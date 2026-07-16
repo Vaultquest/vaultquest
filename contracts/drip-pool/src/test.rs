@@ -1,23 +1,33 @@
 //! Adversarial unit-test suite (#141) + regression tests (#139, #140).
 //! Event emission tests (#255). Storage optimisation regression (#257).
+//! Multisig signer rotation, revoked-signer and threshold coverage.
 
 use super::*;
-use soroban_sdk::{Address, Env};
+use crate::proxy::{Error as ProxyError, VaultProxy, VaultProxyClient};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
+use soroban_sdk::IntoVal;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
 fn setup() -> (Env, DripPoolClient<'static>, Address) {
     let env = Env::default();
-    let id = env.register_contract(None, DripPool).unwrap();
+    env.mock_all_auths();
+    // Give storage entries a TTL longer than the lockup window so that
+    // skip_lockup() does not archive the contract instance in the test env.
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1_000_000;
+        li.min_temp_entry_ttl = 1_000_000;
+        li.max_entry_ttl = 6_312_000;
+    });
+    let id = env.register_contract(None, DripPool);
     let client = DripPoolClient::new(&env, &id);
-    let admin = Address::from_string(&"GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCD".to_string());
+    let admin = Address::generate(&env);
     (env, client, admin)
 }
 
 /// Advance ledger sequence past the lockup window.
 fn skip_lockup(env: &Env) {
-    let current = env.ledger().sequence();
-    env.ledger().set_sequence(current + 120_961);
+    env.ledger().with_mut(|li| li.sequence_number += 120_961);
 }
 
 // ── existing regression tests (updated for new Participant shape) ──────────
@@ -36,7 +46,10 @@ fn create_initialises_pool() {
 fn create_twice_fails() {
     let (_env, client, admin) = setup();
     client.create(&admin);
-    assert_eq!(client.try_create(&admin), Err(Ok(Error::AlreadyInitialized)));
+    assert_eq!(
+        client.try_create(&admin),
+        Err(Ok(Error::AlreadyInitialized))
+    );
 }
 
 #[test]
@@ -150,7 +163,10 @@ fn single_sig_does_not_execute_release() {
     client.deposit(&admin, &500);
 
     let recipient = Address::generate(&env);
-    let pid = client.propose(&admin, &ProposalAction::ReleaseEscrow(recipient.clone(), 500));
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 500),
+    );
     // Admin already signed via propose — second approve must be rejected.
     assert_eq!(
         client.try_approve(&admin, &pid),
@@ -166,29 +182,19 @@ fn two_of_two_sigs_executes_release() {
     client.create(&admin);
     client.deposit(&admin, &500);
 
-    // Add a second admin via a proposal (admin self-approves, then we need
-    // a second signer — bootstrap: add signer2 with admin alone since
-    // threshold is 2 but only 1 admin exists initially, so propose+approve
-    // by admin counts as 1; we test the threshold logic directly).
     let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
 
-    // Propose adding signer2 — admin auto-approves (1/2).
-    let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer2.clone()));
-    // signer2 not yet an admin, so we simulate threshold=1 bootstrap:
-    // approve with admin again should fail (AlreadySigned).
-    assert_eq!(
-        client.try_approve(&admin, &add_pid),
-        Err(Ok(Error::AlreadySigned))
-    );
-
-    // Directly test ReleaseEscrow with two distinct signers by first
-    // bootstrapping signer2 as admin via a second proposal approved by admin.
-    // Since threshold=2 and only 1 admin exists, we verify the guard holds.
     let recipient = Address::generate(&env);
-    let rel_pid = client.propose(&admin, &ProposalAction::ReleaseEscrow(recipient, 200));
-    // Still only 1 signer — not executed.
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 200),
+    );
+    // Proposer counts as 1 of 2 — nothing released yet.
     assert_eq!(client.pool().total_deposited, 500);
-    let _ = rel_pid;
+    // Second distinct signer reaches the threshold and executes.
+    assert!(client.approve(&signer2, &pid));
+    assert_eq!(client.pool().total_deposited, 300);
 }
 
 #[test]
@@ -200,6 +206,290 @@ fn duplicate_approval_rejected() {
         client.try_approve(&admin, &pid),
         Err(Ok(Error::AlreadySigned))
     );
+}
+
+// ── multisig signer rotation & revoked-signer behaviour ───────────────────
+
+#[test]
+fn added_signer_counts_toward_threshold() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.deposit(&admin, &500);
+
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+    assert_eq!(client.admins().len(), 2);
+
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 200),
+    );
+    assert!(client.approve(&signer2, &pid));
+    assert_eq!(client.pool().total_deposited, 300);
+}
+
+#[test]
+fn duplicate_add_admin_is_noop() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+    client.add_admin(&admin, &signer2);
+    // No duplicate entry in the signer set.
+    assert_eq!(client.admins().len(), 2);
+}
+
+#[test]
+fn removed_signer_cannot_propose() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+    client.remove_admin(&admin, &signer2);
+    assert_eq!(client.admins().len(), 1);
+
+    // Removed signer can no longer propose…
+    assert_eq!(
+        client.try_propose(&signer2, &ProposalAction::AddAdmin(signer2.clone())),
+        Err(Ok(Error::Unauthorized))
+    );
+    // …nor mutate the signer set directly.
+    assert_eq!(
+        client.try_add_admin(&signer2, &signer2),
+        Err(Ok(Error::Unauthorized))
+    );
+}
+
+#[test]
+fn removed_signer_cannot_approve() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.deposit(&admin, &500);
+
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+    client.add_admin(&admin, &signer3);
+
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 200),
+    );
+
+    // Revoke signer3 while the proposal is pending.
+    client.remove_admin(&admin, &signer3);
+    assert_eq!(
+        client.try_approve(&signer3, &pid),
+        Err(Ok(Error::Unauthorized))
+    );
+    assert_eq!(client.pool().total_deposited, 500);
+
+    // Remaining signers can still complete the proposal.
+    assert!(client.approve(&signer2, &pid));
+    assert_eq!(client.pool().total_deposited, 300);
+}
+
+#[test]
+fn non_signer_cannot_approve() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let pid = client.propose(&admin, &ProposalAction::AddAdmin(Address::generate(&env)));
+    let rando = Address::generate(&env);
+    assert_eq!(
+        client.try_approve(&rando, &pid),
+        Err(Ok(Error::Unauthorized))
+    );
+}
+
+#[test]
+fn duplicate_approval_does_not_inflate_threshold() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.deposit(&admin, &500);
+
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+    client.add_admin(&admin, &signer3);
+
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 500),
+    );
+
+    // The proposer re-approving is rejected and does not count twice.
+    assert_eq!(
+        client.try_approve(&admin, &pid),
+        Err(Ok(Error::AlreadySigned))
+    );
+    assert_eq!(client.pool().total_deposited, 500);
+
+    // A second distinct signer proves the count was still 1 of 2.
+    assert!(client.approve(&signer2, &pid));
+    assert_eq!(client.pool().total_deposited, 0);
+}
+
+#[test]
+fn approval_order_is_irrelevant() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.deposit(&admin, &400);
+
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+    client.add_admin(&admin, &signer3);
+
+    let recipient = Address::generate(&env);
+
+    // Proposed by admin, completed by the third signer.
+    let pid1 = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+    );
+    assert!(client.approve(&signer3, &pid1));
+    assert_eq!(client.pool().total_deposited, 300);
+
+    // Proposed by the second signer, completed by admin.
+    let pid2 = client.propose(
+        &signer2,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+    );
+    assert!(client.approve(&admin, &pid2));
+    assert_eq!(client.pool().total_deposited, 200);
+}
+
+#[test]
+fn executed_proposal_cannot_be_reapproved() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.deposit(&admin, &500);
+
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+    client.add_admin(&admin, &signer3);
+
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 200),
+    );
+    assert!(client.approve(&signer2, &pid));
+
+    // Executed proposals are deleted — a late approval cannot re-execute.
+    assert_eq!(
+        client.try_approve(&signer3, &pid),
+        Err(Ok(Error::ProposalNotFound))
+    );
+    assert_eq!(client.pool().total_deposited, 300);
+}
+
+/// Documents current behaviour: an approval recorded while the signer was
+/// still a member is NOT pruned when that signer is later removed. The stale
+/// approval keeps counting toward the threshold. If this is undesirable,
+/// approvals must be re-validated against the signer set at execution time.
+#[test]
+fn stale_approval_from_removed_signer_still_counts() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+
+    // signer2 proposes (auto-approves, 1 of 2), then is removed.
+    let pid = client.propose(&signer2, &ProposalAction::AddAdmin(signer3.clone()));
+    client.remove_admin(&admin, &signer2);
+
+    // signer2's recorded approval still counts — admin's approval executes.
+    assert!(client.approve(&admin, &pid));
+    assert!(client.admins().contains(&signer3));
+}
+
+#[test]
+fn admin_rotation_via_multisig_proposals() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.deposit(&admin, &500);
+
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+
+    // AddAdmin executed through the multisig flow.
+    let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    assert!(client.approve(&signer2, &add_pid));
+    assert_eq!(client.admins().len(), 3);
+    assert!(client.admins().contains(&signer3));
+
+    // RemoveAdmin executed through the multisig flow.
+    let rm_pid = client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
+    assert!(client.approve(&signer3, &rm_pid));
+    assert_eq!(client.admins().len(), 2);
+    assert!(!client.admins().contains(&signer2));
+
+    // The rotated-out signer has lost both propose and approve rights.
+    let recipient = Address::generate(&env);
+    let rel_pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+    );
+    assert_eq!(
+        client.try_propose(&signer2, &ProposalAction::AddAdmin(signer2.clone())),
+        Err(Ok(Error::Unauthorized))
+    );
+    assert_eq!(
+        client.try_approve(&signer2, &rel_pid),
+        Err(Ok(Error::Unauthorized))
+    );
+    assert_eq!(client.pool().total_deposited, 500);
+}
+
+#[test]
+fn cannot_remove_last_admin() {
+    let (_env, client, admin) = setup();
+    client.create(&admin);
+    assert_eq!(
+        client.try_remove_admin(&admin, &admin),
+        Err(Ok(Error::Unauthorized))
+    );
+    assert_eq!(client.admins().len(), 1);
+}
+
+#[test]
+fn threshold_unreachable_after_signer_set_shrinks() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.deposit(&admin, &500);
+
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+    client.remove_admin(&admin, &signer2);
+
+    // Threshold stays 2-of-N: a lone signer can propose but never execute.
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 500),
+    );
+    assert_eq!(
+        client.try_approve(&admin, &pid),
+        Err(Ok(Error::AlreadySigned))
+    );
+    assert_eq!(client.pool().total_deposited, 500);
+
+    // Re-adding a second signer makes the pending proposal executable again.
+    let signer3 = Address::generate(&env);
+    client.add_admin(&admin, &signer3);
+    assert!(client.approve(&signer3, &pid));
+    assert_eq!(client.pool().total_deposited, 0);
 }
 
 // ── #141: adversarial prize-draw edge cases ────────────────────────────────
@@ -260,10 +550,7 @@ fn flash_loan_blocked_by_lockup() {
     client.join(&attacker);
     client.deposit(&attacker, &1_000_000_000);
     // Attempt immediate withdrawal (flash-loan style) — must fail.
-    assert_eq!(
-        client.try_withdraw(&attacker),
-        Err(Ok(Error::LockupActive))
-    );
+    assert_eq!(client.try_withdraw(&attacker), Err(Ok(Error::LockupActive)));
     // Pool still holds the funds.
     assert_eq!(client.pool().total_deposited, 1_000_000_000);
 }
@@ -294,11 +581,12 @@ fn deposit_emits_event() {
 
     let events = env.events().all();
     let deposit_event = events.iter().find(|(_, topics, _)| {
-        *topics == vec![
-            &env,
-            symbol_short!("pool").into_val(&env),
-            symbol_short!("deposit").into_val(&env),
-        ]
+        *topics
+            == vec![
+                &env,
+                symbol_short!("pool").into_val(&env),
+                symbol_short!("deposit").into_val(&env),
+            ]
     });
     assert!(deposit_event.is_some(), "deposit event not found");
 }
@@ -316,11 +604,12 @@ fn withdraw_emits_event() {
 
     let events = env.events().all();
     let withdrawn_event = events.iter().find(|(_, topics, _)| {
-        *topics == vec![
-            &env,
-            symbol_short!("pool").into_val(&env),
-            symbol_short!("withdrawn").into_val(&env),
-        ]
+        *topics
+            == vec![
+                &env,
+                symbol_short!("pool").into_val(&env),
+                symbol_short!("withdrawn").into_val(&env),
+            ]
     });
     assert!(withdrawn_event.is_some(), "withdrawn event not found");
 }
@@ -339,11 +628,12 @@ fn draw_winner_emits_payout_event() {
 
     let events = env.events().all();
     let payout_event = events.iter().find(|(_, topics, _)| {
-        *topics == vec![
-            &env,
-            symbol_short!("pool").into_val(&env),
-            symbol_short!("payout").into_val(&env),
-        ]
+        *topics
+            == vec![
+                &env,
+                symbol_short!("pool").into_val(&env),
+                symbol_short!("payout").into_val(&env),
+            ]
     });
     assert!(payout_event.is_some(), "payout event not found");
 }
@@ -351,7 +641,7 @@ fn draw_winner_emits_payout_event() {
 /// draw_winner with zero prize is rejected.
 #[test]
 fn draw_winner_zero_prize_fails() {
-    let (env, client, admin) = setup();
+    let (_env, client, admin) = setup();
     client.create(&admin);
     assert_eq!(
         client.try_draw_winner(&admin, &0),
@@ -393,13 +683,19 @@ fn pool_locked_field_starts_false() {
 
 // ── #265: proxy upgrade tests ─────────────────────────────────────────────
 
+fn proxy_setup() -> (Env, VaultProxyClient<'static>, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+    let proxy_id = env.register_contract(None, VaultProxy);
+    let client = VaultProxyClient::new(&env, &proxy_id);
+    let admin = Address::generate(&env);
+    let logic = Address::generate(&env);
+    (env, client, admin, logic)
+}
+
 #[test]
 fn proxy_create_initialises() {
-    let env = Env::default();
-    let proxy_id = env.register_contract(None, VaultProxy).unwrap();
-    let client = VaultProxyClient::new(&env, &proxy_id);
-    let admin = Address::from_string(&"GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCD".to_string());
-    let logic = Address::from_string(&"GBCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDE".to_string());
+    let (_env, client, admin, logic) = proxy_setup();
     client.create(&admin, &logic);
     assert_eq!(client.admin(), admin);
     assert_eq!(client.logic_contract(), logic);
@@ -407,12 +703,8 @@ fn proxy_create_initialises() {
 
 #[test]
 fn proxy_upgrade_changes_logic() {
-    let env = Env::default();
-    let proxy_id = env.register_contract(None, VaultProxy).unwrap();
-    let client = VaultProxyClient::new(&env, &proxy_id);
-    let admin = Address::from_string(&"GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCD".to_string());
-    let logic1 = Address::from_string(&"GBCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDE".to_string());
-    let logic2 = Address::from_string(&"GCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDEF".to_string());
+    let (env, client, admin, logic1) = proxy_setup();
+    let logic2 = Address::generate(&env);
     client.create(&admin, &logic1);
     assert_eq!(client.logic_contract(), logic1);
     // Upgrade to new logic
@@ -422,15 +714,11 @@ fn proxy_upgrade_changes_logic() {
 
 #[test]
 fn proxy_upgrade_unauthorized_fails() {
-    let env = Env::default();
-    let proxy_id = env.register_contract(None, VaultProxy).unwrap();
-    let client = VaultProxyClient::new(&env, &proxy_id);
-    let admin = Address::from_string(&"GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCD".to_string());
-    let rando = Address::from_string(&"GDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDEFG".to_string());
-    let logic = Address::from_string(&"GBCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDE".to_string());
+    let (env, client, admin, logic) = proxy_setup();
+    let rando = Address::generate(&env);
     client.create(&admin, &logic);
     assert_eq!(
         client.try_upgrade(&rando, &logic),
-        Err(Ok(Error::Unauthorized))
+        Err(Ok(ProxyError::Unauthorized))
     );
 }
