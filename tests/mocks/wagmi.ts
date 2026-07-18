@@ -17,6 +17,10 @@ export const mockWagmiHooks = {
     disconnect: vi.fn(),
   })),
   useChainId: vi.fn(() => 43113),
+  useSwitchChain: vi.fn(() => ({
+    switchChain: vi.fn(),
+    isPending: false,
+  })),
 };
 
 vi.mock('wagmi', () => {
@@ -25,5 +29,6 @@ vi.mock('wagmi', () => {
     useConnect: () => mockWagmiHooks.useConnect(),
     useDisconnect: () => mockWagmiHooks.useDisconnect(),
     useChainId: () => mockWagmiHooks.useChainId(),
+    useSwitchChain: () => mockWagmiHooks.useSwitchChain(),
   };
 });
