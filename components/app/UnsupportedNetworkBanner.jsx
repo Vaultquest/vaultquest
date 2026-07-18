@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { AlertTriangle } from "lucide-react";
 import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { DEFAULT_CHAIN, SUPPORTED_CHAINS } from "@/lib/wagmi";
