@@ -16,3 +16,5 @@ target/
 tsc_output.txt
 scratch/
 CUsersgooglAppDataLocalpnpmstorev3/
+# Block rejected patch files
+*.rej
