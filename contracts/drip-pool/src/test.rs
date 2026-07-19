@@ -722,3 +722,148 @@ fn proxy_upgrade_unauthorized_fails() {
         Err(Ok(ProxyError::Unauthorized))
     );
 }
+
+#[test]
+fn test_cost_budgets() {
+    extern crate std;
+    use std::collections::HashMap;
+    use std::string::ToString;
+    use std::{eprintln, format, println};
+
+    let thresholds_str = include_str!("../cost_thresholds.txt");
+    let mut thresholds = HashMap::new();
+
+    for line in thresholds_str.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, val)) = line.split_once('=') {
+            if let Ok(num) = val.trim().parse::<u64>() {
+                thresholds.insert(key.trim().to_string(), num);
+            }
+        }
+    }
+
+    let (env, client, admin) = setup();
+
+    // 1. Create
+    client.create(&admin);
+    let create_cpu = env.budget().cpu_instruction_cost();
+    let create_mem = env.budget().memory_bytes_cost();
+
+    // 2. Join
+    let alice = Address::generate(&env);
+    env.budget().reset_default();
+    client.join(&alice);
+    let join_cpu = env.budget().cpu_instruction_cost();
+    let join_mem = env.budget().memory_bytes_cost();
+
+    // 3. Deposit
+    env.budget().reset_default();
+    client.deposit(&alice, &100);
+    let deposit_cpu = env.budget().cpu_instruction_cost();
+    let deposit_mem = env.budget().memory_bytes_cost();
+
+    // 4. Drip
+    env.budget().reset_default();
+    client.drip(&alice, &50);
+    let drip_cpu = env.budget().cpu_instruction_cost();
+    let drip_mem = env.budget().memory_bytes_cost();
+
+    // 5. Draw Winner
+    env.budget().reset_default();
+    client.draw_winner(&admin, &200);
+    let draw_winner_cpu = env.budget().cpu_instruction_cost();
+    let draw_winner_mem = env.budget().memory_bytes_cost();
+
+    // 6. Claim
+    env.budget().reset_default();
+    client.claim(&alice);
+    let claim_cpu = env.budget().cpu_instruction_cost();
+    let claim_mem = env.budget().memory_bytes_cost();
+
+    // 7. Withdraw
+    skip_lockup(&env);
+    env.budget().reset_default();
+    client.withdraw(&alice);
+    let withdraw_cpu = env.budget().cpu_instruction_cost();
+    let withdraw_mem = env.budget().memory_bytes_cost();
+
+    // 8. Propose
+    env.budget().reset_default();
+    let _pid = client.propose(&admin, &ProposalAction::AddAdmin(Address::generate(&env)));
+    let propose_cpu = env.budget().cpu_instruction_cost();
+    let propose_mem = env.budget().memory_bytes_cost();
+
+    // 9. Approve
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+    let pid2 = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(Address::generate(&env), 10),
+    );
+    env.budget().reset_default();
+    client.approve(&signer2, &pid2);
+    let approve_cpu = env.budget().cpu_instruction_cost();
+    let approve_mem = env.budget().memory_bytes_cost();
+
+    // Output measurements for local developers
+    println!("=== Soroban Drip Pool Cost Profile ===");
+    println!("create(admin):         cpu={create_cpu}, mem={create_mem}");
+    println!("join(who):             cpu={join_cpu}, mem={join_mem}");
+    println!("deposit(who, amount):  cpu={deposit_cpu}, mem={deposit_mem}");
+    println!("drip(who, amount):     cpu={drip_cpu}, mem={drip_mem}");
+    println!("draw_winner(prize):    cpu={draw_winner_cpu}, mem={draw_winner_mem}");
+    println!("claim(who):            cpu={claim_cpu}, mem={claim_mem}");
+    println!("withdraw(who):         cpu={withdraw_cpu}, mem={withdraw_mem}");
+    println!("propose(action):       cpu={propose_cpu}, mem={propose_mem}");
+    println!("approve(id):           cpu={approve_cpu}, mem={approve_mem}");
+
+    let mut failed = false;
+    let mut fail_msgs = std::vec::Vec::new();
+
+    let mut check_limit = |op: &str, metric: &str, actual: u64| {
+        let key = format!("{}_{}", op, metric);
+        if let Some(&limit) = thresholds.get(&key) {
+            if actual > limit {
+                failed = true;
+                fail_msgs.push(format!(
+                    "Cost Regression: {}/{} exceeded threshold! Actual: {}, Limit: {}",
+                    op, metric, actual, limit
+                ));
+            }
+        } else {
+            failed = true;
+            fail_msgs.push(format!("Missing threshold definition for key: {}", key));
+        }
+    };
+
+    check_limit("create", "cpu", create_cpu);
+    check_limit("create", "mem", create_mem);
+    check_limit("join", "cpu", join_cpu);
+    check_limit("join", "mem", join_mem);
+    check_limit("deposit", "cpu", deposit_cpu);
+    check_limit("deposit", "mem", deposit_mem);
+    check_limit("drip", "cpu", drip_cpu);
+    check_limit("drip", "mem", drip_mem);
+    check_limit("draw_winner", "cpu", draw_winner_cpu);
+    check_limit("draw_winner", "mem", draw_winner_mem);
+    check_limit("claim", "cpu", claim_cpu);
+    check_limit("claim", "mem", claim_mem);
+    check_limit("withdraw", "cpu", withdraw_cpu);
+    check_limit("withdraw", "mem", withdraw_mem);
+    check_limit("propose", "cpu", propose_cpu);
+    check_limit("propose", "mem", propose_mem);
+    check_limit("approve", "cpu", approve_cpu);
+    check_limit("approve", "mem", approve_mem);
+
+    if failed {
+        eprintln!("\n=== BUDGET CHECK FAILURE ===");
+        for msg in &fail_msgs {
+            eprintln!("  [FAIL] {}", msg);
+        }
+        eprintln!("============================\n");
+        panic!("Cost budget validation failed. See output above for details.");
+    }
+}

@@ -1,87 +1,62 @@
-# Drip Pool — Cost Profile (#27)
+# Drip Pool — Cost Profile & Budget Enforcement (#18, #27)
 
-Tracking doc for the optimization pass called for by issue #27.
-Numbers below are recorded by `scripts/measure_costs.sh` (which invokes
-`cargo test` with Soroban's `cost_estimate` reporting); see the script
-for the exact invocation and parser.
+This document tracks the execution costs and enforces the resource budgets for the VaultQuest Soroban smart contracts.
 
-## How to update this doc
+---
 
-```
+## 🚀 Cost Budget Enforcement in CI
+
+To prevent cost regressions on hot paths, we enforce CPU instruction and memory consumption budgets in our continuous integration (CI) pipeline.
+
+*   **Threshold Config File**: [`contracts/drip-pool/cost_thresholds.txt`](../drip-pool/cost_thresholds.txt)
+*   **Cost Check Script**: [`contracts/scripts/measure_costs.sh`](../scripts/measure_costs.sh)
+*   **CI Trigger**: Every pull request targeting the `main` or `develop` branches that modifies contract source code runs the budget checks. If any operation exceeds its configured threshold, the CI pipeline fails.
+
+---
+
+## 💻 Running Budget Checks Locally
+
+Developers must run budget checks locally before submitting a pull request:
+
+```bash
 cd contracts/
-./scripts/measure_costs.sh > /tmp/costs.txt
-# Compare /tmp/costs.txt against the table below; update if the delta
-# is meaningful (≥ 5% on any metric) and explain the cause in
-# "Recent changes" at the bottom.
+./scripts/measure_costs.sh
 ```
 
-## Baseline (`drip-pool` scaffold)
+To run a raw cargo test with full standard out captures:
 
-| Operation | CPU instructions | Storage writes | Storage reads | Notes |
-|---|---:|---:|---:|---|
-| `create(admin)` | TBD | 2 instance keys | 0 | Single instance write per pool. |
-| `join(who)` | TBD | 1 persistent key | 1 | Per-participant key. |
-| `drip(who, amount)` | TBD | 2 (participant + pool) | 2 | Hot path — primary optimization target. |
-| `claim(who)` | TBD | 1 persistent key | 1 | Resets `claimable` to 0. |
-| `withdraw(who)` | TBD | 1 delete | 1 | Frees rent on persistent key. |
+```bash
+./scripts/measure_costs.sh --raw
+```
 
-Numbers replaced as the real implementation lands and
-`scripts/measure_costs.sh` produces non-TBD output.
+---
 
-## Storage layout — known optimization opportunities
+## 📊 Measured Baselines & Thresholds
 
-These are the levers the optimization pass should evaluate against
-realistic pool sizes (see "Representative scenarios" below). Each is
-listed with the trade-off the maintainer should weigh:
+Below are the resource usage statistics measured in the native Rust test environment.
 
-- **Pack `Pool` and per-participant counters into a single instance
-  storage entry.** Cheaper writes; constrains the pool size to whatever
-  fits under the entry size limit.
-- **Switch `Participant.claimable` to `i64`.** Half the bytes per write,
-  caps the per-participant claimable balance at ~9.2e18 stroops (still
-  far above any realistic TrustQuest amount).
-- **Use temporary storage for the hot per-participant `drip` increment
-  and flush to persistent storage on `claim`.** Dramatically lower rent
-  for active pools; adds a recovery path for participants who never
-  call `claim` before the temporary entry expires.
-- **Emit a single batched `pool_drip_summary` event per ledger instead
-  of one event per `drip` call.** Cheaper in event payload bytes;
-  requires the indexer (#13) to fan-out per-participant.
-- **Drop the `created_at` field from `Pool`.** The ledger sequence + the
-  initialising tx already pin the creation time; saves one `u64` per
-  pool.
+| Operation | CPU Instructions (Baseline) | CPU Threshold | Memory (Baseline) | Memory Threshold | Notes |
+|---|---|---|---|---|---|
+| `create(admin)` | 76,551 | 100,000 | 7,877 bytes | 10,000 bytes | Configures initial pool metadata and admin signers. |
+| `join(who)` | 59,535 | 80,000 | 9,848 bytes | 12,000 bytes | Initializes participant record and locks period. |
+| `deposit(who, amount)` | 116,829 | 150,000 | 17,708 bytes | 22,000 bytes | Increments user balance and total deposits. |
+| `drip(who, amount)` | 117,921 | 150,000 | 18,098 bytes | 22,000 bytes | Evaluates yield, performs drips. Hot path. |
+| `draw_winner(prize)` | 63,743 | 85,000 | 9,058 bytes | 12,000 bytes | Selects pool winners (admin-only). |
+| `claim(who)` | 75,346 | 100,000 | 12,336 bytes | 16,000 bytes | Resets user claimable rewards to zero. |
+| `withdraw(who)` | 121,849 | 150,000 | 17,753 bytes | 22,000 bytes | Reentrancy-guarded withdrawal of principal. |
+| `propose(action)` | 102,145 | 130,000 | 16,092 bytes | 20,000 bytes | Proposes admin multi-sig actions. |
+| `approve(id)` | 142,512 | 180,000 | 23,792 bytes | 30,000 bytes | Approves and auto-executes proposals. |
 
-## Representative scenarios for the optimization pass
+---
 
-The cost numbers above are meaningless without realistic load. The
-optimization pass should report deltas against these three scenarios:
+## 🔧 Updating Budgets for Intentional Changes
 
-1. **Small pool** — 1 admin, 5 participants, 10 drips per participant.
-   Smoke-test for the API and the worst-case rent on instance storage.
-2. **Mid pool** — 1 admin, 50 participants, 100 drips per participant.
-   The expected steady-state for an active TrustQuest round.
-3. **Wide pool** — 1 admin, 500 participants, 5 drips per participant.
-   Stresses the per-participant storage layout.
+If you intentionally introduce features that increase the cost complexity of an operation (e.g. adding new validation rules, storage writes, or events):
 
-Each scenario is parameterised in `tests/scenarios.rs` (TODO file —
-introduced when the optimization pass starts) and run by
-`scripts/measure_costs.sh`.
-
-## Safety invariants the pass must not weaken
-
-The optimization pass must keep these unchanged:
-
-- A participant who has not joined cannot drip or claim.
-- Double-join is rejected.
-- `drip` requires a positive amount and is bounded by `i128`.
-- `claim` is idempotent — second call returns 0 without erroring.
-
-`drip-pool/src/test.rs` covers each of these. Any optimization PR must
-re-run the full harness without skipped or modified assertions.
-
-## Recent changes
-
-| Date (UTC) | PR | Operation | Delta | Cause |
-|---|---|---|---|---|
-| 2026-04-26 | this PR | scaffold | n/a | Establishes baseline; no real numbers yet. |
-
+1.  Measure the new baseline costs by running:
+    ```bash
+    ./scripts/measure_costs.sh
+    ```
+2.  Review the output cost profile.
+3.  Open [`contracts/drip-pool/cost_thresholds.txt`](../drip-pool/cost_thresholds.txt) and adjust the threshold keys for the affected operations (it is recommended to set thresholds ~15-20% above your new baselines to prevent flaky test failures).
+4.  Commit the updated `cost_thresholds.txt` along with your contract changes and a brief justification in the pull request description.
