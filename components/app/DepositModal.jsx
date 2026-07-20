@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X, Loader2, CheckCircle2, AlertTriangle, ArrowLeft } from "lucide-react";
 import GasPrioritySelector from "@/components/app/GasPrioritySelector";
 import { toast } from "react-hot-toast";
@@ -10,6 +10,8 @@ function formatToken(value, token) {
 }
 
 export default function DepositModal({ isOpen, onClose }) {
+  const dialogRef = useRef(null);
+  const closeButtonRef = useRef(null);
   const [step, setStep] = useState("input"); // "input" | "confirm" | "loading" | "success"
   const [amount, setAmount] = useState("250");
   const [feeState, setFeeState] = useState(null);
@@ -27,14 +29,41 @@ export default function DepositModal({ isOpen, onClose }) {
       return undefined;
     }
 
+    const previouslyFocused = document.activeElement;
+    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+
     const onKeyDown = (event) => {
       if (event.key === "Escape" && step !== "loading") {
         onClose?.();
       }
+
+      if (event.key === "Tab" && dialogRef.current) {
+        const focusable = Array.from(
+          dialogRef.current.querySelectorAll(
+            'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+          ),
+        );
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (focusable.length === 0) {
+          event.preventDefault();
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKeyDown);
+      previouslyFocused?.focus?.();
+    };
   }, [isOpen, onClose, step]);
 
   if (!isOpen) {
@@ -102,18 +131,25 @@ export default function DepositModal({ isOpen, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/70 px-4 py-6 backdrop-blur-sm sm:items-center">
-      <div className="vq-glass w-full max-w-5xl overflow-hidden border border-vault-border/60 shadow-2xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="deposit-dialog-title"
+        className="vq-glass w-full max-w-5xl overflow-hidden border border-vault-border/60 shadow-2xl"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-vault-border/40 px-5 py-4 sm:px-6">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.22em] text-vault-muted">
               Deposit flow
             </p>
-            <h2 className="mt-1 text-xl font-semibold text-vault-text">
+            <h2 id="deposit-dialog-title" className="mt-1 text-xl font-semibold text-vault-text">
               {getHeaderTitle()}
             </h2>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="vq-btn-ghost h-10 w-10 rounded-full p-0 disabled:opacity-40"
