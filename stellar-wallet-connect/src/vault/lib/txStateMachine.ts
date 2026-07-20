@@ -9,7 +9,7 @@
  * pass it straight to `<TransactionTimeline>` with no mapping.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { TimelineStage } from "../../components/TransactionTimeline";
 import type { PoolActionInput, PoolActionType, VaultContractClient } from "../contract/types";
 
@@ -53,16 +53,6 @@ export interface TxFlowOptions {
   indexingDelayMs?: number;
 }
 
-const STAGE_ORDER: Record<TimelineStage, number> = {
-  preparing: 0,
-  "awaiting-signature": 1,
-  submitting: 2,
-  confirming: 3,
-  indexing: 4,
-  success: 5,
-  failed: -1,
-};
-
 function isTerminal(stage: TimelineStage): boolean {
   return stage === "success" || stage === "failed";
 }
@@ -82,11 +72,18 @@ function mapError(err: unknown): { failedAt: Exclude<TimelineStage, "success" | 
 
 export function useTxFlow(): TxFlowResult {
   const [state, setState] = useState<TxFlowState>({ stage: "idle" });
+  // Tracks in-flight status synchronously so a second run() called before the
+  // first setState({ preparing }) commits can still be detected and ignored —
+  // `state` itself is stale across same-tick calls since React batches updates.
+  const inFlightRef = useRef(false);
 
   const busy =
     state.stage !== "idle" && !isTerminal(state.stage as TimelineStage);
 
-  const reset = useCallback(() => setState({ stage: "idle" }), []);
+  const reset = useCallback(() => {
+    inFlightRef.current = false;
+    setState({ stage: "idle" });
+  }, []);
 
   const run = useCallback(
     async (
@@ -97,13 +94,13 @@ export function useTxFlow(): TxFlowResult {
     ) => {
       const { onConfirmed, indexingDelayMs = 2_000 } = options;
 
-      // Prevent double-submission.
-      setState((prev) => {
-        if (prev.stage !== "idle" && !isTerminal(STAGE_ORDER[prev.stage as TimelineStage] >= 0 ? prev.stage as TimelineStage : "failed")) {
-          return prev;
-        }
-        return { stage: "preparing" };
-      });
+      // Prevent double-submission: ignore a second run() while one is
+      // already in flight, so the same action can't be broadcast twice.
+      if (inFlightRef.current) {
+        return;
+      }
+      inFlightRef.current = true;
+      setState({ stage: "preparing" });
 
       try {
         setState({ stage: "awaiting-signature" });
@@ -121,6 +118,8 @@ export function useTxFlow(): TxFlowResult {
       } catch (err) {
         const { failedAt, message } = mapError(err);
         setState({ stage: "failed", failedAt, message });
+      } finally {
+        inFlightRef.current = false;
       }
     },
     [],
