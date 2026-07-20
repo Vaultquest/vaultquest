@@ -34,7 +34,7 @@ This map tracks important product and platform areas that should stay covered as
 | --- | --- | --- | --- |
 | Drip pool lifecycle | `contracts/drip-pool/src/test.rs` covers create, join, drip, claim, withdraw snapshots | Covered | Keep snapshot fixtures updated with intentional event/schema changes |
 | Validation and failure cases | Rust tests cover double joins, zero/negative deposits, missing pool, unauthorized proposal paths | Covered | Add fuzz/property tests for deposit amount boundaries and timing windows |
-| Lockup and withdrawal rules | Rust tests cover before/after lockup and flash-loan style withdrawal blocking | Covered | Add multi-round lockup rollover cases |
+| Lockup and withdrawal rules | Rust tests cover before/after lockup, multi-round lockup rollover, mixed duration deposits, and lockup window preservation | Covered | Maintain test coverage as contract features evolve |
 | Multisig release flow | Rust tests cover single-sig rejection and two-of-two execution | Partial | Add signer rotation, duplicate signer ordering, and revoked signer scenarios |
 | Cost and event schemas | `contracts/scripts/measure_costs.sh`, `contracts/docs/EVENT_SCHEMA.md` | Partial | Automate cost budget assertions in CI and validate emitted event schema snapshots |
 
@@ -43,4 +43,4 @@ This map tracks important product and platform areas that should stay covered as
 1. Add frontend component tests for vault participant insights, archive load-more behavior, and wallet header status.
 2. Extend route smoke coverage to include `/app/vaults/archive`.
 3. Add backend failure-path tests around indexer recovery and authenticated route errors.
-4. Add contract tests for signer rotation and multi-round lockup rollover.
+4. Add contract tests for signer rotation scenarios.

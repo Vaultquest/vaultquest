@@ -5,7 +5,7 @@
 use super::*;
 use crate::proxy::{Error as ProxyError, VaultProxy, VaultProxyClient};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
-use soroban_sdk::IntoVal;
+use soroban_sdk::{IntoVal, TryFromVal};
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -15,9 +15,9 @@ fn setup() -> (Env, DripPoolClient<'static>, Address) {
     // Give storage entries a TTL longer than the lockup window so that
     // skip_lockup() does not archive the contract instance in the test env.
     env.ledger().with_mut(|li| {
-        li.min_persistent_entry_ttl = 1_000_000;
-        li.min_temp_entry_ttl = 1_000_000;
-        li.max_entry_ttl = 6_312_000;
+        li.min_persistent_entry_ttl = 10_000_000;
+        li.min_temp_entry_ttl = 10_000_000;
+        li.max_entry_ttl = 20_000_000;
     });
     let id = env.register_contract(None, DripPool);
     let client = DripPoolClient::new(&env, &id);
@@ -592,9 +592,9 @@ fn create_emits_event() {
             ]
     });
     let (_, _, payload) = created_event.expect("created event not found");
+    let val: Address = Address::try_from_val(&env, &payload).unwrap();
     assert_eq!(
-        payload,
-        admin.into_val(&env),
+        val, admin,
         "created event payload should be the admin address"
     );
 }
@@ -617,9 +617,9 @@ fn join_emits_event() {
             ]
     });
     let (_, _, payload) = joined_event.expect("joined event not found");
+    let val: Address = Address::try_from_val(&env, &payload).unwrap();
     assert_eq!(
-        payload,
-        alice.into_val(&env),
+        val, alice,
         "joined event payload should be the joining wallet"
     );
 }
@@ -643,9 +643,10 @@ fn deposit_emits_event() {
             ]
     });
     let (_, _, payload) = deposit_event.expect("deposit event not found");
+    let val: (Address, i128, i128) = <(Address, i128, i128)>::try_from_val(&env, &payload).unwrap();
     assert_eq!(
-        payload,
-        (alice.clone(), 500i128, 500i128).into_val(&env),
+        val,
+        (alice.clone(), 500i128, 500i128),
         "deposit event payload should be (who, amount, total_deposited)"
     );
 }
@@ -671,9 +672,10 @@ fn claim_emits_event() {
             ]
     });
     let (_, _, payload) = claimed_event.expect("claimed event not found");
+    let val: (Address, i128) = <(Address, i128)>::try_from_val(&env, &payload).unwrap();
     assert_eq!(
-        payload,
-        (alice.clone(), 500i128).into_val(&env),
+        val,
+        (alice.clone(), 500i128),
         "claimed event payload should be (who, amount)"
     );
 }
@@ -699,9 +701,10 @@ fn withdraw_emits_event() {
             ]
     });
     let (_, _, payload) = withdrawn_event.expect("withdrawn event not found");
+    let val: (Address, i128) = <(Address, i128)>::try_from_val(&env, &payload).unwrap();
     assert_eq!(
-        payload,
-        (alice.clone(), 200i128).into_val(&env),
+        val,
+        (alice.clone(), 200i128),
         "withdrawn event payload should be (who, amount)"
     );
 }
@@ -728,9 +731,10 @@ fn draw_winner_emits_payout_event() {
             ]
     });
     let (_, _, payload) = payout_event.expect("payout event not found");
+    let val: (Address, i128) = <(Address, i128)>::try_from_val(&env, &payload).unwrap();
     assert_eq!(
-        payload,
-        (winner.clone(), 100i128).into_val(&env),
+        val,
+        (winner.clone(), 100i128),
         "payout event payload should be (winner, prize)"
     );
 }
@@ -963,4 +967,123 @@ fn test_cost_budgets() {
         eprintln!("============================\n");
         panic!("Cost budget validation failed. See output above for details.");
     }
+}
+
+// ── #16: Multi-round lockup rollover & repeated deposits coverage ─────────
+
+#[test]
+fn test_multi_round_lockup_rollover_mixed_durations() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    client.join(&alice);
+
+    // 1. Initial short deposit (7 days lockup)
+    client.deposit_with_duration(&alice, &100, &7);
+    let s1 = client.savings(&alice);
+    assert_eq!(s1.deposited, 100);
+    assert_eq!(s1.lockup_multiplier, 110);
+    let initial_locked_until = s1.locked_until;
+    assert!(initial_locked_until > env.ledger().sequence());
+
+    // 2. Add long deposit (90 days) before short lockup expires
+    client.deposit_with_duration(&alice, &200, &90);
+    let s2 = client.savings(&alice);
+    assert_eq!(s2.deposited, 300);
+    assert_eq!(s2.claimable, 300);
+    assert_eq!(s2.lockup_multiplier, 150);
+    // Lockup sequence extended
+    assert!(s2.locked_until > initial_locked_until);
+
+    // 3. Early withdrawal attempt is blocked
+    assert_eq!(client.try_withdraw(&alice), Err(Ok(Error::LockupActive)));
+
+    // 4. Skip sequence past long lockup
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 5_000_000;
+        li.max_entry_ttl = 10_000_000;
+        li.sequence_number = s2.locked_until + 1;
+    });
+
+    // 5. Withdrawal succeeds with yield multiplier applied (300 * 150 / 100 = 450)
+    let payout = client.withdraw(&alice);
+    assert_eq!(payout, 450);
+}
+
+#[test]
+fn test_deposit_flexible_during_active_lockup_preserves_lockup() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    client.join(&alice);
+
+    // Deposit medium duration (14 days)
+    client.deposit_with_duration(&alice, &150, &14);
+    let s1 = client.savings(&alice);
+    assert_eq!(s1.lockup_multiplier, 125);
+    let locked_until = s1.locked_until;
+
+    // Deposit flexible duration (0 days) while lockup is active
+    client.deposit_with_duration(&alice, &50, &0);
+    let s2 = client.savings(&alice);
+    assert_eq!(s2.deposited, 200);
+    // Active locked_until must remain preserved (not reset to 0/current sequence)
+    assert_eq!(s2.locked_until, locked_until);
+
+    // Early withdrawal still blocked
+    assert_eq!(client.try_withdraw(&alice), Err(Ok(Error::LockupActive)));
+
+    // Advance sequence past lockup
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 5_000_000;
+        li.max_entry_ttl = 10_000_000;
+        li.sequence_number = locked_until + 1;
+    });
+
+    // Withdrawal succeeds
+    let payout = client.withdraw(&alice);
+    assert_eq!(payout, 200);
+}
+
+#[test]
+fn test_deposit_after_lockup_expiration_resets_lockup_window() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    client.join(&alice);
+
+    // Deposit short duration (7 days)
+    client.deposit_with_duration(&alice, &100, &7);
+    let s1 = client.savings(&alice);
+
+    // Skip sequence past short lockup
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 5_000_000;
+        li.max_entry_ttl = 10_000_000;
+        li.sequence_number = s1.locked_until + 10;
+    });
+
+    // Participant deposits again with long duration (90 days)
+    client.deposit_with_duration(&alice, &300, &90);
+    let s2 = client.savings(&alice);
+    assert_eq!(s2.deposited, 400);
+    assert_eq!(s2.lockup_multiplier, 150);
+    assert!(s2.locked_until > env.ledger().sequence());
+
+    // Early withdrawal blocked under new lockup window
+    assert_eq!(client.try_withdraw(&alice), Err(Ok(Error::LockupActive)));
+
+    // Skip past long lockup window
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 5_000_000;
+        li.max_entry_ttl = 10_000_000;
+        li.sequence_number = s2.locked_until + 1;
+    });
+
+    // Withdrawal succeeds with 1.5x multiplier boost (400 * 150 / 100 = 600)
+    let payout = client.withdraw(&alice);
+    assert_eq!(payout, 600);
 }

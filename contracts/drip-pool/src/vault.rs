@@ -1,4 +1,4 @@
-#![no_std]
+#![allow(dead_code)]
 
 //! #264 Time-locked withdrawals with yield multipliers.
 //! Adds an enhanced vault flow with duration-based lockups and APY multipliers.
@@ -17,7 +17,7 @@ const SHORT_LEDGERS: u32 = 7 * 17_280;
 const MEDIUM_LEDGERS: u32 = 14 * 17_280;
 const LONG_LEDGERS: u32 = 90 * 17_280;
 
-fn multiplier_for(lockup_days: u32) -> Result<u32, Error> {
+pub(crate) fn multiplier_for(lockup_days: u32) -> Result<u32, Error> {
     match lockup_days {
         0 => Ok(FLEXIBLE_MULTIPLIER),
         1..=7 => Ok(SHORT_MULTIPLIER),
@@ -26,7 +26,7 @@ fn multiplier_for(lockup_days: u32) -> Result<u32, Error> {
     }
 }
 
-fn lockup_ledgers_for(lockup_days: u32) -> Result<u32, Error> {
+pub(crate) fn lockup_ledgers_for(lockup_days: u32) -> Result<u32, Error> {
     match lockup_days {
         0 => Ok(0),
         1..=7 => Ok(SHORT_LEDGERS),
@@ -37,7 +37,7 @@ fn lockup_ledgers_for(lockup_days: u32) -> Result<u32, Error> {
 
 // Applies the selected duration multiplier to a deposit and stores the new lockup.
 // Caller must already be joined. Amount validated > 0.
-fn apply_time_locked_deposit(
+pub(crate) fn apply_time_locked_deposit(
     env: &Env,
     who: &Address,
     amount: i128,
@@ -54,7 +54,10 @@ fn apply_time_locked_deposit(
     p.claimable += amount;
     p.lockup_multiplier = multiplier_for(lockup_days)?;
     let ledgers = lockup_ledgers_for(lockup_days)?;
-    p.locked_until = env.ledger().sequence() + ledgers;
+    let new_locked_until = env.ledger().sequence() + ledgers;
+    if new_locked_until > p.locked_until {
+        p.locked_until = new_locked_until;
+    }
     env.storage().persistent().set(&key, &p);
     Ok(())
 }
