@@ -16,6 +16,7 @@ import VaultRewardsExplanationModal from "@/components/app/VaultRewardsExplanati
 import MobileVaultActions from "@/components/app/MobileVaultActions";
 import VaultRetryQueue from "@/components/app/VaultRetryQueue";
 import { useVaultDataReview } from "@/hooks/useVaultDataReview";
+import { useVaultCatalog } from "@/hooks/useVaultCatalog";
 import { Archive, LayoutGrid, Table } from "lucide-react";
 
 const INITIAL_FILTERS = {
@@ -34,8 +35,11 @@ export default function VaultsPage() {
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [viewMode, setViewMode] = useState("table");
 
+  const vaultQuery = useVaultCatalog();
+  const sourceVaults = vaultQuery.data?.vaults ?? [];
+
   const { vaults: reviewedVaults, warnings: dataWarnings } =
-    useVaultDataReview(MOCK_VAULTS);
+    useVaultDataReview(sourceVaults);
 
   const filteredVaults = useMemo(() => {
     return reviewedVaults.filter((vault) => {
@@ -97,7 +101,7 @@ export default function VaultsPage() {
 
       return true;
     });
-  }, [filters]);
+  }, [filters, reviewedVaults]);
 
   const clearFilters = () => setFilters(INITIAL_FILTERS);
 
@@ -167,9 +171,18 @@ export default function VaultsPage() {
         />
 
         <div className="flex-1 space-y-6">
-          <VaultDataRefresh />
+          <VaultDataRefresh
+            status={vaultQuery.isLoading ? "loading" : vaultQuery.freshness.status}
+            updatedAt={vaultQuery.freshness.updatedAt}
+            isRefreshing={vaultQuery.isFetching}
+            error={vaultQuery.error}
+            onRefresh={() => vaultQuery.refetch()}
+          />
 
-          <VaultDataWarnings warnings={dataWarnings} />
+          <VaultDataWarnings
+            warnings={dataWarnings}
+            status={vaultQuery.isLoading ? "loading" : vaultQuery.freshness.status}
+          />
 
           <VaultHealthStatusPanel />
 
