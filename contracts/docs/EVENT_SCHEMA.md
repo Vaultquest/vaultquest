@@ -82,3 +82,31 @@ Additive optional fields may ship under the same version. Required field
 changes, renamed events, changed topic order, or changed units require a new
 schema topic such as `"v2"`. Indexers must continue accepting all supported
 versions until a migration note removes the old version from this document.
+
+## Implementation status
+
+The `drip-pool` contract (`contracts/drip-pool/src/lib.rs`) does **not** yet
+emit the versioned `("vaultquest", "v1", event_name, pool_id)` envelope or
+snake_case map payloads described above — no backend indexer currently
+depends on it, so this is the target shape rather than the current one.
+Today the contract emits a compact 2-symbol topic plus a positional tuple
+payload, pinned by regression tests in `contracts/drip-pool/src/test.rs`:
+
+| Event | Topics | Payload |
+|---|---|---|
+| `pool_created` → `create()` | `("pool", "created")` | `admin: Address` |
+| `pool_joined` → `join()` | `("pool", "joined")` | `who: Address` |
+| `drip_deposited` → `deposit()` / `drip()` | `("pool", "deposit")` | `(who: Address, amount: i128, total_deposited: i128)` |
+| `reward_claimed` → `claim()` / `claim_reward()` | `("pool", "claimed")` | `(who: Address, amount: i128)` |
+| `withdrawn` → `withdraw()` | `("pool", "withdrawn")` | `(who: Address, amount: i128)` |
+| `payout_selected` → `draw_winner()` | `("pool", "payout")` | `(winner: Address, prize: i128)` |
+
+`paused`, `recovered`, and `config_changed` are not implemented by the
+contract yet — there is no corresponding entry point.
+
+Migrating to the full envelope (versioned topics, `pool_id` in topic
+position 3, named map payloads, `idempotency_key`) is tracked separately;
+until that lands, treat the table above — not the payload shapes in
+"Required events" — as the source of truth for what's actually on-chain,
+and keep `contracts/drip-pool/src/test.rs`'s `*_emits_event` tests in sync
+with any topic or payload change in the same PR.
