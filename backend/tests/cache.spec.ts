@@ -125,4 +125,94 @@ describe("CacheService Fallback & Caching Logic Tests", () => {
     // Deletes from cache because it is consumed
     expect(mockRedisInstance.del).toHaveBeenCalled();
   });
+
+  describe("getOrSet wallet-scoped cache keys", () => {
+    it("keeps cache entries isolated per wallet-scoped key", async () => {
+      const service = new CacheService(mockPrisma, mockLogger, "redis://127.0.0.1:6379");
+      const connectCallback = mockRedisInstance.on.mock.calls.find((c) => c[0] === "connect")?.[1];
+      if (connectCallback) connectCallback();
+
+      const store = new Map<string, string>();
+      mockRedisInstance.get.mockImplementation(async (key: string) => store.get(key) ?? null);
+      mockRedisInstance.set.mockImplementation(async (key: string, value: string) => {
+        store.set(key, value);
+        return "OK";
+      });
+      mockRedisInstance.del.mockImplementation(async (key: string) => {
+        const existed = store.has(key);
+        store.delete(key);
+        return existed ? 1 : 0;
+      });
+
+      const fetchA = vi.fn().mockResolvedValue({ pools: ["a-1"] });
+      const fetchB = vi.fn().mockResolvedValue({ pools: ["b-1"] });
+
+      const resultA = await service.getOrSet("saved-pools:walletA", 60, fetchA);
+      const resultB = await service.getOrSet("saved-pools:walletB", 60, fetchB);
+
+      expect(resultA).toEqual({ pools: ["a-1"] });
+      expect(resultB).toEqual({ pools: ["b-1"] });
+      expect(fetchA).toHaveBeenCalledTimes(1);
+      expect(fetchB).toHaveBeenCalledTimes(1);
+
+      // Evicting wallet A's key must not affect wallet B's cached entry.
+      await service.invalidate("saved-pools:walletA");
+      expect(store.has("saved-pools:walletA")).toBe(false);
+      expect(store.has("saved-pools:walletB")).toBe(true);
+
+      const refetchB = await service.getOrSet("saved-pools:walletB", 60, fetchB);
+      expect(refetchB).toEqual({ pools: ["b-1"] });
+      expect(fetchB).toHaveBeenCalledTimes(1); // still cached, no re-fetch
+    });
+  });
+
+  describe("pending event eviction", () => {
+    it("removes only the consumed event from cache, leaving other pending events intact", async () => {
+      const service = new CacheService(mockPrisma, mockLogger, "redis://127.0.0.1:6379");
+      const connectCallback = mockRedisInstance.on.mock.calls.find((c) => c[0] === "connect")?.[1];
+      if (connectCallback) connectCallback();
+
+      const store = new Map<string, string>();
+      mockRedisInstance.set.mockImplementation(async (key: string, value: string) => {
+        store.set(key, value);
+        return "OK";
+      });
+      mockRedisInstance.del.mockImplementation(async (key: string) => {
+        const existed = store.has(key);
+        store.delete(key);
+        return existed ? 1 : 0;
+      });
+      mockRedisInstance.get.mockImplementation(async (key: string) => store.get(key) ?? null);
+
+      const eventA: Parameters<CacheService["setPendingEvent"]>[0] = {
+        txHash: "0xaaa",
+        sorobanEventId: "evt_a",
+        eventPayload: { amount: 10 },
+        statusHint: "confirmed",
+        receivedAt: new Date(),
+        consumedAt: null
+      };
+      const eventB: Parameters<CacheService["setPendingEvent"]>[0] = {
+        txHash: "0xbbb",
+        sorobanEventId: "evt_b",
+        eventPayload: { amount: 20 },
+        statusHint: "confirmed",
+        receivedAt: new Date(),
+        consumedAt: null
+      };
+
+      await service.setPendingEvent(eventA);
+      await service.setPendingEvent(eventB);
+      expect(store.has("pending-event:0xaaa")).toBe(true);
+      expect(store.has("pending-event:0xbbb")).toBe(true);
+
+      await service.setPendingEvent({ ...eventA, consumedAt: new Date() });
+
+      expect(store.has("pending-event:0xaaa")).toBe(false);
+      expect(store.has("pending-event:0xbbb")).toBe(true);
+
+      const remaining = await service.getPendingEvent("0xbbb");
+      expect(remaining?.txHash).toBe("0xbbb");
+    });
+  });
 });
