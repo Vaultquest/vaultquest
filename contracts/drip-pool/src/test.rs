@@ -568,7 +568,61 @@ fn negative_deposit_rejected() {
     );
 }
 
-// ── #255: event emission ───────────────────────────────────────────────────
+// ── #255 / #19: event emission and schema conformance ──────────────────────
+//
+// These tests pin down the exact topic pair and payload shape emitted for
+// each lifecycle event so that an accidental change to a topic symbol or a
+// payload field/order breaks CI instead of silently drifting from
+// `contracts/docs/EVENT_SCHEMA.md`. See that file's "Implementation status"
+// section for how the on-chain shape maps to the documented schema.
+
+/// create emits a `pool / created` event carrying the admin address.
+#[test]
+fn create_emits_event() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let events = env.events().all();
+    let created_event = events.iter().find(|(_, topics, _)| {
+        *topics
+            == vec![
+                &env,
+                symbol_short!("pool").into_val(&env),
+                symbol_short!("created").into_val(&env),
+            ]
+    });
+    let (_, _, payload) = created_event.expect("created event not found");
+    assert_eq!(
+        payload,
+        admin.into_val(&env),
+        "created event payload should be the admin address"
+    );
+}
+
+/// join emits a `pool / joined` event carrying the joining wallet.
+#[test]
+fn join_emits_event() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let alice = Address::generate(&env);
+    client.join(&alice);
+
+    let events = env.events().all();
+    let joined_event = events.iter().find(|(_, topics, _)| {
+        *topics
+            == vec![
+                &env,
+                symbol_short!("pool").into_val(&env),
+                symbol_short!("joined").into_val(&env),
+            ]
+    });
+    let (_, _, payload) = joined_event.expect("joined event not found");
+    assert_eq!(
+        payload,
+        alice.into_val(&env),
+        "joined event payload should be the joining wallet"
+    );
+}
 
 /// Deposit emits a `pool / deposit` event with (who, amount, total_deposited).
 #[test]
@@ -588,7 +642,40 @@ fn deposit_emits_event() {
                 symbol_short!("deposit").into_val(&env),
             ]
     });
-    assert!(deposit_event.is_some(), "deposit event not found");
+    let (_, _, payload) = deposit_event.expect("deposit event not found");
+    assert_eq!(
+        payload,
+        (alice.clone(), 500i128, 500i128).into_val(&env),
+        "deposit event payload should be (who, amount, total_deposited)"
+    );
+}
+
+/// claim_reward emits a `pool / claimed` event with (who, amount).
+#[test]
+fn claim_emits_event() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let alice = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &500);
+    let claimed = client.claim_reward(&alice);
+    assert_eq!(claimed, 500);
+
+    let events = env.events().all();
+    let claimed_event = events.iter().find(|(_, topics, _)| {
+        *topics
+            == vec![
+                &env,
+                symbol_short!("pool").into_val(&env),
+                symbol_short!("claimed").into_val(&env),
+            ]
+    });
+    let (_, _, payload) = claimed_event.expect("claimed event not found");
+    assert_eq!(
+        payload,
+        (alice.clone(), 500i128).into_val(&env),
+        "claimed event payload should be (who, amount)"
+    );
 }
 
 /// Withdraw emits a `pool / withdrawn` event with (who, amount).
@@ -611,7 +698,12 @@ fn withdraw_emits_event() {
                 symbol_short!("withdrawn").into_val(&env),
             ]
     });
-    assert!(withdrawn_event.is_some(), "withdrawn event not found");
+    let (_, _, payload) = withdrawn_event.expect("withdrawn event not found");
+    assert_eq!(
+        payload,
+        (alice.clone(), 200i128).into_val(&env),
+        "withdrawn event payload should be (who, amount)"
+    );
 }
 
 /// draw_winner emits a `pool / payout` event with (winner, prize).
@@ -635,7 +727,12 @@ fn draw_winner_emits_payout_event() {
                 symbol_short!("payout").into_val(&env),
             ]
     });
-    assert!(payout_event.is_some(), "payout event not found");
+    let (_, _, payload) = payout_event.expect("payout event not found");
+    assert_eq!(
+        payload,
+        (winner.clone(), 100i128).into_val(&env),
+        "payout event payload should be (winner, prize)"
+    );
 }
 
 /// draw_winner with zero prize is rejected.
