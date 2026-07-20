@@ -177,4 +177,77 @@ describe("Saved pools API", () => {
     });
     expect(resB.json().data).toHaveLength(0);
   });
+
+  describe("cross-user authorization", () => {
+    const walletA = "GSAVEDAAAA111111111111111111111111111111111111111111111";
+    const walletB = "GSAVEDBBBB222222222222222222222222222222222222222222222";
+    const poolShared = { ...samplePool, pool_id: "pool-shared", pool_name: "Shared Pool" };
+    const poolAOnly = { ...samplePool, pool_id: "pool-a-only", pool_name: "A Only" };
+    const poolBOnly = { ...samplePool, pool_id: "pool-b-only", pool_name: "B Only" };
+
+    async function save(wallet: string, pool: typeof samplePool) {
+      return app.inject({
+        method: "POST",
+        url: "/saved-pools",
+        headers: { "content-type": "application/json" },
+        payload: { wallet_address: wallet, pool },
+      });
+    }
+
+    it("keeps overlapping and distinct saved pools scoped per wallet", async () => {
+      await save(walletA, poolShared);
+      await save(walletA, poolAOnly);
+      await save(walletB, poolShared);
+      await save(walletB, poolBOnly);
+
+      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}` });
+      const listB = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletB}` });
+
+      expect(listA.json().data.map((p: any) => p.pool_id).sort()).toEqual(
+        ["pool-a-only", "pool-shared"].sort()
+      );
+      expect(listB.json().data.map((p: any) => p.pool_id).sort()).toEqual(
+        ["pool-b-only", "pool-shared"].sort()
+      );
+    });
+
+    it("does not let wallet B delete wallet A's saved pool by guessing the poolId", async () => {
+      await save(walletA, poolAOnly);
+
+      const del = await app.inject({
+        method: "DELETE",
+        url: `/saved-pools/${poolAOnly.pool_id}?wallet=${walletB}`,
+      });
+      expect(del.statusCode).toBe(200);
+      expect(del.json().data.deleted).toBe(0); // no rows matched wallet B's scope
+
+      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}` });
+      expect(listA.json().data.map((p: any) => p.pool_id)).toContain(poolAOnly.pool_id);
+    });
+
+    it("lets wallet A and wallet B independently save/unsave the same poolId without affecting each other", async () => {
+      await save(walletA, poolShared);
+      await save(walletB, poolShared);
+
+      const delA = await app.inject({
+        method: "DELETE",
+        url: `/saved-pools/${poolShared.pool_id}?wallet=${walletA}`,
+      });
+      expect(delA.json().data.deleted).toBe(1);
+
+      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}` });
+      const listB = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletB}` });
+
+      expect(listA.json().data).toHaveLength(0);
+      expect(listB.json().data.map((p: any) => p.pool_id)).toContain(poolShared.pool_id);
+    });
+
+    it("does not let wallet B's re-save of a shared poolId overwrite wallet A's record", async () => {
+      await save(walletA, poolShared);
+      await save(walletB, { ...poolShared, pool_name: "Renamed by B" });
+
+      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}` });
+      expect(listA.json().data[0].pool_name).toBe(poolShared.pool_name);
+    });
+  });
 });

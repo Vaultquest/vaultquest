@@ -205,4 +205,55 @@ export const actionsRoutes = (
       });
       return page(result.items.map(serialize), { nextCursor: result.nextCursor, limit: q.limit });
     });
+
+    app.get("/actions/leaderboard", async () => {
+      const data = [
+        {
+          rank: 1,
+          previousRank: 2,
+          walletAddress: "GABCD1234567890STUVWXWXYZ1234567890ALPHA",
+          displayName: "GABC...LPHA",
+          vaultId: "v_usdc_stable",
+          vaultName: "USDC Savings Sprint",
+          depositedAmount: 12500,
+          asset: "USDC",
+          ticketsCount: 250,
+          prizeWins: 3,
+          score: 9840,
+          state: "rising",
+          lastActivity: "10 minutes ago"
+        },
+        {
+          rank: 2,
+          previousRank: 1,
+          walletAddress: "GBBDU9876543210ZYXWVUTSRQPONMLKJIHGBETA",
+          displayName: "GBBD...BETA",
+          vaultId: "v_xlm_drip",
+          vaultName: "XLM Drip Vault",
+          depositedAmount: 8200,
+          asset: "XLM",
+          ticketsCount: 164,
+          prizeWins: 1,
+          score: 8120,
+          state: "holding",
+          lastActivity: "1 hour ago"
+        },
+        {
+          rank: 3,
+          previousRank: 5,
+          walletAddress: "GC4AK9Q2345678901234567890123456789GAMMA",
+          displayName: "GC4A...AMMA",
+          vaultId: "v_student_quest",
+          vaultName: "Student Saver Quest",
+          depositedAmount: 3400,
+          asset: "USDC",
+          ticketsCount: 68,
+          prizeWins: 2,
+          score: 6540,
+          state: "rising",
+          lastActivity: "3 hours ago"
+        }
+      ];
+      return ok(data);
+    });
   };

@@ -350,6 +350,53 @@ impl DripPool {
         Ok(())
     }
 
+    /// Deposit `amount` with a specific lockup duration (in days).
+    pub fn deposit_with_duration(
+        env: Env,
+        who: Address,
+        amount: i128,
+        lockup_days: u32,
+    ) -> Result<(), Error> {
+        who.require_auth();
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let key = DataKey::Participant(who.clone());
+        let mut p: Participant = env.storage().persistent().get(&key).unwrap_or(Participant {
+            joined_at: env.ledger().timestamp(),
+            deposited: 0,
+            claimable: 0,
+            locked_until: 0,
+            lockup_multiplier: 100,
+        });
+
+        p.deposited += amount;
+        p.claimable += amount;
+        p.lockup_multiplier = vault::multiplier_for(lockup_days)?;
+        let ledgers = vault::lockup_ledgers_for(lockup_days)?;
+        let new_locked_until = env.ledger().sequence() + ledgers;
+        if new_locked_until > p.locked_until {
+            p.locked_until = new_locked_until;
+        }
+        env.storage().persistent().set(&key, &p);
+
+        let mut pool: Pool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Pool)
+            .ok_or(Error::NotInitialized)?;
+        pool.total_drips += 1;
+        pool.total_deposited += amount;
+        env.storage().instance().set(&DataKey::Pool, &pool);
+
+        env.events().publish(
+            (symbol_short!("pool"), symbol_short!("deposit")),
+            (who, amount, pool.total_deposited),
+        );
+        Ok(())
+    }
+
     // ── Claim ──────────────────────────────────────────────────────────────
     pub fn claim(env: Env, who: Address) -> Result<i128, Error> {
         Self::claim_reward(env, who)
@@ -400,7 +447,9 @@ impl DripPool {
         Self::acquire_lock(&mut pool)?;
         env.storage().instance().set(&DataKey::Pool, &pool);
 
-        let amount = p.deposited;
+        let amount = (p.deposited as u128)
+            .saturating_mul(p.lockup_multiplier as u128)
+            .saturating_div(100) as i128;
         env.storage().persistent().remove(&key);
 
         // token_client.transfer(&env.current_contract_address(), &who, &amount);
@@ -478,6 +527,8 @@ impl DripPool {
 // Soroban wasm binary can only hold one contract — deploying the proxy
 // requires moving it to its own workspace crate. Until then it is compiled
 // for native builds and tests only, keeping the drip-pool wasm unchanged.
+pub mod vault;
+
 #[cfg(not(target_family = "wasm"))]
 pub mod proxy;
 

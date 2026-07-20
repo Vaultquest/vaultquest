@@ -1,12 +1,20 @@
+import { Redis } from "ioredis";
+import type { PrismaClient } from "@prisma/client";
+
 /**
- * In-memory caching layer for frequently requested on-chain and indexer data.
+ * Caching layer for frequently requested on-chain and indexer data.
  *
- * Stores pending events, indexer checkpoints, and protocol config with LRU eviction.
+ * Backs the indexer checkpoint and generic key/value cache with Redis when a
+ * REDIS_URL is configured, falling back to PostgreSQL (checkpoint) or serving
+ * straight from the source (generic cache) whenever Redis is unavailable.
+ * Pending events, asset metadata, and protocol config use a small in-memory
+ * LRU map since they are hot, short-lived, per-process lookups.
  */
 
 export interface IndexerCheckpoint {
   id?: string;
   latestLedger: number;
+  lastProcessedEventId?: string | null;
   lastSyncTime: Date;
   lastSuccessSyncTime?: Date;
   lastError?: string | null;
@@ -33,24 +41,75 @@ export interface ProtocolConfigRecord {
   updatedAt: Date;
 }
 
+interface Logger {
+  info: (...args: any[]) => void;
+  warn: (...args: any[]) => void;
+  error: (...args: any[]) => void;
+  debug: (...args: any[]) => void;
+}
+
 type CacheEntry<T> = { value: T; accessedAt: Date };
 
 /**
- * Minimal in-memory LRU cache service for hot data.
+ * Caching service combining a Redis-backed cache with an in-memory LRU
+ * fallback for hot data.
  */
 export class CacheService {
+  private readonly prisma: PrismaClient;
+  private readonly logger: Logger;
+  private redis: Redis | null = null;
+  private isOnline = false;
+
   private readonly pendingMap = new Map<string, CacheEntry<PendingEvent>>();
   private readonly assetMap = new Map<string, CacheEntry<AssetMetadata>>();
   private readonly configMap = new Map<string, CacheEntry<ProtocolConfigRecord>>();
-  private checkpoint: CacheEntry<IndexerCheckpoint | null> = { value: null, accessedAt: new Date() };
   private readonly maxEntries: number;
 
   /**
-   * @param maxEntries - Maximum number of entries per cache map before eviction
+   * @param prisma - Prisma client for database fallback access
+   * @param logger - Logger used for non-fatal Redis warnings
+   * @param redisUrl - Redis connection string; caching degrades gracefully when omitted
+   * @param maxEntries - Maximum number of entries per in-memory cache map before eviction
    */
-  constructor(maxEntries = 500) {
+  constructor(prisma: PrismaClient, logger: Logger, redisUrl?: string | null, maxEntries = 500) {
+    this.prisma = prisma;
+    this.logger = logger;
     this.maxEntries = maxEntries;
+
+    if (redisUrl) {
+      this.redis = new Redis(redisUrl, { lazyConnect: false, maxRetriesPerRequest: 1 });
+      this.redis.on("connect", () => {
+        this.isOnline = true;
+      });
+      this.redis.on("error", (err: Error) => {
+        this.isOnline = false;
+        this.logger.warn({ err }, "Redis connection error");
+      });
+    }
   }
+
+  // --- helpers ---
+
+  private touch<K, V>(map: Map<K, CacheEntry<V>>, key: K, value: V): void {
+    const now = new Date();
+    map.set(key, { value, accessedAt: now });
+    this.evictIfNeeded(map);
+  }
+
+  private evictIfNeeded<K, V>(map: Map<K, CacheEntry<V>>): void {
+    if (map.size <= this.maxEntries) return;
+    let oldestKey: K | undefined;
+    let oldest = new Date(map.size ? Infinity : 0);
+    for (const [k, entry] of map.entries()) {
+      if (entry.accessedAt < oldest) {
+        oldest = entry.accessedAt;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey !== undefined) map.delete(oldestKey);
+  }
+
+  // --- indexer checkpoint ---
 
   async getCheckpoint(): Promise<Partial<IndexerCheckpoint> | null> {
     if (this.redis && this.isOnline) {
@@ -98,44 +157,26 @@ export class CacheService {
         return;
       } catch (err) {
         this.logger.warn({ err }, "Redis setCheckpoint failed, writing directly to database");
-  // --- helpers ---
-
-  private touch<K, V>(map: Map<K, CacheEntry<V>>, key: K, value: V): void {
-    const now = new Date();
-    map.set(key, { value, accessedAt: now });
-    this.evictIfNeeded(map);
-  }
-
-  private evictIfNeeded<K, V>(map: Map<K, CacheEntry<V>>): void {
-    if (map.size <= this.maxEntries) return;
-    let oldestKey: K | undefined;
-    let oldest = new Date(map.size ? Infinity : 0);
-    for (const [k, entry] of map.entries()) {
-      if (entry.accessedAt < oldest) {
-        oldest = entry.accessedAt;
-        oldestKey = k;
       }
     }
-    if (oldestKey !== undefined) map.delete(oldestKey);
-  }
 
     // Fallback direct DB write
     await this.prisma.indexerCheckpoint.upsert({
       where: { id: "singleton" },
-        create: {
-          id: "singleton",
-          latestLedger: checkpoint.latestLedger,
-          lastProcessedEventId: checkpoint.lastProcessedEventId,
-          lastSyncTime: checkpoint.lastSyncTime,
-          lastError: checkpoint.lastError,
-          lastSuccessSyncTime: checkpoint.lastSuccessSyncTime
-        },
-        update: {
-          latestLedger: checkpoint.latestLedger,
-          lastProcessedEventId: checkpoint.lastProcessedEventId,
-          lastSyncTime: checkpoint.lastSyncTime,
-          lastError: checkpoint.lastError,
-          lastSuccessSyncTime: checkpoint.lastSuccessSyncTime
+      create: {
+        id: "singleton",
+        latestLedger: checkpoint.latestLedger,
+        lastProcessedEventId: checkpoint.lastProcessedEventId,
+        lastSyncTime: checkpoint.lastSyncTime,
+        lastError: checkpoint.lastError,
+        lastSuccessSyncTime: checkpoint.lastSuccessSyncTime
+      },
+      update: {
+        latestLedger: checkpoint.latestLedger,
+        lastProcessedEventId: checkpoint.lastProcessedEventId,
+        lastSyncTime: checkpoint.lastSyncTime,
+        lastError: checkpoint.lastError,
+        lastSuccessSyncTime: checkpoint.lastSuccessSyncTime
       }
     });
   }
@@ -150,22 +191,22 @@ export class CacheService {
       if (!data) return;
 
       const parsed = JSON.parse(data);
-        await this.prisma.indexerCheckpoint.upsert({
-          where: { id: "singleton" },
-          create: {
-            id: "singleton",
-            latestLedger: parsed.latestLedger,
-            lastProcessedEventId: parsed.lastProcessedEventId ?? null,
-            lastSyncTime: new Date(parsed.lastSyncTime),
-            lastError: parsed.lastError,
-            lastSuccessSyncTime: new Date(parsed.lastSuccessSyncTime)
-          },
-          update: {
-            latestLedger: parsed.latestLedger,
-            lastProcessedEventId: parsed.lastProcessedEventId ?? null,
-            lastSyncTime: new Date(parsed.lastSyncTime),
-            lastError: parsed.lastError,
-            lastSuccessSyncTime: new Date(parsed.lastSuccessSyncTime)
+      await this.prisma.indexerCheckpoint.upsert({
+        where: { id: "singleton" },
+        create: {
+          id: "singleton",
+          latestLedger: parsed.latestLedger,
+          lastProcessedEventId: parsed.lastProcessedEventId ?? null,
+          lastSyncTime: new Date(parsed.lastSyncTime),
+          lastError: parsed.lastError,
+          lastSuccessSyncTime: new Date(parsed.lastSuccessSyncTime)
+        },
+        update: {
+          latestLedger: parsed.latestLedger,
+          lastProcessedEventId: parsed.lastProcessedEventId ?? null,
+          lastSyncTime: new Date(parsed.lastSyncTime),
+          lastError: parsed.lastError,
+          lastSuccessSyncTime: new Date(parsed.lastSuccessSyncTime)
         }
       });
       await this.redis.del("indexer:checkpoint:dirty");
@@ -173,15 +214,30 @@ export class CacheService {
     } catch (err) {
       this.logger.error({ err }, "Failed to sync checkpoint from Redis to PostgreSQL");
     }
+  }
+
   // --- pending events ---
 
+  private pendingEventCacheKey(txHash: string): string {
+    return `pending-event:${txHash}`;
+  }
+
   /**
-   * Retrieves a pending event by transaction hash.
+   * Retrieves a pending event by transaction hash. Reads through Redis when
+   * online, falling back to the in-memory map.
    *
    * @param txHash - On-chain transaction hash
    * @returns Pending event or null if absent
    */
   async getPendingEvent(txHash: string): Promise<PendingEvent | null> {
+    if (this.redis && this.isOnline) {
+      try {
+        const data = await this.redis.get(this.pendingEventCacheKey(txHash));
+        if (data) return JSON.parse(data) as PendingEvent;
+      } catch (err) {
+        this.logger.warn({ err, txHash }, "Redis getPendingEvent failed, falling back to memory");
+      }
+    }
     const entry = this.pendingMap.get(txHash);
     if (!entry) return null;
     entry.accessedAt = new Date();
@@ -189,12 +245,44 @@ export class CacheService {
   }
 
   /**
-   * Stores or updates a pending event.
+   * Writes a pending event through to the database and the cache. Once an
+   * event is consumed (`consumedAt` set), it is evicted from the cache
+   * instead of being kept around.
    *
    * @param event - Pending event payload
    */
   async setPendingEvent(event: PendingEvent): Promise<void> {
+    await this.prisma.pendingEvent.upsert({
+      where: { txHash: event.txHash },
+      create: {
+        txHash: event.txHash,
+        sorobanEventId: event.sorobanEventId,
+        eventPayload: event.eventPayload as object,
+        statusHint: event.statusHint,
+        receivedAt: event.receivedAt,
+        consumedAt: event.consumedAt ?? null
+      },
+      update: {
+        sorobanEventId: event.sorobanEventId,
+        eventPayload: event.eventPayload as object,
+        statusHint: event.statusHint,
+        consumedAt: event.consumedAt ?? null
+      }
+    });
+
+    if (event.consumedAt) {
+      await this.deletePendingEvent(event.txHash);
+      return;
+    }
+
     this.touch(this.pendingMap, event.txHash, event);
+    if (this.redis && this.isOnline) {
+      try {
+        await this.redis.set(this.pendingEventCacheKey(event.txHash), JSON.stringify(event));
+      } catch (err) {
+        this.logger.warn({ err, txHash: event.txHash }, "Redis setPendingEvent failed, cached in memory only");
+      }
+    }
   }
 
   /**
@@ -204,27 +292,13 @@ export class CacheService {
    */
   async deletePendingEvent(txHash: string): Promise<void> {
     this.pendingMap.delete(txHash);
-  }
-
-  // --- indexer checkpoint ---
-
-  /**
-   * Gets the cached indexer checkpoint.
-   *
-   * @returns Checkpoint or null if none cached
-   */
-  async getCheckpoint(): Promise<IndexerCheckpoint | null> {
-    this.checkpoint.accessedAt = new Date();
-    return this.checkpoint.value;
-  }
-
-  /**
-   * Updates the cached indexer checkpoint.
-   *
-   * @param checkpoint - New checkpoint state
-   */
-  async setCheckpoint(checkpoint: IndexerCheckpoint): Promise<void> {
-    this.checkpoint = { value: checkpoint, accessedAt: new Date() };
+    if (this.redis && this.isOnline) {
+      try {
+        await this.redis.del(this.pendingEventCacheKey(txHash));
+      } catch (err) {
+        this.logger.warn({ err, txHash }, "Redis deletePendingEvent failed");
+      }
+    }
   }
 
   // --- asset metadata ---
@@ -251,6 +325,13 @@ export class CacheService {
     this.touch(this.assetMap, metadata.asset, metadata);
   }
 
+  // --- generic Redis-backed cache ---
+
+  /**
+   * Returns the cached value for `key`, or invokes `fetch` on a miss and
+   * caches the result for `ttlSeconds`. Degrades gracefully (always calls
+   * `fetch`) when Redis is offline or errors.
+   */
   async getOrSet<T>(key: string, ttlSeconds: number, fetch: () => Promise<T>): Promise<T> {
     if (this.redis && this.isOnline) {
       try {
@@ -259,26 +340,30 @@ export class CacheService {
           return JSON.parse(cached) as T;
         }
       } catch (err: any) {
-        this.logger.warn({ err, key }, 'Redis get failed — falling through to source');
+        this.logger.warn({ err, key }, "Redis get failed — falling through to source");
       }
     }
     const value = await fetch();
     if (this.redis && this.isOnline) {
       try {
-        await this.redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+        await this.redis.set(key, JSON.stringify(value), "EX", ttlSeconds);
       } catch (err: any) {
-        this.logger.warn({ err, key }, 'Redis set failed — response served uncached');
+        this.logger.warn({ err, key }, "Redis set failed — response served uncached");
       }
     }
     return value;
   }
 
+  /**
+   * Evicts a single key from the Redis-backed cache. No-op when Redis is
+   * offline; never throws.
+   */
   async invalidate(key: string): Promise<void> {
     if (this.redis && this.isOnline) {
       try {
         await this.redis.del(key);
       } catch (err: any) {
-        this.logger.warn({ err, key }, 'Redis invalidate failed');
+        this.logger.warn({ err, key }, "Redis invalidate failed");
       }
     }
   }
@@ -317,19 +402,26 @@ export class CacheService {
   }
 
   /**
-   * Resets all caches (context: config refresh/restart).
+   * Resets all in-memory caches (context: config refresh/restart). Does not
+   * touch Redis-backed state.
    */
   async reset(): Promise<void> {
     this.pendingMap.clear();
     this.assetMap.clear();
     this.configMap.clear();
-    this.checkpoint = { value: null, accessedAt: new Date() };
   }
 
   /**
-   * Placeholder disconnect hook if future implementation adds external connections.
+   * Closes the Redis connection (if any) and clears in-memory caches.
    */
   async disconnect(): Promise<void> {
-    this.reset();
+    await this.reset();
+    if (this.redis) {
+      try {
+        await this.redis.quit();
+      } catch {
+        // best-effort close
+      }
+    }
   }
 }
