@@ -17,7 +17,8 @@
     "term": "Trustless Work",
     "paths": [
       "docs/env-inventory.md",
-      "services/escrowService.ts"
+      "services/escrowService.ts",
+      "stellar-wallet-connect/src/components/NetworkDiagnostics.tsx"
     ],
     "reason": "Intentional integration references that remain part of current config semantics."
   },
