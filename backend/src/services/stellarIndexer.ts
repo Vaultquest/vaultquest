@@ -61,6 +61,11 @@ export interface StellarIndexerOptions {
   /** Retry config forwarded to `withRetry` for each `fetchEvents` call. */
   retryOptions?: RetryOptions;
   logger?: Logger;
+  /**
+   * When true, the indexer skips loading the checkpoint from the database on
+   * construction (useful in tests where the ledger service is a stub).
+   */
+  skipCheckpointLoad?: boolean;
 }
 
 export interface SorobanRpcEventSourceOptions {
@@ -123,16 +128,39 @@ export const defaultXdrDecoder: XdrDecoder = {
  */
 export class StellarIndexer {
   private cursor: string | null = null;
+  private latestLedger: number = 0;
+  private checkpointLoaded: Promise<void>;
   private readonly opts: Required<
     Pick<StellarIndexerOptions, "batchSize" | "retryOptions">
   > & StellarIndexerOptions;
 
   constructor(private options: StellarIndexerOptions) {
     this.opts = {
-      batchSize: options.batchSize ?? 50,
+      batchSize: options.batchSize ?? 200,
       retryOptions: options.retryOptions ?? {},
       ...options
     };
+    this.checkpointLoaded = this.loadCheckpoint();
+  }
+
+  private async loadCheckpoint(): Promise<void> {
+    if (this.opts.skipCheckpointLoad) return;
+
+    try {
+      const checkpoint = await this.opts.ledger.getIndexerCheckpoint();
+      if (checkpoint?.lastProcessedEventId) {
+        this.cursor = checkpoint.lastProcessedEventId;
+        this.latestLedger = checkpoint.latestLedger;
+        this.opts.logger?.info(
+          { cursor: this.cursor, latestLedger: this.latestLedger },
+          "indexer: loaded checkpoint from database"
+        );
+      } else {
+        this.opts.logger?.info("indexer: no checkpoint found, starting from beginning");
+      }
+    } catch (err) {
+      this.opts.logger?.error({ err }, "indexer: failed to load checkpoint from database");
+    }
   }
 
   setCursor(cursor: string | null): void {
@@ -148,6 +176,7 @@ export class StellarIndexer {
    * advances the cursor.
    */
   async tick(): Promise<IndexResult> {
+    await this.checkpointLoaded;
     const { ledger, source, decoder } = this.opts;
     const batchSize = this.opts.batchSize;
 
@@ -202,9 +231,24 @@ export class StellarIndexer {
       }
     }
 
-    // Advance cursor to the last event id in this batch.
+    // Advance cursor and ledger to the last event in this batch.
     if (rawEvents.length > 0) {
-      this.cursor = rawEvents[rawEvents.length - 1]!.id;
+      const lastEvent = rawEvents[rawEvents.length - 1]!;
+      this.cursor = lastEvent.id;
+      this.latestLedger = lastEvent.ledger;
+    }
+
+    // Persist checkpoint to database after successful processing.
+    if (rawEvents.length > 0) {
+      try {
+        await this.opts.ledger.updateIndexerCheckpoint({
+          latestLedger: this.latestLedger,
+          lastProcessedEventId: this.cursor,
+          success: true
+        });
+      } catch (err) {
+        this.opts.logger?.warn({ err }, "indexer: failed to persist checkpoint");
+      }
     }
 
     return {

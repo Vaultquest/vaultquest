@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { seedAction } from "./helpers/factory.js";
 import { LedgerService } from "../src/services/ledger.js";
@@ -104,6 +104,81 @@ describe("StellarIndexer", () => {
     await indexer.tick();
     const refreshed = await db.prisma.actionLedger.findUnique({ where: { id: action.id } });
     expect(refreshed?.status).toBe("reverted");
+  });
+
+  it("starts from the beginning when no checkpoint exists", async () => {
+    let seenCursor: string | null = null;
+    const indexer = new StellarIndexer({
+      ledger,
+      source: {
+        async fetchEvents({ cursor }) {
+          seenCursor = cursor;
+          return [makeEvent({ id: "1", ledger: 100, txHash: "tx_fresh" })];
+        }
+      },
+      decoder: defaultXdrDecoder
+    });
+
+    const result = await indexer.tick();
+
+    expect(seenCursor).toBeNull();
+    expect(result.cursor).toBe("1");
+    expect(result.processed).toBe(1);
+    expect(result.imported).toBe(1);
+
+    const checkpoint = await db.prisma.indexerCheckpoint.findUnique({ where: { id: "singleton" } });
+    expect(checkpoint?.lastProcessedEventId).toBe("1");
+    expect(checkpoint?.latestLedger).toBe(100);
+  });
+
+  it("persists checkpoint after successful tick", async () => {
+    const indexer = new StellarIndexer({
+      ledger,
+      source: staticSource([
+        makeEvent({ id: "10", ledger: 200, txHash: "tx_persist1" }),
+        makeEvent({ id: "11", ledger: 201, txHash: "tx_persist2" })
+      ]),
+      decoder: defaultXdrDecoder
+    });
+
+    await indexer.tick();
+
+    const checkpoint = await db.prisma.indexerCheckpoint.findUnique({ where: { id: "singleton" } });
+    expect(checkpoint).not.toBeNull();
+    expect(checkpoint?.lastProcessedEventId).toBe("11");
+    expect(checkpoint?.latestLedger).toBe(201);
+    expect(checkpoint?.lastSyncTime).toBeInstanceOf(Date);
+  });
+
+  it("handles checkpoint update failure gracefully", async () => {
+    const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+    const warnSpy = vi.spyOn(logger, "warn");
+
+    const failingLedger = {
+      getIndexerCheckpoint: ledger.getIndexerCheckpoint.bind(ledger),
+      updateIndexerCheckpoint: async () => { throw new Error("DB write failed"); },
+      reconcileEvent: ledger.reconcileEvent.bind(ledger)
+    };
+
+    const indexer = new StellarIndexer({
+      ledger: failingLedger as any,
+      source: staticSource([makeEvent({ id: "1", ledger: 100, txHash: "tx_err" })]),
+      decoder: defaultXdrDecoder,
+      logger: logger as any
+    });
+
+    const result = await indexer.tick();
+
+    // Event still processed despite checkpoint failure
+    expect(result.processed).toBe(1);
+    expect(result.imported).toBe(1);
+    expect(result.cursor).toBe("1");
+
+    // Warning logged about checkpoint failure
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      "indexer: failed to persist checkpoint"
+    );
   });
 
   it("resumes from the persisted processed-event cursor after downtime", async () => {
