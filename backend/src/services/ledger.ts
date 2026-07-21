@@ -388,7 +388,13 @@ export class LedgerService {
     return { scrubbed: result.count };
   }
 
-  async getPortfolioSummary(walletAddress: string) {
+  async getPortfolioSummary(
+    walletAddress: string,
+    options: { staleAfterMs?: number; now?: Date } = {}
+  ) {
+    const staleAfterMs = options.staleAfterMs ?? 5 * 60 * 1000;
+    const now = options.now ?? new Date();
+
     const actions = await this.prisma.actionLedger.findMany({
       where: { walletAddress },
       orderBy: { createdAt: "desc" }
@@ -419,15 +425,58 @@ export class LedgerService {
       }
     }
 
+    const activeVaultIds = Object.keys(poolBalances).filter((vid) => poolBalances[vid].balance > 0);
+    const checkpointIds = ["singleton", ...activeVaultIds.map((vid) => `vault-${vid}`)];
+
+    const checkpoints = await this.prisma.indexerCheckpoint.findMany({
+      where: { id: { in: checkpointIds } }
+    });
+
+    const globalCheckpoint = checkpoints.find((c) => c.id === "singleton") ?? null;
+    const vaultCheckpointMap = new Map(
+      checkpoints
+        .filter((c) => c.id !== "singleton")
+        .map((c) => [c.id.replace(/^vault-/, ""), c])
+    );
+
     let totalDeposits = 0;
+    let totalStaleDeposits = 0;
+    let anyStale = false;
+
+    const isGlobalStale =
+      globalCheckpoint != null &&
+      now.getTime() - globalCheckpoint.lastSuccessSyncTime.getTime() > staleAfterMs;
+
+    if (isGlobalStale) {
+      anyStale = true;
+    }
+
     const activePositions = Object.entries(poolBalances)
       .filter(([_, data]) => data.balance > 0)
       .map(([vaultId, data]) => {
-        totalDeposits += data.balance;
+        const checkpoint = vaultCheckpointMap.get(vaultId) ?? globalCheckpoint;
+        
+        let isStale = false;
+        let lastUpdatedAt: Date | null = null;
+        
+        if (checkpoint) {
+          lastUpdatedAt = checkpoint.lastSuccessSyncTime;
+          isStale = now.getTime() - checkpoint.lastSuccessSyncTime.getTime() > staleAfterMs;
+        }
+
+        if (isStale) {
+          totalStaleDeposits += data.balance;
+          anyStale = true;
+        } else {
+          totalDeposits += data.balance;
+        }
+
         return {
           vault_id: vaultId,
           balance: data.balance,
-          token: data.token
+          token: data.token,
+          is_stale: isStale,
+          last_updated_at: lastUpdatedAt
         };
       });
 
@@ -443,10 +492,12 @@ export class LedgerService {
     return {
       wallet_address: walletAddress,
       total_deposits: totalDeposits,
+      total_stale_deposits: totalStaleDeposits,
       active_positions: activePositions,
       pending_rewards: 0,
       claimable_amount: totalClaimed,
-      recent_activity: recentActivity
+      recent_activity: recentActivity,
+      is_stale: anyStale
     };
   }
 

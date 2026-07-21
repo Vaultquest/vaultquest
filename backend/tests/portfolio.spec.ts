@@ -121,4 +121,115 @@ describe("Backend Portfolio Summary Endpoint", () => {
     expect(data.recent_activity[0].status).toBe("pending");
     expect(data.recent_activity[0].action_type).toBe("deposit");
   });
+
+  it("handles a stale global indexer checkpoint in endpoint response", async () => {
+    // Seed action
+    await seedAction(db.prisma, {
+      walletAddress: validStellarAddress,
+      actionType: "deposit",
+      status: "confirmed",
+      actionPayload: { vault_id: "vault-1", amount: "100", token: "USDC" }
+    });
+
+    // Seed stale global checkpoint
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    await db.prisma.indexerCheckpoint.upsert({
+      where: { id: "singleton" },
+      create: {
+        id: "singleton",
+        latestLedger: 100,
+        lastProcessedEventId: "1",
+        lastSyncTime: oneHourAgo,
+        lastSuccessSyncTime: oneHourAgo,
+        lastError: null
+      },
+      update: {
+        lastSyncTime: oneHourAgo,
+        lastSuccessSyncTime: oneHourAgo
+      }
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/portfolio/summary?wallet=${validStellarAddress}`
+    });
+
+    expect(res.statusCode).toBe(200);
+    const json = res.json();
+    expect(json.ok).toBe(true);
+    expect(json.data.total_deposits).toBe(0);
+    expect(json.data.total_stale_deposits).toBe(100);
+    expect(json.data.is_stale).toBe(true);
+    expect(json.data.active_positions).toHaveLength(1);
+    expect(json.data.active_positions[0].is_stale).toBe(true);
+  });
+
+  it("segregates fresh vs stale vault deposits based on vault-specific checkpoints", async () => {
+    // Seed fresh vault deposit
+    await seedAction(db.prisma, {
+      walletAddress: validStellarAddress,
+      actionType: "deposit",
+      status: "confirmed",
+      actionPayload: { vault_id: "vault-fresh", amount: "150", token: "USDC" }
+    });
+
+    // Seed stale vault deposit
+    await seedAction(db.prisma, {
+      walletAddress: validStellarAddress,
+      actionType: "deposit",
+      status: "confirmed",
+      actionPayload: { vault_id: "vault-stale", amount: "300", token: "USDC" }
+    });
+
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+
+    // Upsert vault-fresh checkpoint (fresh)
+    await db.prisma.indexerCheckpoint.upsert({
+      where: { id: "vault-vault-fresh" },
+      create: {
+        id: "vault-vault-fresh",
+        latestLedger: 100,
+        lastSyncTime: now,
+        lastSuccessSyncTime: now
+      },
+      update: {
+        lastSyncTime: now,
+        lastSuccessSyncTime: now
+      }
+    });
+
+    // Upsert vault-stale checkpoint (stale)
+    await db.prisma.indexerCheckpoint.upsert({
+      where: { id: "vault-vault-stale" },
+      create: {
+        id: "vault-vault-stale",
+        latestLedger: 90,
+        lastSyncTime: oneHourAgo,
+        lastSuccessSyncTime: oneHourAgo
+      },
+      update: {
+        lastSyncTime: oneHourAgo,
+        lastSuccessSyncTime: oneHourAgo
+      }
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/portfolio/summary?wallet=${validStellarAddress}&stale_after_ms=300000` // 5 mins
+    });
+
+    expect(res.statusCode).toBe(200);
+    const json = res.json();
+    expect(json.ok).toBe(true);
+    expect(json.data.total_deposits).toBe(150);
+    expect(json.data.total_stale_deposits).toBe(300);
+    expect(json.data.is_stale).toBe(true);
+
+    const freshPos = json.data.active_positions.find((p: any) => p.vault_id === "vault-fresh");
+    const stalePos = json.data.active_positions.find((p: any) => p.vault_id === "vault-stale");
+
+    expect(freshPos.is_stale).toBe(false);
+    expect(stalePos.is_stale).toBe(true);
+  });
 });

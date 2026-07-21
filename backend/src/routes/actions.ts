@@ -136,7 +136,9 @@ export const actionsRoutes = (
      */
     app.get("/portfolio/summary", async (req) => {
       const q = portfolioQuery.parse(req.query);
-      const summary = await svc.getPortfolioSummary(q.wallet);
+      const summary = await svc.getPortfolioSummary(q.wallet, {
+        staleAfterMs: q.stale_after_ms
+      });
       return ok(summary);
     });
 
