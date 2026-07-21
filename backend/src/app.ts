@@ -83,8 +83,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Guard is a no-op when apiKey is undefined (local dev without configuration).
   const apiKeyGuard = requireApiKey(deps.apiKey);
 
-  app.register(actionsRoutes(svc, apiKeyGuard));
   app.register(healthRoutes(svc));
+  app.register(actionsRoutes(svc, apiKeyGuard));
   app.register(savedPoolsRoutes(savedPoolsSvc));
   app.register(internalRoutes(svc, deps.internalSecret));
   app.register(metricsRoutes(metricsSvc, apiKeyGuard));

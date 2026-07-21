@@ -22,7 +22,7 @@ This map tracks important product and platform areas that should stay covered as
 | Area | Current coverage | Status | Missing coverage to add |
 | --- | --- | --- | --- |
 | Health, env, constants, logging | `backend/tests/health.spec.ts`, `env.spec.ts`, `constants.spec.ts`, `logger.spec.ts` | Covered | Add regression tests whenever new required env vars are introduced |
-| Actions and internal routes | `backend/tests/routes.actions.spec.ts`, `routes.internal.spec.ts`, `middleware.spec.ts`, `security.spec.ts` | Partial | Add unhappy-path tests for malformed payloads, auth failures, and rate limits per route |
+| Actions and internal routes | `backend/tests/routes.actions.spec.ts`, `routes.actions.unhappy.spec.ts`, `routes.internal.spec.ts`, `middleware.spec.ts`, `security.spec.ts` | Covered | Keep regression tests updated on schema/auth changes |
 | Portfolio/dashboard data | `backend/tests/dashboard.spec.ts`, `portfolio.spec.ts`, `portfolio-unit.spec.ts` | Partial | Add tests for empty portfolios, stale indexer data, and multi-vault summaries |
 | Quest and escrow services | `backend/tests/quest.spec.ts`, `escrow.spec.ts` | Partial | Add settlement retry, idempotency, and external API failure coverage |
 | Indexer, ledger, reconciliation | `backend/tests/indexer.spec.ts`, `ledger.spec.ts`, `reconciler.spec.ts`, `pool-status.spec.ts` | Partial | Add checkpoint recovery, duplicate event handling, and partial Horizon outage tests |
