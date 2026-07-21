@@ -4,7 +4,12 @@
 
 ## Linked Issue
 
--
+- Closes #
+
+## Contributor Branch
+
+- [ ] This PR targets `Vaultquest/vaultquest:main` from a branch on my fork.
+- [ ] I did not commit directly to, or force-push, the canonical `main` branch.
 
 ## Validation
 
