@@ -14,9 +14,10 @@
 //! - `withdraw` computes yield-adjusted amount using per-participant lockup_multiplier.
 //! - Early withdrawals revert with `LockupActive`.
 //!
-//! #265 Upgrade path
-//! - New proxy contract in `proxy.rs` stores logic contract + admin.
-//! - `upgrade` is admin-only; direct caller path enforces auth for transparent proxy.
+//! #265/#32 Upgrade path
+//! - Proxy contract in `proxy.rs` stores logic contract + governance metadata.
+//! - Upgrades require signer quorum, an observation timelock, approved hashes,
+//!   migration simulation, invariant checks, and rollback write-preservation.
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Env, Vec,
