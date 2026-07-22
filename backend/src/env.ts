@@ -41,7 +41,9 @@ const schema = z.object({
    */
   BACKUP_DIR: z.string().min(1).optional(),
   BACKUP_RETAIN_DAYS: z.coerce.number().int().positive().default(7),
-  BACKUP_SCHEDULE: z.string().default("0 2 * * *")
+  BACKUP_SCHEDULE: z.string().default("0 2 * * *"),
+  /** Master key used for envelope encryption of PII fields (issue #76). */
+  PRIVACY_MASTER_KEY: z.string().min(16).optional()
 });
 
 export type Env = z.infer<typeof schema>;
@@ -73,7 +75,8 @@ export function getEnv(): Env {
       API_KEY: process.env.API_KEY || undefined,
       BACKUP_DIR: process.env.BACKUP_DIR || undefined,
       BACKUP_RETAIN_DAYS: Number(process.env.BACKUP_RETAIN_DAYS ?? 7),
-      BACKUP_SCHEDULE: process.env.BACKUP_SCHEDULE ?? "0 2 * * *"
+      BACKUP_SCHEDULE: process.env.BACKUP_SCHEDULE ?? "0 2 * * *",
+      PRIVACY_MASTER_KEY: process.env.PRIVACY_MASTER_KEY || undefined
     } satisfies Env;
   }
   return parseEnv();
