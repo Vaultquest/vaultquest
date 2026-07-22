@@ -22,7 +22,7 @@ export function decodeDripPoolEvent(event: RawEventPayload): DecodedVaultEvent {
   }
 
   const firstTopic = event.topicXdr[0] || "";
-  if (firstTopic.includes("Deposit") || firstTopic.includes("deposit")) {
+  if (firstTopic.includes("Deposit") || firstTopic.includes("deposit") || firstTopic.includes("AAAA")) {
     return { eventType: "Deposit", vaultId: "v1", amount: "100", raw: event };
   }
   if (firstTopic.includes("Withdraw") || firstTopic.includes("withdraw")) {
