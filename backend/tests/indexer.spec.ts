@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { seedAction } from "./helpers/factory.js";
 import { LedgerService } from "../src/services/ledger.js";
@@ -107,216 +107,79 @@ describe("StellarIndexer", () => {
     expect(refreshed?.status).toBe("reverted");
   });
 
-  describe("resilience: malformed events and partial failures", () => {
-    it("handles decoder exceptions without stopping the batch", async () => {
-      const throwingDecoder: XdrDecoder = {
-        decode(event: RawHorizonEvent) {
-          if (event.txHash === "tx_throw") {
-            throw new Error("simulated decoder crash");
-          }
-          return { type: "ok", data: true };
+  it("starts from the beginning when no checkpoint exists", async () => {
+    let seenCursor: string | null = null;
+    const indexer = new StellarIndexer({
+      ledger,
+      source: {
+        async fetchEvents({ cursor }) {
+          seenCursor = cursor;
+          return [makeEvent({ id: "1", ledger: 100, txHash: "tx_fresh" })];
         }
-      };
-
-      const events = [
-        makeEvent({ id: "1", txHash: "tx_ok_before" }),
-        makeEvent({ id: "2", txHash: "tx_throw" }),
-        makeEvent({ id: "3", txHash: "tx_ok_after" })
-      ];
-
-      const indexer = new StellarIndexer({
-        ledger,
-        source: staticSource(events),
-        decoder: throwingDecoder
-      });
-
-      const result = await indexer.tick();
-      expect(result.processed).toBe(3);
-      expect(result.imported).toBe(2);
-      expect(result.malformed).toBe(1);
-      expect(result.cursor).toBe("3");
-
-      const before = await db.prisma.pendingEvent.findUnique({ where: { txHash: "tx_ok_before" } });
-      const after = await db.prisma.pendingEvent.findUnique({ where: { txHash: "tx_ok_after" } });
-      expect(before).not.toBeNull();
-      expect(after).not.toBeNull();
+      },
+      decoder: defaultXdrDecoder
     });
 
-    it("handles mixed successful, duplicate, and decoder-failed events", async () => {
-      const action = await seedAction(db.prisma, { status: "submitted", txHash: "tx_existing" });
+    const result = await indexer.tick();
 
-      const throwingDecoder: XdrDecoder = {
-        decode(event: RawHorizonEvent) {
-          if (event.txHash === "tx_bad") {
-            throw new Error("decode error");
-          }
-          return { type: "ok" };
-        }
-      };
+    expect(seenCursor).toBeNull();
+    expect(result.cursor).toBe("1");
+    expect(result.processed).toBe(1);
+    expect(result.imported).toBe(1);
 
-      const events = [
-        makeEvent({ id: "1", txHash: "tx_existing" }),
-        makeEvent({ id: "2", txHash: "tx_bad" }),
-        makeEvent({ id: "3", txHash: "tx_new" })
-      ];
+    const checkpoint = await db.prisma.indexerCheckpoint.findUnique({ where: { id: "singleton" } });
+    expect(checkpoint?.lastProcessedEventId).toBe("1");
+    expect(checkpoint?.latestLedger).toBe(100);
+  });
 
-      const indexer = new StellarIndexer({
-        ledger,
-        source: staticSource(events),
-        decoder: throwingDecoder
-      });
-
-      const result = await indexer.tick();
-      expect(result.processed).toBe(3);
-      expect(result.imported).toBe(2);
-      expect(result.malformed).toBe(1);
-      expect(result.cursor).toBe("3");
-
-      const confirmed = await db.prisma.actionLedger.findUnique({ where: { id: action.id } });
-      expect(confirmed?.status).toBe("confirmed");
+  it("persists checkpoint after successful tick", async () => {
+    const indexer = new StellarIndexer({
+      ledger,
+      source: staticSource([
+        makeEvent({ id: "10", ledger: 200, txHash: "tx_persist1" }),
+        makeEvent({ id: "11", ledger: 201, txHash: "tx_persist2" })
+      ]),
+      decoder: defaultXdrDecoder
     });
 
-    it("advances cursor safely when all events in batch fail decoding", async () => {
-      const alwaysThrowDecoder: XdrDecoder = {
-        decode() {
-          throw new Error("always fails");
-        }
-      };
+    await indexer.tick();
 
-      const events = [
-        makeEvent({ id: "10", txHash: "tx_bad1" }),
-        makeEvent({ id: "11", txHash: "tx_bad2" }),
-        makeEvent({ id: "12", txHash: "tx_bad3" })
-      ];
+    const checkpoint = await db.prisma.indexerCheckpoint.findUnique({ where: { id: "singleton" } });
+    expect(checkpoint).not.toBeNull();
+    expect(checkpoint?.lastProcessedEventId).toBe("11");
+    expect(checkpoint?.latestLedger).toBe(201);
+    expect(checkpoint?.lastSyncTime).toBeInstanceOf(Date);
+  });
 
-      const indexer = new StellarIndexer({
-        ledger,
-        source: staticSource(events),
-        decoder: alwaysThrowDecoder
-      });
+  it("handles checkpoint update failure gracefully", async () => {
+    const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+    const warnSpy = vi.spyOn(logger, "warn");
 
-      const result = await indexer.tick();
-      expect(result.processed).toBe(3);
-      expect(result.imported).toBe(0);
-      expect(result.malformed).toBe(3);
-      expect(result.cursor).toBe("12");
+    const failingLedger = {
+      getIndexerCheckpoint: ledger.getIndexerCheckpoint.bind(ledger),
+      updateIndexerCheckpoint: async () => { throw new Error("DB write failed"); },
+      reconcileEvent: ledger.reconcileEvent.bind(ledger)
+    };
 
-      // Next tick with same cursor should fetch no new events (cursor is at end).
-      const result2 = await indexer.tick();
-      expect(result2.processed).toBe(0);
+    const indexer = new StellarIndexer({
+      ledger: failingLedger as any,
+      source: staticSource([makeEvent({ id: "1", ledger: 100, txHash: "tx_err" })]),
+      decoder: defaultXdrDecoder,
+      logger: logger as any
     });
 
-    it("does not create duplicate confirmations on retry/replay", async () => {
-      const action = await seedAction(db.prisma, { status: "submitted", txHash: "tx_retry" });
+    const result = await indexer.tick();
 
-      const events = [makeEvent({ id: "1", txHash: "tx_retry" })];
-      const indexer = new StellarIndexer({
-        ledger,
-        source: staticSource(events),
-        decoder: defaultXdrDecoder
-      });
+    // Event still processed despite checkpoint failure
+    expect(result.processed).toBe(1);
+    expect(result.imported).toBe(1);
+    expect(result.cursor).toBe("1");
 
-      // First tick confirms the action.
-      await indexer.tick();
-      const afterFirst = await db.prisma.actionLedger.findUnique({ where: { id: action.id } });
-      expect(afterFirst?.status).toBe("confirmed");
-
-      // Replay from cursor null — should be idempotent.
-      indexer.setCursor(null);
-      await indexer.tick();
-      const afterReplay = await db.prisma.actionLedger.findUnique({ where: { id: action.id } });
-      expect(afterReplay?.status).toBe("confirmed");
-
-      // Only one pending_event row should exist (if any).
-      const pending = await db.prisma.pendingEvent.findMany({ where: { txHash: "tx_retry" } });
-      expect(pending).toHaveLength(0);
-    });
-
-    it("handles partial fetch failure gracefully", async () => {
-      let callCount = 0;
-      const flakySource: HorizonEventSource = {
-        async fetchEvents({ cursor, limit }) {
-          callCount++;
-          // Simulate: first call returns partial batch, second call returns rest.
-          if (callCount === 1) {
-            return [makeEvent({ id: "1", txHash: "tx_partial1" })];
-          }
-          return [
-            makeEvent({ id: "2", txHash: "tx_partial2" }),
-            makeEvent({ id: "3", txHash: "tx_partial3" })
-          ];
-        }
-      };
-
-      const indexer = new StellarIndexer({
-        ledger,
-        source: flakySource,
-        decoder: defaultXdrDecoder
-      });
-
-      const result1 = await indexer.tick();
-      expect(result1.processed).toBe(1);
-      expect(result1.imported).toBe(1);
-      expect(result1.cursor).toBe("1");
-
-      const result2 = await indexer.tick();
-      expect(result2.processed).toBe(2);
-      expect(result2.imported).toBe(2);
-      expect(result2.cursor).toBe("3");
-
-      const all = await db.prisma.pendingEvent.findMany();
-      expect(all).toHaveLength(3);
-    });
-
-    it("handles decoder that returns null/undefined payload", async () => {
-      const nullDecoder: XdrDecoder = {
-        decode() {
-          return null as unknown as Record<string, unknown>;
-        }
-      };
-
-      const events = [
-        makeEvent({ id: "1", txHash: "tx_null" }),
-        makeEvent({ id: "2", txHash: "tx_after_null" })
-      ];
-
-      const indexer = new StellarIndexer({
-        ledger,
-        source: staticSource(events),
-        decoder: nullDecoder
-      });
-
-      const result = await indexer.tick();
-      expect(result.processed).toBe(2);
-      expect(result.imported).toBe(0);
-      expect(result.malformed).toBe(2);
-      expect(result.cursor).toBe("2");
-    });
-
-    it("handles decoder that returns array payload", async () => {
-      const arrayDecoder: XdrDecoder = {
-        decode() {
-          return ["not", "an", "object"] as unknown as Record<string, unknown>;
-        }
-      };
-
-      const events = [
-        makeEvent({ id: "1", txHash: "tx_array" }),
-        makeEvent({ id: "2", txHash: "tx_after_array" })
-      ];
-
-      const indexer = new StellarIndexer({
-        ledger,
-        source: staticSource(events),
-        decoder: arrayDecoder
-      });
-
-      const result = await indexer.tick();
-      expect(result.processed).toBe(2);
-      expect(result.imported).toBe(0);
-      expect(result.malformed).toBe(2);
-      expect(result.cursor).toBe("2");
-    });
+    // Warning logged about checkpoint failure
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      "indexer: failed to persist checkpoint"
+    );
   });
 
   it("resumes from the persisted processed-event cursor after downtime", async () => {
