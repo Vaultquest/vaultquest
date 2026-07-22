@@ -18,6 +18,8 @@
 //! - Proxy contract in `proxy.rs` stores logic contract + governance metadata.
 //! - Upgrades require signer quorum, an observation timelock, approved hashes,
 //!   migration simulation, invariant checks, and rollback write-preservation.
+//!
+//! #72 Share-based NAV vault (`shares.rs` + the `vault_*` methods below) — additive, on its own storage keys.
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Env, Vec,
@@ -39,6 +41,17 @@ pub enum DataKey {
     Pool,
     Participant(Address),
     Proposal(u32), // pending admin proposal
+
+    // ── #72: share-based NAV vault ──
+    VaultShares,
+    ShareBalance(Address),
+    WithdrawalNonce,
+    WithdrawalRequest(u32),
+    WithdrawalOwner(u32),
+    FeeRecipient,
+    DustBeneficiary,
+    ManagementFeeBps,
+    PerformanceFeeBps,
 }
 
 // ── Errors ─────────────────────────────────────────────────────────────────
@@ -57,6 +70,15 @@ pub enum Error {
     ThresholdNotMet = 9, // not enough signatures
     AlreadySigned = 10,  // signer already approved this proposal
     ProposalNotFound = 11,
+    StaleSnapshot = 12, // NAV snapshot version moved under the caller
+    RoundsToZero = 13,  // amount too small to produce a non-zero result
+    InsufficientShares = 14,
+    MathOverflow = 15,
+    NothingToSweep = 16,
+    WithdrawalNotFound = 17,
+    WithdrawalAlreadySettled = 18,
+    ExceedsOwed = 19,         // fulfillment amount exceeds what's still owed
+    InsufficientBalance = 20, // vault-side balance can't cover this amount
 }
 
 // ── Structs ────────────────────────────────────────────────────────────────
@@ -522,6 +544,404 @@ impl DripPool {
             .get(&DataKey::Admins)
             .unwrap_or(vec![&env])
     }
+
+    // ── #72: share-based NAV vault — additive, its own storage keys ──────────
+
+    pub fn vault_init(env: Env, caller: Address) -> Result<(), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        if env.storage().instance().has(&DataKey::VaultShares) {
+            return Err(Error::AlreadyInitialized);
+        }
+        let snapshot = shares::VaultSnapshot::new(env.ledger().timestamp())?;
+        env.storage()
+            .instance()
+            .set(&DataKey::VaultShares, &snapshot);
+        env.storage()
+            .instance()
+            .set(&DataKey::WithdrawalNonce, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeRecipient, &caller);
+        env.storage()
+            .instance()
+            .set(&DataKey::DustBeneficiary, &caller);
+        env.storage()
+            .instance()
+            .set(&DataKey::ManagementFeeBps, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::PerformanceFeeBps, &0u32);
+        env.events()
+            .publish((symbol_short!("vault"), symbol_short!("init")), caller);
+        Ok(())
+    }
+
+    fn load_vault(env: &Env) -> Result<shares::VaultSnapshot, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::VaultShares)
+            .ok_or(Error::NotInitialized)
+    }
+
+    fn save_vault(env: &Env, snapshot: &shares::VaultSnapshot) {
+        env.storage()
+            .instance()
+            .set(&DataKey::VaultShares, snapshot);
+    }
+
+    fn fee_config(env: &Env) -> Result<(u32, u32), Error> {
+        let management: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ManagementFeeBps)
+            .ok_or(Error::NotInitialized)?;
+        let performance: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PerformanceFeeBps)
+            .ok_or(Error::NotInitialized)?;
+        Ok((management, performance))
+    }
+
+    /// Runs before any share-supply change so no depositor/withdrawer can dodge an owed fee.
+    fn checkpoint_fees(env: &Env, snapshot: &mut shares::VaultSnapshot) -> Result<(), Error> {
+        let (management_bps, performance_bps) = Self::fee_config(env)?;
+
+        let management_fee =
+            shares::accrue_management_fee(snapshot, env.ledger().timestamp(), management_bps)?;
+        if management_fee > 0 {
+            env.events().publish(
+                (symbol_short!("vault"), symbol_short!("mgmtfee")),
+                (management_fee, snapshot.version),
+            );
+        }
+
+        let performance_fee = shares::accrue_performance_fee(snapshot, performance_bps)?;
+        if performance_fee > 0 {
+            env.events().publish(
+                (symbol_short!("vault"), symbol_short!("perffee")),
+                (performance_fee, snapshot.high_water_mark),
+            );
+        }
+        Ok(())
+    }
+
+    pub fn vault_preview_deposit(env: Env, assets: i128) -> Result<i128, Error> {
+        shares::preview_deposit(&Self::load_vault(&env)?, assets)
+    }
+
+    pub fn vault_preview_redeem(env: Env, shares_amount: i128) -> Result<i128, Error> {
+        shares::preview_redeem(&Self::load_vault(&env)?, shares_amount)
+    }
+
+    pub fn vault_preview_mint(env: Env, shares_amount: i128) -> Result<i128, Error> {
+        shares::preview_mint(&Self::load_vault(&env)?, shares_amount)
+    }
+
+    pub fn vault_preview_withdraw(env: Env, assets: i128) -> Result<i128, Error> {
+        shares::preview_withdraw(&Self::load_vault(&env)?, assets)
+    }
+
+    pub fn vault_deposit(
+        env: Env,
+        who: Address,
+        assets: i128,
+        expected_version: u64,
+    ) -> Result<i128, Error> {
+        who.require_auth();
+        let mut snapshot = Self::load_vault(&env)?;
+        if snapshot.version != expected_version {
+            return Err(Error::StaleSnapshot);
+        }
+        Self::checkpoint_fees(&env, &mut snapshot)?;
+        // Already validated above — checkpoint_fees' own version bumps must not re-trip this.
+        let post_checkpoint_version = snapshot.version;
+        let receipt = shares::deposit(&mut snapshot, assets, post_checkpoint_version)?;
+
+        let balance_key = DataKey::ShareBalance(who.clone());
+        let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&balance_key, &(balance + receipt.shares_minted));
+
+        Self::save_vault(&env, &snapshot);
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("deposit")),
+            (who, assets, receipt.shares_minted, snapshot.version),
+        );
+        Ok(receipt.shares_minted)
+    }
+
+    pub fn vault_request_withdrawal(
+        env: Env,
+        who: Address,
+        shares_amount: i128,
+        expected_version: u64,
+    ) -> Result<u32, Error> {
+        who.require_auth();
+        let mut snapshot = Self::load_vault(&env)?;
+        if snapshot.version != expected_version {
+            return Err(Error::StaleSnapshot);
+        }
+        Self::checkpoint_fees(&env, &mut snapshot)?;
+
+        let balance_key = DataKey::ShareBalance(who.clone());
+        let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        if shares_amount > balance {
+            return Err(Error::InsufficientShares);
+        }
+
+        // Already validated above — checkpoint_fees' own version bumps must not re-trip this.
+        let post_checkpoint_version = snapshot.version;
+        let request =
+            shares::request_withdrawal(&mut snapshot, shares_amount, post_checkpoint_version)?;
+        env.storage()
+            .persistent()
+            .set(&balance_key, &(balance - shares_amount));
+
+        let nonce: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::WithdrawalNonce)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::WithdrawalNonce, &(nonce + 1));
+        env.storage()
+            .persistent()
+            .set(&DataKey::WithdrawalRequest(nonce), &request);
+        env.storage()
+            .persistent()
+            .set(&DataKey::WithdrawalOwner(nonce), &who);
+
+        Self::save_vault(&env, &snapshot);
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("requested")),
+            (who, nonce, shares_amount, request.assets_owed),
+        );
+        Ok(nonce)
+    }
+
+    /// Callable by the request's own owner (self-service) or any approved signer (batching).
+    pub fn vault_fulfill_withdrawal(
+        env: Env,
+        caller: Address,
+        request_id: u32,
+        amount: i128,
+    ) -> Result<i128, Error> {
+        caller.require_auth();
+        let owner: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::WithdrawalOwner(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        if caller != owner {
+            Self::require_signer(&env, &caller)?;
+        }
+
+        let mut request: shares::WithdrawalRequest = env
+            .storage()
+            .persistent()
+            .get(&DataKey::WithdrawalRequest(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        let mut snapshot = Self::load_vault(&env)?;
+        let paid = shares::fulfill_withdrawal(&mut snapshot, &mut request, amount)?;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::WithdrawalRequest(request_id), &request);
+        Self::save_vault(&env, &snapshot);
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("fulfilled")),
+            (request_id, paid, request.assets_owed - request.assets_paid),
+        );
+        Ok(paid)
+    }
+
+    pub fn vault_accrue_management_fee(env: Env, caller: Address) -> Result<i128, Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        let mut snapshot = Self::load_vault(&env)?;
+        let (management_bps, _) = Self::fee_config(&env)?;
+        let fee =
+            shares::accrue_management_fee(&mut snapshot, env.ledger().timestamp(), management_bps)?;
+        Self::save_vault(&env, &snapshot);
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("mgmtfee")),
+            (fee, snapshot.version),
+        );
+        Ok(fee)
+    }
+
+    pub fn vault_accrue_performance_fee(env: Env, caller: Address) -> Result<i128, Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        let mut snapshot = Self::load_vault(&env)?;
+        let (_, performance_bps) = Self::fee_config(&env)?;
+        let fee = shares::accrue_performance_fee(&mut snapshot, performance_bps)?;
+        Self::save_vault(&env, &snapshot);
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("perffee")),
+            (fee, snapshot.high_water_mark),
+        );
+        Ok(fee)
+    }
+
+    pub fn vault_report_gain(env: Env, caller: Address, amount: i128) -> Result<(), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        let mut snapshot = Self::load_vault(&env)?;
+        shares::report_gain(&mut snapshot, amount)?;
+        Self::save_vault(&env, &snapshot);
+        env.events()
+            .publish((symbol_short!("vault"), symbol_short!("gain")), amount);
+        Ok(())
+    }
+
+    pub fn vault_report_loss(env: Env, caller: Address, amount: i128) -> Result<(), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        let mut snapshot = Self::load_vault(&env)?;
+        shares::report_loss(&mut snapshot, amount)?;
+        Self::save_vault(&env, &snapshot);
+        env.events()
+            .publish((symbol_short!("vault"), symbol_short!("loss")), amount);
+        Ok(())
+    }
+
+    pub fn vault_note_donation(env: Env, caller: Address, amount: i128) -> Result<(), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        let mut snapshot = Self::load_vault(&env)?;
+        shares::note_donation(&mut snapshot, amount)?;
+        Self::save_vault(&env, &snapshot);
+        env.events()
+            .publish((symbol_short!("vault"), symbol_short!("noted")), amount);
+        Ok(())
+    }
+
+    pub fn vault_recognize_donation(env: Env, caller: Address, amount: i128) -> Result<(), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        let mut snapshot = Self::load_vault(&env)?;
+        shares::recognize_donation(&mut snapshot, amount)?;
+        Self::save_vault(&env, &snapshot);
+        env.events()
+            .publish((symbol_short!("vault"), symbol_short!("donation")), amount);
+        Ok(())
+    }
+
+    pub fn vault_sweep_dust(env: Env, caller: Address) -> Result<i128, Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        let mut snapshot = Self::load_vault(&env)?;
+        let amount = shares::sweep_dust(&mut snapshot)?;
+        Self::save_vault(&env, &snapshot);
+        let beneficiary: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::DustBeneficiary)
+            .ok_or(Error::NotInitialized)?;
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("dustswep")),
+            (beneficiary, amount),
+        );
+        Ok(amount)
+    }
+
+    pub fn vault_claim_fees(env: Env, caller: Address, amount: i128) -> Result<(), Error> {
+        caller.require_auth();
+        let recipient: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeRecipient)
+            .ok_or(Error::NotInitialized)?;
+        if caller != recipient {
+            Self::require_signer(&env, &caller)?;
+        }
+        let mut snapshot = Self::load_vault(&env)?;
+        shares::claim_fees(&mut snapshot, amount)?;
+        Self::save_vault(&env, &snapshot);
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("feeclaim")),
+            (recipient, amount),
+        );
+        Ok(())
+    }
+
+    pub fn vault_set_fee_recipient(
+        env: Env,
+        caller: Address,
+        recipient: Address,
+    ) -> Result<(), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeRecipient, &recipient);
+        Ok(())
+    }
+
+    pub fn vault_set_dust_beneficiary(
+        env: Env,
+        caller: Address,
+        beneficiary: Address,
+    ) -> Result<(), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::DustBeneficiary, &beneficiary);
+        Ok(())
+    }
+
+    pub fn vault_set_management_fee_bps(env: Env, caller: Address, bps: u32) -> Result<(), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::ManagementFeeBps, &bps);
+        Ok(())
+    }
+
+    pub fn vault_set_performance_fee_bps(env: Env, caller: Address, bps: u32) -> Result<(), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::PerformanceFeeBps, &bps);
+        Ok(())
+    }
+
+    // ── Views ──
+    pub fn vault_snapshot(env: Env) -> Result<shares::VaultSnapshot, Error> {
+        Self::load_vault(&env)
+    }
+
+    pub fn vault_share_balance(env: Env, who: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ShareBalance(who))
+            .unwrap_or(0)
+    }
+
+    pub fn vault_withdrawal_request(
+        env: Env,
+        request_id: u32,
+    ) -> Result<shares::WithdrawalRequest, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::WithdrawalRequest(request_id))
+            .ok_or(Error::WithdrawalNotFound)
+    }
+
+    pub fn vault_withdrawal_owner(env: Env, request_id: u32) -> Result<Address, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::WithdrawalOwner(request_id))
+            .ok_or(Error::WithdrawalNotFound)
+    }
 }
 
 // VaultProxy shares export names with DripPool (e.g. `create`), and a
@@ -529,6 +949,8 @@ impl DripPool {
 // requires moving it to its own workspace crate. Until then it is compiled
 // for native builds and tests only, keeping the drip-pool wasm unchanged.
 pub mod vault;
+
+pub mod shares;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod proxy;
