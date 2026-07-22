@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::proxy::{
-    Error as ProxyError, UpgradeKind, VaultProxy, VaultProxyClient, WasmProvenance,
+    Error as ProxyError, MigrationCheck, UpgradeKind, VaultProxy, VaultProxyClient, WasmProvenance,
 };
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
 use soroban_sdk::{vec, BytesN, IntoVal, TryFromVal, Vec};
@@ -789,6 +789,14 @@ fn pool_locked_field_starts_false() {
 fn proxy_setup() -> (Env, VaultProxyClient<'static>, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
+    // Upgrade tests advance the ledger sequence past the timelock delay;
+    // give storage entries a TTL long enough that the contract instance
+    // does not archive before execute_upgrade runs.
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 10_000_000;
+        li.min_temp_entry_ttl = 10_000_000;
+        li.max_entry_ttl = 20_000_000;
+    });
     let proxy_id = env.register_contract(None, VaultProxy);
     let client = VaultProxyClient::new(&env, &proxy_id);
     let admin = Address::generate(&env);
@@ -820,6 +828,14 @@ fn provenance(env: &Env, byte: u8) -> WasmProvenance {
     }
 }
 
+fn compatible_migration(env: &Env) -> MigrationCheck {
+    MigrationCheck {
+        plan_hash: hash(env, 10),
+        state_hash: hash(env, 11),
+        compatible: true,
+    }
+}
+
 fn min_upgrade_ledger(env: &Env) -> u32 {
     env.ledger().sequence() + 17_280
 }
@@ -842,10 +858,8 @@ fn propose_proxy_upgrade(
         &client.current_hash(),
         target_hash,
         &2,
-        &hash(env, 10),
-        &hash(env, 11),
+        &compatible_migration(env),
         &min_upgrade_ledger(env),
-        &true,
         &provenance(env, 12),
     )
 }
@@ -875,10 +889,8 @@ fn proxy_upgrade_requires_quorum_and_timelock() {
         &client.current_hash(),
         &target_hash,
         &2,
-        &hash(&env, 10),
-        &hash(&env, 11),
+        &compatible_migration(&env),
         &earliest,
-        &true,
         &provenance(&env, 12),
     );
 
@@ -951,10 +963,12 @@ fn proxy_upgrade_rejects_failed_migration_before_live_mutation() {
             &client.current_hash(),
             &hash(&env, 70),
             &2,
-            &hash(&env, 10),
-            &hash(&env, 11),
+            &MigrationCheck {
+                plan_hash: hash(&env, 10),
+                state_hash: hash(&env, 11),
+                compatible: false,
+            },
             &min_upgrade_ledger(&env),
-            &false,
             &provenance(&env, 12),
         ),
         Err(Ok(ProxyError::MigrationSimulationFailed))
@@ -994,10 +1008,8 @@ fn proxy_rollback_preserves_later_writes() {
         &client.current_hash(),
         &rollback_hash,
         &1,
-        &hash(&env, 10),
-        &hash(&env, 11),
+        &compatible_migration(&env),
         &min_upgrade_ledger(&env),
-        &true,
         &provenance(&env, 12),
     );
     assert!(client.approve_upgrade(&signer2, &pid));
@@ -1028,10 +1040,8 @@ fn proxy_records_reproducible_wasm_provenance() {
         &client.current_hash(),
         &target_hash,
         &2,
-        &hash(&env, 10),
-        &hash(&env, 11),
+        &compatible_migration(&env),
         &min_upgrade_ledger(&env),
-        &true,
         &expected_provenance,
     );
     assert_eq!(
@@ -1059,10 +1069,8 @@ fn proxy_upgrade_unauthorized_fails() {
             &client.current_hash(),
             &target_hash,
             &2,
-            &hash(&env, 10),
-            &hash(&env, 11),
+            &compatible_migration(&env),
             &min_upgrade_ledger(&env),
-            &true,
             &provenance(&env, 12),
         ),
         Err(Ok(ProxyError::Unauthorized))
@@ -1331,4 +1339,389 @@ fn test_deposit_after_lockup_expiration_resets_lockup_window() {
     // Withdrawal succeeds with 1.5x multiplier boost (400 * 150 / 100 = 600)
     let payout = client.withdraw(&alice);
     assert_eq!(payout, 600);
+}
+
+// ── #72: share-based NAV vault ──────────────────────────────────────────────
+
+fn vault_setup() -> (Env, DripPoolClient<'static>, Address) {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.vault_init(&admin);
+    (env, client, admin)
+}
+
+#[test]
+fn vault_init_requires_an_existing_signer() {
+    let (_env, client, admin) = setup();
+    // create() was never called, so Admins is empty and admin isn't a signer.
+    assert_eq!(client.try_vault_init(&admin), Err(Ok(Error::Unauthorized)));
+}
+
+#[test]
+fn vault_init_twice_fails() {
+    let (_env, client, admin) = vault_setup();
+    assert_eq!(
+        client.try_vault_init(&admin),
+        Err(Ok(Error::AlreadyInitialized))
+    );
+}
+
+#[test]
+fn vault_deposit_before_init_fails() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let alice = Address::generate(&env);
+    assert_eq!(
+        client.try_vault_deposit(&alice, &100, &0),
+        Err(Ok(Error::NotInitialized))
+    );
+}
+
+// ── first / last user, single round trip ────────────────────────────────────
+
+#[test]
+fn first_depositor_gets_shares_and_can_fully_exit_as_the_last_holder() {
+    let (env, client, _admin) = vault_setup();
+    let alice = Address::generate(&env);
+
+    let shares = client.vault_deposit(&alice, &1_000_000, &0);
+    assert!(shares > 0);
+    assert_eq!(client.vault_share_balance(&alice), shares);
+
+    let version = client.vault_snapshot().version;
+    let request_id = client.vault_request_withdrawal(&alice, &shares, &version);
+    let request = client.vault_withdrawal_request(&request_id);
+    assert_eq!(request.assets_owed, 1_000_000);
+
+    let paid = client.vault_fulfill_withdrawal(&alice, &request_id, &1_000_000);
+    assert_eq!(paid, 1_000_000);
+    assert_eq!(client.vault_share_balance(&alice), 0);
+    assert_eq!(client.vault_snapshot().total_shares, 0);
+}
+
+#[test]
+fn simultaneous_deposits_get_fair_proportional_shares() {
+    let (env, client, _admin) = vault_setup();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    let alice_shares = client.vault_deposit(&alice, &1_000, &0);
+    let version = client.vault_snapshot().version;
+    let bob_shares = client.vault_deposit(&bob, &1_000, &version);
+
+    assert_eq!(alice_shares, bob_shares);
+}
+
+#[test]
+fn cannot_request_withdrawal_of_more_shares_than_you_personally_own() {
+    let (env, client, _admin) = vault_setup();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.vault_deposit(&alice, &1_000, &0);
+    let v1 = client.vault_snapshot().version;
+    let bob_shares = client.vault_deposit(&bob, &1_000, &v1);
+
+    // Combined total_shares would cover this, but Alice only owns her own share of it.
+    let too_many = bob_shares + 1;
+    let v2 = client.vault_snapshot().version;
+    assert_eq!(
+        client.try_vault_request_withdrawal(&alice, &too_many, &v2),
+        Err(Ok(Error::InsufficientShares))
+    );
+}
+
+// ── stale NAV / preview-matches-execution ───────────────────────────────────
+
+#[test]
+fn stale_snapshot_version_is_rejected() {
+    let (env, client, _admin) = vault_setup();
+    let alice = Address::generate(&env);
+    client.vault_deposit(&alice, &1_000, &0);
+    // The version has already moved on — depositing against stale version 0 again must fail.
+    assert_eq!(
+        client.try_vault_deposit(&alice, &500, &0),
+        Err(Ok(Error::StaleSnapshot))
+    );
+}
+
+#[test]
+fn preview_matches_execution_when_version_unchanged() {
+    let (env, client, _admin) = vault_setup();
+    let alice = Address::generate(&env);
+    client.vault_deposit(&alice, &10_000, &0);
+
+    let version = client.vault_snapshot().version;
+    let previewed = client.vault_preview_deposit(&2_000);
+    let executed = client.vault_deposit(&alice, &2_000, &version);
+    assert_eq!(previewed, executed);
+}
+
+// ── gain / loss cycles and the high-water mark ──────────────────────────────
+
+#[test]
+fn gain_loss_cycle_and_high_water_mark_via_contract_calls() {
+    let (env, client, admin) = vault_setup();
+    client.vault_set_performance_fee_bps(&admin, &2_000); // 20%
+    let alice = Address::generate(&env);
+    client.vault_deposit(&alice, &1_000_000, &0);
+
+    client.vault_report_gain(&admin, &500_000);
+    let first_charge = client.vault_accrue_performance_fee(&admin);
+    assert!(first_charge > 0);
+
+    // No new gain since the last checkpoint — must charge nothing.
+    assert_eq!(client.vault_accrue_performance_fee(&admin), 0);
+
+    client.vault_report_loss(&admin, &300_000);
+    assert_eq!(
+        client.vault_accrue_performance_fee(&admin),
+        0,
+        "a drawdown below the high-water mark owes nothing"
+    );
+
+    client.vault_report_gain(&admin, &500_000);
+    let recovery_charge = client.vault_accrue_performance_fee(&admin);
+    assert!(
+        recovery_charge > 0,
+        "only the recovery past the prior peak is taxable"
+    );
+
+    assert!(client.vault_snapshot().accrued_fees > 0);
+}
+
+#[test]
+fn only_a_signer_can_report_gain_or_loss() {
+    let (env, client, _admin) = vault_setup();
+    let rando = Address::generate(&env);
+    assert_eq!(
+        client.try_vault_report_gain(&rando, &100),
+        Err(Ok(Error::Unauthorized))
+    );
+    assert_eq!(
+        client.try_vault_report_loss(&rando, &100),
+        Err(Ok(Error::Unauthorized))
+    );
+}
+
+#[test]
+fn management_and_performance_fees_default_off_and_are_governance_configurable() {
+    let (env, client, admin) = vault_setup();
+    assert_eq!(client.vault_snapshot().accrued_fees, 0);
+
+    let alice = Address::generate(&env);
+    client.vault_deposit(&alice, &1_000_000, &0);
+    client.vault_report_gain(&admin, &500_000);
+    // Rates are 0 by default — accruing charges nothing until configured.
+    client.vault_accrue_performance_fee(&admin);
+    assert_eq!(client.vault_snapshot().accrued_fees, 0);
+
+    client.vault_set_performance_fee_bps(&admin, &1_000);
+    client.vault_report_gain(&admin, &1);
+    assert!(client.vault_accrue_performance_fee(&admin) > 0);
+}
+
+// ── partial withdrawal queue ─────────────────────────────────────────────────
+
+#[test]
+fn partial_withdrawal_queue_across_multiple_fulfillments() {
+    let (env, client, admin) = vault_setup();
+    let alice = Address::generate(&env);
+    let shares = client.vault_deposit(&alice, &1_000, &0);
+
+    let version = client.vault_snapshot().version;
+    let request_id = client.vault_request_withdrawal(&alice, &shares, &version);
+
+    let paid1 = client.vault_fulfill_withdrawal(&alice, &request_id, &400);
+    assert_eq!(paid1, 400);
+    // The admin can also batch the rest of the queue as liquidity frees up.
+    let paid2 = client.vault_fulfill_withdrawal(&admin, &request_id, &600);
+    assert_eq!(paid2, 600);
+
+    let request = client.vault_withdrawal_request(&request_id);
+    assert_eq!(request.assets_paid, request.assets_owed);
+    assert_eq!(
+        client.try_vault_fulfill_withdrawal(&admin, &request_id, &1),
+        Err(Ok(Error::WithdrawalAlreadySettled))
+    );
+}
+
+#[test]
+fn fulfill_withdrawal_requires_the_owner_or_an_approved_signer() {
+    let (env, client, _admin) = vault_setup();
+    let alice = Address::generate(&env);
+    let shares = client.vault_deposit(&alice, &1_000, &0);
+    let version = client.vault_snapshot().version;
+    let request_id = client.vault_request_withdrawal(&alice, &shares, &version);
+
+    let rando = Address::generate(&env);
+    assert_eq!(
+        client.try_vault_fulfill_withdrawal(&rando, &request_id, &100),
+        Err(Ok(Error::Unauthorized))
+    );
+}
+
+// ── donation isolation / inflation-attack resistance ────────────────────────
+
+#[test]
+fn donation_is_invisible_until_recognized() {
+    let (env, client, admin) = vault_setup();
+    let alice = Address::generate(&env);
+    client.vault_deposit(&alice, &1_000, &0);
+    let shares = client.vault_share_balance(&alice);
+    let price_before = client.vault_preview_redeem(&shares);
+
+    client.vault_note_donation(&admin, &1_000_000);
+    assert_eq!(client.vault_preview_redeem(&shares), price_before);
+
+    client.vault_recognize_donation(&admin, &1_000_000);
+    assert!(client.vault_preview_redeem(&shares) > price_before);
+}
+
+#[test]
+fn donation_attack_does_not_rob_the_second_depositor() {
+    let (env, client, admin) = vault_setup();
+    let attacker = Address::generate(&env);
+    let victim = Address::generate(&env);
+
+    client.vault_deposit(&attacker, &1, &0);
+    client.vault_note_donation(&admin, &1_000_000_000);
+    client.vault_recognize_donation(&admin, &1_000_000_000);
+
+    let version = client.vault_snapshot().version;
+    let victim_deposit = 1_000_000;
+    let victim_shares = client.vault_deposit(&victim, &victim_deposit, &version);
+    assert!(
+        victim_shares > 0,
+        "victim must receive non-zero shares for a real deposit"
+    );
+
+    let redeemable = client.vault_preview_redeem(&victim_shares);
+    assert!(redeemable * 100 >= victim_deposit * 99);
+}
+
+// ── tiny amounts / decimal mismatch ──────────────────────────────────────────
+
+#[test]
+fn tiny_deposit_after_a_large_supply_still_gets_fair_shares() {
+    let (env, client, _admin) = vault_setup();
+    let whale = Address::generate(&env);
+    client.vault_deposit(&whale, &1_000_000_000, &0);
+
+    let minnow = Address::generate(&env);
+    let version = client.vault_snapshot().version;
+    let minnow_shares = client.vault_deposit(&minnow, &1, &version);
+    assert!(minnow_shares > 0);
+}
+
+// ── dust and fee claims ──────────────────────────────────────────────────────
+
+#[test]
+fn dust_sweep_pays_the_configured_beneficiary() {
+    let (env, client, admin) = vault_setup();
+    let alice = Address::generate(&env);
+    client.vault_deposit(&alice, &1_000_000, &0);
+    client.vault_report_gain(&admin, &1);
+    let shares = client.vault_share_balance(&alice);
+    let version = client.vault_snapshot().version;
+    client.vault_request_withdrawal(&alice, &shares, &version);
+
+    assert_eq!(client.vault_snapshot().dust, 1);
+    let swept = client.vault_sweep_dust(&admin);
+    assert_eq!(swept, 1);
+    assert_eq!(client.vault_snapshot().dust, 0);
+}
+
+#[test]
+fn claim_fees_pays_the_configured_recipient_and_cannot_exceed_accrued() {
+    let (env, client, admin) = vault_setup();
+    let alice = Address::generate(&env);
+    client.vault_deposit(&alice, &1_000_000, &0);
+    client.vault_set_performance_fee_bps(&admin, &2_000);
+    client.vault_report_gain(&admin, &500_000);
+    client.vault_accrue_performance_fee(&admin);
+
+    let accrued = client.vault_snapshot().accrued_fees;
+    assert!(accrued > 0);
+    assert_eq!(
+        client.try_vault_claim_fees(&admin, &(accrued + 1)),
+        Err(Ok(Error::InsufficientBalance))
+    );
+    client.vault_claim_fees(&admin, &accrued);
+    assert_eq!(client.vault_snapshot().accrued_fees, 0);
+}
+
+// ── event emission ───────────────────────────────────────────────────────────
+
+#[test]
+fn vault_deposit_emits_event() {
+    let (env, client, _admin) = vault_setup();
+    let alice = Address::generate(&env);
+    let shares = client.vault_deposit(&alice, &500, &0);
+    let version = client.vault_snapshot().version;
+
+    let events = env.events().all();
+    let deposit_event = events.iter().find(|(_, topics, _)| {
+        *topics
+            == vec![
+                &env,
+                symbol_short!("vault").into_val(&env),
+                symbol_short!("deposit").into_val(&env),
+            ]
+    });
+    let (_, _, payload) = deposit_event.expect("vault deposit event not found");
+    let val: (Address, i128, i128, u64) =
+        <(Address, i128, i128, u64)>::try_from_val(&env, &payload).unwrap();
+    assert_eq!(val, (alice.clone(), 500i128, shares, version));
+}
+
+#[test]
+fn vault_fulfill_withdrawal_emits_event() {
+    let (env, client, _admin) = vault_setup();
+    let alice = Address::generate(&env);
+    let shares = client.vault_deposit(&alice, &1_000, &0);
+    let version = client.vault_snapshot().version;
+    let request_id = client.vault_request_withdrawal(&alice, &shares, &version);
+    client.vault_fulfill_withdrawal(&alice, &request_id, &400);
+
+    let events = env.events().all();
+    let fulfilled_event = events.iter().find(|(_, topics, _)| {
+        *topics
+            == vec![
+                &env,
+                symbol_short!("vault").into_val(&env),
+                symbol_short!("fulfilled").into_val(&env),
+            ]
+    });
+    let (_, _, payload) = fulfilled_event.expect("vault fulfilled event not found");
+    let val: (u32, i128, i128) = <(u32, i128, i128)>::try_from_val(&env, &payload).unwrap();
+    assert_eq!(val, (request_id, 400i128, 600i128));
+}
+
+// ── end-to-end value conservation ────────────────────────────────────────────
+
+#[test]
+fn value_conservation_across_a_realistic_multi_user_scenario() {
+    let (env, client, admin) = vault_setup();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    client.vault_deposit(&alice, &1_000_000, &0);
+    let v1 = client.vault_snapshot().version;
+    client.vault_deposit(&bob, &2_000_000, &v1);
+    client.vault_report_gain(&admin, &300_000);
+
+    let alice_shares = client.vault_share_balance(&alice);
+    let v2 = client.vault_snapshot().version;
+    let request_id = client.vault_request_withdrawal(&alice, &alice_shares, &v2);
+    let owed = client.vault_withdrawal_request(&request_id).assets_owed;
+    client.vault_fulfill_withdrawal(&alice, &request_id, &owed);
+
+    let snap = client.vault_snapshot();
+    assert_eq!(client.vault_share_balance(&alice), 0);
+    assert!(snap.total_shares > 0, "Bob's shares remain outstanding");
+    assert_eq!(snap.pending_withdrawals, 0);
+    assert_eq!(
+        snap.total_assets + snap.dust,
+        1_000_000 + 2_000_000 + 300_000 - owed
+    );
 }
