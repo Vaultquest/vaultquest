@@ -8,6 +8,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 import { RETRYABLE_RESULT_CODES, SETTLEMENT_RETRY, ERROR_CODES } from "../constants.js";
+import { verifyRuntimeAbiCompatibility } from "./contractGuard.js";
 
 // ─── External dependency interfaces ──────────────────────────────────────────
 
@@ -111,6 +112,10 @@ export class EscrowService {
    */
   async settleVault(input: SettleVaultInput): Promise<SettleVaultOutcome> {
     const { prisma, horizon, signer, assembler, networkPassphrase } = this.deps;
+
+    if (process.env.CONTRACT_WASM_HASH) {
+      verifyRuntimeAbiCompatibility(process.env.CONTRACT_WASM_HASH, networkPassphrase);
+    }
 
     // ── Idempotency check ─────────────────────────────────────────────────
     const existing = await prisma.vaultSettlement.findUnique({
