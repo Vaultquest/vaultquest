@@ -3,9 +3,11 @@
 //! Multisig signer rotation, revoked-signer and threshold coverage.
 
 use super::*;
-use crate::proxy::{Error as ProxyError, VaultProxy, VaultProxyClient};
+use crate::proxy::{
+    Error as ProxyError, UpgradeKind, VaultProxy, VaultProxyClient, WasmProvenance,
+};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
-use soroban_sdk::{IntoVal, TryFromVal};
+use soroban_sdk::{vec, BytesN, IntoVal, TryFromVal, Vec};
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -784,42 +786,285 @@ fn pool_locked_field_starts_false() {
 
 // ── #265: proxy upgrade tests ─────────────────────────────────────────────
 
-fn proxy_setup() -> (Env, VaultProxyClient<'static>, Address, Address) {
+fn proxy_setup() -> (Env, VaultProxyClient<'static>, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
     let proxy_id = env.register_contract(None, VaultProxy);
     let client = VaultProxyClient::new(&env, &proxy_id);
     let admin = Address::generate(&env);
+    let signer2 = Address::generate(&env);
     let logic = Address::generate(&env);
-    (env, client, admin, logic)
+    (env, client, admin, signer2, logic)
+}
+
+fn init_proxy(
+    env: &Env,
+    client: &VaultProxyClient<'static>,
+    admin: &Address,
+    signer2: &Address,
+    logic: &Address,
+) {
+    let signers: Vec<Address> = vec![env, admin.clone(), signer2.clone()];
+    client.create_governed(admin, logic, &signers);
+}
+
+fn hash(env: &Env, byte: u8) -> BytesN<32> {
+    BytesN::from_array(env, &[byte; 32])
+}
+
+fn provenance(env: &Env, byte: u8) -> WasmProvenance {
+    WasmProvenance {
+        source_hash: hash(env, byte),
+        build_recipe_hash: hash(env, byte + 1),
+        compiler_hash: hash(env, byte + 2),
+    }
+}
+
+fn min_upgrade_ledger(env: &Env) -> u32 {
+    env.ledger().sequence() + 17_280
+}
+
+fn skip_to_ledger(env: &Env, sequence: u32) {
+    env.ledger().with_mut(|li| li.sequence_number = sequence);
+}
+
+fn propose_proxy_upgrade(
+    env: &Env,
+    client: &VaultProxyClient<'static>,
+    signer: &Address,
+    logic: &Address,
+    target_hash: &BytesN<32>,
+) -> u32 {
+    client.propose_upgrade(
+        signer,
+        &UpgradeKind::Forward,
+        logic,
+        &client.current_hash(),
+        target_hash,
+        &2,
+        &hash(env, 10),
+        &hash(env, 11),
+        &min_upgrade_ledger(env),
+        &true,
+        &provenance(env, 12),
+    )
 }
 
 #[test]
 fn proxy_create_initialises() {
-    let (_env, client, admin, logic) = proxy_setup();
-    client.create(&admin, &logic);
+    let (env, client, admin, signer2, logic) = proxy_setup();
+    init_proxy(&env, &client, &admin, &signer2, &logic);
     assert_eq!(client.admin(), admin);
     assert_eq!(client.logic_contract(), logic);
+    assert_eq!(client.schema_version(), 1);
+    assert_eq!(client.signers().len(), 2);
 }
 
 #[test]
-fn proxy_upgrade_changes_logic() {
-    let (env, client, admin, logic1) = proxy_setup();
+fn proxy_upgrade_requires_quorum_and_timelock() {
+    let (env, client, admin, signer2, logic1) = proxy_setup();
+    init_proxy(&env, &client, &admin, &signer2, &logic1);
+
     let logic2 = Address::generate(&env);
-    client.create(&admin, &logic1);
+    let target_hash = hash(&env, 42);
+    let earliest = min_upgrade_ledger(&env);
+    let pid = client.propose_upgrade(
+        &admin,
+        &UpgradeKind::Forward,
+        &logic2,
+        &client.current_hash(),
+        &target_hash,
+        &2,
+        &hash(&env, 10),
+        &hash(&env, 11),
+        &earliest,
+        &true,
+        &provenance(&env, 12),
+    );
+
+    assert_eq!(
+        client.try_execute_upgrade(&admin, &pid, &target_hash, &true, &true),
+        Err(Ok(ProxyError::ThresholdNotMet))
+    );
+
+    assert!(client.approve_upgrade(&signer2, &pid));
+    assert_eq!(
+        client.try_execute_upgrade(&admin, &pid, &target_hash, &true, &true),
+        Err(Ok(ProxyError::TimelockActive))
+    );
+
+    skip_to_ledger(&env, earliest);
+    client.execute_upgrade(&admin, &pid, &target_hash, &true, &true);
+    assert_eq!(client.logic_contract(), logic2);
+    assert_eq!(client.current_hash(), target_hash);
+    assert_eq!(client.schema_version(), 2);
+}
+
+#[test]
+fn proxy_upgrade_rejects_substituted_artifact_hash() {
+    let (env, client, admin, signer2, logic1) = proxy_setup();
+    init_proxy(&env, &client, &admin, &signer2, &logic1);
+
+    let logic2 = Address::generate(&env);
+    let approved_hash = hash(&env, 50);
+    let pid = propose_proxy_upgrade(&env, &client, &admin, &logic2, &approved_hash);
+    assert!(client.approve_upgrade(&signer2, &pid));
+
+    skip_to_ledger(&env, client.upgrade_proposal(&pid).earliest_ledger);
+    assert_eq!(
+        client.try_execute_upgrade(&admin, &pid, &hash(&env, 51), &true, &true),
+        Err(Ok(ProxyError::HashMismatch))
+    );
     assert_eq!(client.logic_contract(), logic1);
-    // Upgrade to new logic
-    client.upgrade(&admin, &logic2);
+}
+
+#[test]
+fn proxy_upgrade_rejects_stale_governance_epoch() {
+    let (env, client, admin, signer2, logic1) = proxy_setup();
+    init_proxy(&env, &client, &admin, &signer2, &logic1);
+
+    let signer3 = Address::generate(&env);
+    let logic2 = Address::generate(&env);
+    let target_hash = hash(&env, 60);
+    let pid = propose_proxy_upgrade(&env, &client, &admin, &logic2, &target_hash);
+
+    let approvals: Vec<Address> = vec![&env, admin.clone(), signer2.clone()];
+    let next_signers: Vec<Address> = vec![&env, admin.clone(), signer2.clone(), signer3];
+    client.rotate_signers(&approvals, &next_signers);
+    assert_eq!(
+        client.try_approve_upgrade(&signer2, &pid),
+        Err(Ok(ProxyError::StaleProposal))
+    );
+}
+
+#[test]
+fn proxy_upgrade_rejects_failed_migration_before_live_mutation() {
+    let (env, client, admin, signer2, logic1) = proxy_setup();
+    init_proxy(&env, &client, &admin, &signer2, &logic1);
+
+    let logic2 = Address::generate(&env);
+    assert_eq!(
+        client.try_propose_upgrade(
+            &admin,
+            &UpgradeKind::Forward,
+            &logic2,
+            &client.current_hash(),
+            &hash(&env, 70),
+            &2,
+            &hash(&env, 10),
+            &hash(&env, 11),
+            &min_upgrade_ledger(&env),
+            &false,
+            &provenance(&env, 12),
+        ),
+        Err(Ok(ProxyError::MigrationSimulationFailed))
+    );
+    assert_eq!(client.logic_contract(), logic1);
+}
+
+#[test]
+fn proxy_upgrade_rejects_invariant_failure_at_completion() {
+    let (env, client, admin, signer2, logic1) = proxy_setup();
+    init_proxy(&env, &client, &admin, &signer2, &logic1);
+
+    let logic2 = Address::generate(&env);
+    let target_hash = hash(&env, 80);
+    let pid = propose_proxy_upgrade(&env, &client, &admin, &logic2, &target_hash);
+    assert!(client.approve_upgrade(&signer2, &pid));
+
+    skip_to_ledger(&env, client.upgrade_proposal(&pid).earliest_ledger);
+    assert_eq!(
+        client.try_execute_upgrade(&admin, &pid, &target_hash, &false, &true),
+        Err(Ok(ProxyError::InvariantViolation))
+    );
+    assert_eq!(client.logic_contract(), logic1);
+}
+
+#[test]
+fn proxy_rollback_preserves_later_writes() {
+    let (env, client, admin, signer2, logic1) = proxy_setup();
+    init_proxy(&env, &client, &admin, &signer2, &logic1);
+
+    let logic2 = Address::generate(&env);
+    let rollback_hash = hash(&env, 90);
+    let pid = client.propose_upgrade(
+        &admin,
+        &UpgradeKind::Rollback,
+        &logic2,
+        &client.current_hash(),
+        &rollback_hash,
+        &1,
+        &hash(&env, 10),
+        &hash(&env, 11),
+        &min_upgrade_ledger(&env),
+        &true,
+        &provenance(&env, 12),
+    );
+    assert!(client.approve_upgrade(&signer2, &pid));
+
+    client.record_state_write(&admin);
+    skip_to_ledger(&env, client.upgrade_proposal(&pid).earliest_ledger);
+    assert_eq!(
+        client.try_execute_upgrade(&admin, &pid, &rollback_hash, &true, &false),
+        Err(Ok(ProxyError::StateDiscardBlocked))
+    );
+
+    client.execute_upgrade(&admin, &pid, &rollback_hash, &true, &true);
     assert_eq!(client.logic_contract(), logic2);
 }
 
 #[test]
-fn proxy_upgrade_unauthorized_fails() {
-    let (env, client, admin, logic) = proxy_setup();
-    let rando = Address::generate(&env);
-    client.create(&admin, &logic);
+fn proxy_records_reproducible_wasm_provenance() {
+    let (env, client, admin, signer2, logic1) = proxy_setup();
+    init_proxy(&env, &client, &admin, &signer2, &logic1);
+
+    let logic2 = Address::generate(&env);
+    let target_hash = hash(&env, 100);
+    let expected_provenance = provenance(&env, 20);
+    let pid = client.propose_upgrade(
+        &admin,
+        &UpgradeKind::Forward,
+        &logic2,
+        &client.current_hash(),
+        &target_hash,
+        &2,
+        &hash(&env, 10),
+        &hash(&env, 11),
+        &min_upgrade_ledger(&env),
+        &true,
+        &expected_provenance,
+    );
     assert_eq!(
-        client.try_upgrade(&rando, &logic),
+        client.upgrade_proposal(&pid).provenance,
+        expected_provenance
+    );
+    assert!(client.approve_upgrade(&signer2, &pid));
+
+    skip_to_ledger(&env, client.upgrade_proposal(&pid).earliest_ledger);
+    client.execute_upgrade(&admin, &pid, &target_hash, &true, &true);
+    assert_eq!(client.last_provenance(), expected_provenance);
+}
+
+#[test]
+fn proxy_upgrade_unauthorized_fails() {
+    let (env, client, admin, signer2, logic) = proxy_setup();
+    let rando = Address::generate(&env);
+    let target_hash = hash(&env, 30);
+    init_proxy(&env, &client, &admin, &signer2, &logic);
+    assert_eq!(
+        client.try_propose_upgrade(
+            &rando,
+            &UpgradeKind::Forward,
+            &logic,
+            &client.current_hash(),
+            &target_hash,
+            &2,
+            &hash(&env, 10),
+            &hash(&env, 11),
+            &min_upgrade_ledger(&env),
+            &true,
+            &provenance(&env, 12),
+        ),
         Err(Ok(ProxyError::Unauthorized))
     );
 }

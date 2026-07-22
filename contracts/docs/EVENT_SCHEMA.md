@@ -36,6 +36,11 @@ ledger when available.
 | `paused` | backend operations, frontend disabled states | `scope`, `admin`, `reason`, `paused_at` |
 | `recovered` | backend operations, frontend disabled states | `scope`, `admin`, `recovered_at` |
 | `config_changed` | backend indexing, frontend config refresh | `scope`, `admin`, `key`, `old_value?`, `new_value`, `effective_at` |
+| `upgrade_proposed` | backend/indexer upgrade observation window | `proposal_id`, `current_hash`, `target_hash`, `schema_version`, `migration_plan_hash`, `earliest_ledger`, `signer_epoch`, `provenance` |
+| `upgrade_approved` | backend/indexer governance audit | `proposal_id`, `approval_count` |
+| `upgrade_executed` | backend/indexer implementation refresh | `proposal_id`, `target_hash`, `schema_version` |
+| `governance_epoch_changed` | backend/indexer stale proposal detection | `epoch` |
+| `state_write_recorded` | rollback safety audit | `state_write_version` |
 
 ## Normalized indexer examples
 
@@ -100,6 +105,11 @@ payload, pinned by regression tests in `contracts/drip-pool/src/test.rs`:
 | `reward_claimed` → `claim()` / `claim_reward()` | `("pool", "claimed")` | `(who: Address, amount: i128)` |
 | `withdrawn` → `withdraw()` | `("pool", "withdrawn")` | `(who: Address, amount: i128)` |
 | `payout_selected` → `draw_winner()` | `("pool", "payout")` | `(winner: Address, prize: i128)` |
+| `upgrade_proposed` → `propose_upgrade()` | `("upgrade", "proposed")` | `(proposal_id: u32, target_hash: BytesN<32>, earliest_ledger: u32)` |
+| `upgrade_approved` → `approve_upgrade()` | `("upgrade", "approved")` | `(proposal_id: u32, approval_count: u32)` |
+| `upgrade_executed` → `execute_upgrade()` | `("upgrade", "executed")` | `(proposal_id: u32, target_hash: BytesN<32>, schema_version: u32)` |
+| `governance_epoch_changed` → `rotate_signers()` | `("gov", "epoch")` | `epoch: u32` |
+| `state_write_recorded` → `record_state_write()` | `("state", "write")` | `state_write_version: u32` |
 
 `paused`, `recovered`, and `config_changed` are not implemented by the
 contract yet — there is no corresponding entry point.
