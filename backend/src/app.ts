@@ -18,6 +18,12 @@ import { createLogger } from "./logger.js";
 import type { Logger } from "pino";
 import type { CacheService } from "./services/cacheService.js";
 
+import { privacyRoutes } from "./routes/privacy.js";
+import { PrivacyEncryptionService } from "./services/privacy/privacyEncryptionService.js";
+import { PrivacyAuditService } from "./services/privacy/privacyAuditService.js";
+import { PrivacyExportService } from "./services/privacy/privacyExportService.js";
+import { PrivacyDeletionService } from "./services/privacy/privacyDeletionService.js";
+
 export type AppDeps = {
   prisma: PrismaClient;
   internalSecret: string;
@@ -25,6 +31,7 @@ export type AppDeps = {
   apiKey?: string;
   logger?: Logger;
   cacheService?: CacheService;
+  privacyMasterKey?: string;
 };
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -79,6 +86,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const savedPoolsSvc = new SavedPoolsService(deps.prisma);
   const metricsSvc = new MetricsService(deps.prisma);
 
+  // Privacy Services (issue #76)
+  const encryptionSvc = new PrivacyEncryptionService(deps.privacyMasterKey);
+  const auditSvc = new PrivacyAuditService(deps.prisma);
+  const exportSvc = new PrivacyExportService(deps.prisma, encryptionSvc, auditSvc);
+  const deletionSvc = new PrivacyDeletionService(deps.prisma, deps.cacheService, auditSvc);
+
   // API key guard for external-service endpoints (#273).
   // Guard is a no-op when apiKey is undefined (local dev without configuration).
   const apiKeyGuard = requireApiKey(deps.apiKey);
@@ -89,6 +102,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.register(internalRoutes(svc, deps.internalSecret));
   app.register(metricsRoutes(metricsSvc, apiKeyGuard));
   app.register(prometheusRoutes);
+  app.register(
+    privacyRoutes({
+      exportSvc,
+      deletionSvc,
+      encryptionSvc,
+      auditSvc,
+      prisma: deps.prisma,
+      internalSecret: deps.internalSecret,
+    })
+  );
 
   // Central Error Handler Middleware
   app.setErrorHandler(errorHandler);
