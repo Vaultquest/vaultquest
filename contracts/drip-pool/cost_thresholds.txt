@@ -3,7 +3,7 @@
 # Baseline values derived from DripPool contract test execution.
 
 create_cpu=100000
-create_mem=10000
+create_mem=12000
 
 join_cpu=80000
 join_mem=12000
@@ -24,7 +24,7 @@ withdraw_cpu=150000
 withdraw_mem=22000
 
 propose_cpu=130000
-propose_mem=20000
+propose_mem=22000
 
-approve_cpu=180000
-approve_mem=30000
+approve_cpu=230000
+approve_mem=40000

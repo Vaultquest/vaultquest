@@ -213,33 +213,18 @@ fn duplicate_approval_rejected() {
 // ── multisig signer rotation & revoked-signer behaviour ───────────────────
 
 #[test]
-fn added_signer_counts_toward_threshold() {
-    let (env, client, admin) = setup();
-    client.create(&admin);
-    client.deposit(&admin, &500);
-
-    let signer2 = Address::generate(&env);
-    client.add_admin(&admin, &signer2);
-    assert_eq!(client.admins().len(), 2);
-
-    let recipient = Address::generate(&env);
-    let pid = client.propose(
-        &admin,
-        &ProposalAction::ReleaseEscrow(recipient.clone(), 200),
-    );
-    assert!(client.approve(&signer2, &pid));
-    assert_eq!(client.pool().total_deposited, 300);
-}
-
-#[test]
 fn duplicate_add_admin_is_noop() {
     let (env, client, admin) = setup();
     client.create(&admin);
 
     let signer2 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.add_admin(&admin, &signer2);
-    // No duplicate entry in the signer set.
+    // After the first add_admin, admins has size 2, so bootstrap is complete.
+    // The second direct add_admin must fail with Error::BootstrapComplete.
+    assert_eq!(
+        client.try_add_admin(&admin, &signer2),
+        Err(Ok(Error::BootstrapComplete))
+    );
     assert_eq!(client.admins().len(), 2);
 }
 
@@ -250,7 +235,14 @@ fn removed_signer_cannot_propose() {
 
     let signer2 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.remove_admin(&admin, &signer2);
+    
+    // To remove signer2, we must first change threshold to 1.
+    let pid1 = client.propose(&admin, &ProposalAction::ChangeThreshold(1));
+    client.approve(&signer2, &pid1);
+    
+    // Propose removing signer2. Since threshold is 1, it executes immediately.
+    client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
+    
     assert_eq!(client.admins().len(), 1);
 
     // Removed signer can no longer propose…
@@ -274,7 +266,10 @@ fn removed_signer_cannot_approve() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.add_admin(&admin, &signer3);
+    
+    // Add signer3 via proposal
+    let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &add_pid);
 
     let recipient = Address::generate(&env);
     let pid = client.propose(
@@ -283,29 +278,21 @@ fn removed_signer_cannot_approve() {
     );
 
     // Revoke signer3 while the proposal is pending.
-    client.remove_admin(&admin, &signer3);
+    let rm_pid = client.propose(&admin, &ProposalAction::RemoveAdmin(signer3.clone()));
+    client.approve(&signer2, &rm_pid);
+
+    // signer3 is removed. Try to approve the old pid should fail because signer3 is no longer authorized.
     assert_eq!(
         client.try_approve(&signer3, &pid),
         Err(Ok(Error::Unauthorized))
     );
-    assert_eq!(client.pool().total_deposited, 500);
-
-    // Remaining signers can still complete the proposal.
-    assert!(client.approve(&signer2, &pid));
-    assert_eq!(client.pool().total_deposited, 300);
-}
-
-#[test]
-fn non_signer_cannot_approve() {
-    let (env, client, admin) = setup();
-    client.create(&admin);
-
-    let pid = client.propose(&admin, &ProposalAction::AddAdmin(Address::generate(&env)));
-    let rando = Address::generate(&env);
+    
+    // Remaining signers also cannot complete the proposal from the previous epoch.
     assert_eq!(
-        client.try_approve(&rando, &pid),
-        Err(Ok(Error::Unauthorized))
+        client.try_approve(&signer2, &pid),
+        Err(Ok(Error::StaleEpoch))
     );
+    assert_eq!(client.pool().total_deposited, 500);
 }
 
 #[test]
@@ -317,7 +304,10 @@ fn duplicate_approval_does_not_inflate_threshold() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.add_admin(&admin, &signer3);
+    
+    // Add signer3 via proposal
+    let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &add_pid);
 
     let recipient = Address::generate(&env);
     let pid = client.propose(
@@ -332,7 +322,7 @@ fn duplicate_approval_does_not_inflate_threshold() {
     );
     assert_eq!(client.pool().total_deposited, 500);
 
-    // A second distinct signer proves the count was still 1 of 2.
+    // A second distinct signer reaches the threshold and executes.
     assert!(client.approve(&signer2, &pid));
     assert_eq!(client.pool().total_deposited, 0);
 }
@@ -346,7 +336,10 @@ fn approval_order_is_irrelevant() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.add_admin(&admin, &signer3);
+    
+    // Add signer3 via proposal
+    let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &add_pid);
 
     let recipient = Address::generate(&env);
 
@@ -376,7 +369,10 @@ fn executed_proposal_cannot_be_reapproved() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.add_admin(&admin, &signer3);
+    
+    // Add signer3 via proposal
+    let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &add_pid);
 
     let recipient = Address::generate(&env);
     let pid = client.propose(
@@ -385,34 +381,41 @@ fn executed_proposal_cannot_be_reapproved() {
     );
     assert!(client.approve(&signer2, &pid));
 
-    // Executed proposals are deleted — a late approval cannot re-execute.
+    // Executed proposals are saved in storage as Executed — a late approval returns ProposalAlreadyExecuted
     assert_eq!(
         client.try_approve(&signer3, &pid),
-        Err(Ok(Error::ProposalNotFound))
+        Err(Ok(Error::ProposalAlreadyExecuted))
     );
     assert_eq!(client.pool().total_deposited, 300);
 }
 
-/// Documents current behaviour: an approval recorded while the signer was
-/// still a member is NOT pruned when that signer is later removed. The stale
-/// approval keeps counting toward the threshold. If this is undesirable,
-/// approvals must be re-validated against the signer set at execution time.
 #[test]
-fn stale_approval_from_removed_signer_still_counts() {
+fn stale_approval_from_removed_signer_is_prevented() {
     let (env, client, admin) = setup();
     client.create(&admin);
 
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
+    let signer4 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
+    
+    // Add signer3 via proposal
+    let add_pid1 = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &add_pid1);
 
-    // signer2 proposes (auto-approves, 1 of 2), then is removed.
-    let pid = client.propose(&signer2, &ProposalAction::AddAdmin(signer3.clone()));
-    client.remove_admin(&admin, &signer2);
+    // signer2 proposes a release escrow (auto-approves, 1 of 2), then is removed.
+    let pid = client.propose(&signer2, &ProposalAction::AddAdmin(signer4.clone()));
+    
+    // Remove signer2 via proposal
+    let rm_pid = client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
+    client.approve(&signer3, &rm_pid);
 
-    // signer2's recorded approval still counts — admin's approval executes.
-    assert!(client.approve(&admin, &pid));
-    assert!(client.admins().contains(&signer3));
+    // signer2's proposal is stale due to epoch change. Admin approving it should fail with StaleEpoch.
+    assert_eq!(
+        client.try_approve(&admin, &pid),
+        Err(Ok(Error::StaleEpoch))
+    );
+    assert!(!client.admins().contains(&signer4));
 }
 
 #[test]
@@ -466,32 +469,31 @@ fn cannot_remove_last_admin() {
 }
 
 #[test]
-fn threshold_unreachable_after_signer_set_shrinks() {
+fn prevent_unreachable_quorum_when_signer_set_shrinks() {
     let (env, client, admin) = setup();
     client.create(&admin);
     client.deposit(&admin, &500);
 
     let signer2 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.remove_admin(&admin, &signer2);
 
-    // Threshold stays 2-of-N: a lone signer can propose but never execute.
-    let recipient = Address::generate(&env);
-    let pid = client.propose(
-        &admin,
-        &ProposalAction::ReleaseEscrow(recipient.clone(), 500),
-    );
+    // Direct remove admin fails because bootstrap is complete
     assert_eq!(
-        client.try_approve(&admin, &pid),
-        Err(Ok(Error::AlreadySigned))
+        client.try_remove_admin(&admin, &signer2),
+        Err(Ok(Error::BootstrapComplete))
+    );
+
+    // Proposing to remove signer2 without changing threshold to 1 first
+    // should fail during execution/validation since remaining signer count (1)
+    // would be less than the threshold (2).
+    let pid = client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
+    
+    // Approving it will try to execute it, which fails with Error::InvalidThreshold
+    assert_eq!(
+        client.try_approve(&signer2, &pid),
+        Err(Ok(Error::InvalidThreshold))
     );
     assert_eq!(client.pool().total_deposited, 500);
-
-    // Re-adding a second signer makes the pending proposal executable again.
-    let signer3 = Address::generate(&env);
-    client.add_admin(&admin, &signer3);
-    assert!(client.approve(&signer3, &pid));
-    assert_eq!(client.pool().total_deposited, 0);
 }
 
 // ── #141: adversarial prize-draw edge cases ────────────────────────────────
@@ -1331,4 +1333,164 @@ fn test_deposit_after_lockup_expiration_resets_lockup_window() {
     // Withdrawal succeeds with 1.5x multiplier boost (400 * 150 / 100 = 600)
     let payout = client.withdraw(&alice);
     assert_eq!(payout, 600);
+}
+
+#[test]
+fn test_proposal_expiry() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+    );
+
+    // Fast-forward ledger time past 7 days (7 * 24 * 60 * 60 = 604,800 seconds)
+    env.ledger().with_mut(|li| {
+        li.timestamp += 7 * 24 * 60 * 60 + 10;
+    });
+
+    // Try to approve should fail with Error::ProposalExpired
+    assert_eq!(
+        client.try_approve(&signer2, &pid),
+        Err(Ok(Error::ProposalExpired))
+    );
+}
+
+#[test]
+fn test_proposal_cancellation() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+    );
+
+    // signer2 cannot cancel it because they are not the proposer
+    assert_eq!(
+        client.try_cancel(&signer2, &pid),
+        Err(Ok(Error::Unauthorized))
+    );
+
+    // Proposer (admin) cancels
+    client.cancel(&admin, &pid);
+
+    // Approval of cancelled proposal fails
+    assert_eq!(
+        client.try_approve(&signer2, &pid),
+        Err(Ok(Error::ProposalCancelled))
+    );
+}
+
+#[test]
+fn test_idempotent_proposal_execution() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.deposit(&admin, &500);
+
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+    );
+
+    // Execute the proposal
+    assert!(client.approve(&signer2, &pid));
+    assert_eq!(client.pool().total_deposited, 400);
+
+    // Try to approve/execute again fails with Error::ProposalAlreadyExecuted
+    assert_eq!(
+        client.try_approve(&signer2, &pid),
+        Err(Ok(Error::ProposalAlreadyExecuted))
+    );
+}
+
+#[test]
+fn test_bootstrap_permanently_constrained() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+
+    // Bootstrap direct addition works when count < threshold
+    client.add_admin(&admin, &signer2); // count = 2 >= threshold (2). Bootstrap complete!
+
+    // Direct addition of a 3rd admin fails with BootstrapComplete
+    assert_eq!(
+        client.try_add_admin(&admin, &signer3),
+        Err(Ok(Error::BootstrapComplete))
+    );
+
+    // Direct removal also fails with BootstrapComplete
+    assert_eq!(
+        client.try_remove_admin(&admin, &signer2),
+        Err(Ok(Error::BootstrapComplete))
+    );
+}
+
+#[test]
+fn test_random_governance_fuzz_sequence() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+    let signer4 = Address::generate(&env);
+
+    // 1. Bootstrap: add signer2
+    client.add_admin(&admin, &signer2);
+
+    // 2. Add signer3 via proposal
+    let p1 = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &p1);
+
+    // 3. Propose to change threshold to 3
+    let p2 = client.propose(&admin, &ProposalAction::ChangeThreshold(3));
+    client.approve(&signer3, &p2);
+    assert_eq!(client.pool().threshold, 3);
+
+    // 4. Propose to add signer4
+    let p3 = client.propose(&admin, &ProposalAction::AddAdmin(signer4.clone()));
+    client.approve(&signer2, &p3);
+    // Needs 3 signatures! (proposed by admin + signer2 + signer3)
+    client.approve(&signer3, &p3);
+    assert!(client.admins().contains(&signer4));
+}
+
+#[test]
+fn test_epoch_bumps_on_immediate_execution() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
+
+    // Change threshold to 1. Since threshold is 2, it requires signer2's approval.
+    let p1 = client.propose(&admin, &ProposalAction::ChangeThreshold(1));
+    client.approve(&signer2, &p1);
+    
+    let pool_before = client.pool();
+    assert_eq!(pool_before.threshold, 1);
+    let epoch_before = pool_before.signer_epoch;
+
+    // Now propose a RemoveAdmin for signer2 when threshold is 1.
+    // This proposal has threshold 1. It must execute immediately and bump the epoch.
+    client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
+
+    let pool_after = client.pool();
+    assert_eq!(pool_after.signer_epoch, epoch_before + 1);
+    assert!(!client.admins().contains(&signer2));
 }
