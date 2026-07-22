@@ -19,7 +19,8 @@
 //! - `upgrade` is admin-only; direct caller path enforces auth for transparent proxy.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, BytesN, Env, Vec,
+    xdr::ToXdr,
 };
 
 // ── Lockup duration (ledgers, ~7 days at 5 s/ledger) ──────────────────────
@@ -56,6 +57,22 @@ pub enum Error {
     ThresholdNotMet = 9, // not enough signatures
     AlreadySigned = 10,  // signer already approved this proposal
     ProposalNotFound = 11,
+    ProposalAlreadyExecuted = 12,
+    ProposalCancelled = 13,
+    ProposalExpired = 14,
+    StaleEpoch = 15,
+    InvalidThreshold = 16,
+    BootstrapComplete = 17,
+}
+
+// ── Proposal Status ────────────────────────────────────────────────────────
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub enum ProposalStatus {
+    Pending = 0,
+    Executed = 1,
+    Cancelled = 2,
+    Expired = 3,
 }
 
 // ── Structs ────────────────────────────────────────────────────────────────
@@ -70,6 +87,9 @@ pub struct Pool {
     pub created_at: u64,
     pub locked: bool,        // reentrancy guard (was DataKey::Locked)
     pub proposal_nonce: u32, // monotonic counter (was DataKey::ProposalNonce)
+    pub signer_epoch: u32,
+    pub signer_set_hash: BytesN<32>,
+    pub threshold: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -86,8 +106,14 @@ pub struct Participant {
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Proposal {
+    pub id: u32,
     pub action: ProposalAction,
     pub approvals: Vec<Address>,
+    pub epoch: u32,
+    pub signer_set_hash: BytesN<32>,
+    pub expires_at: u64,
+    pub proposer: Address,
+    pub status: ProposalStatus,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -96,6 +122,7 @@ pub enum ProposalAction {
     ReleaseEscrow(Address, i128), // recipient, amount
     AddAdmin(Address),
     RemoveAdmin(Address),
+    ChangeThreshold(u32),
 }
 
 // ── Contract ───────────────────────────────────────────────────────────────
@@ -130,12 +157,58 @@ impl DripPool {
         Ok(())
     }
 
+    fn validate_quorum(admins_count: u32, threshold: u32) -> Result<(), Error> {
+        if threshold == 0 || threshold > admins_count {
+            return Err(Error::InvalidThreshold);
+        }
+        Ok(())
+    }
+
+    fn update_signer_set(env: &Env, pool: &mut Pool, new_admins: Vec<Address>) -> Result<(), Error> {
+        Self::validate_quorum(new_admins.len() as u32, pool.threshold)?;
+        pool.signer_epoch += 1;
+        pool.signer_set_hash = env.crypto().sha256(&new_admins.clone().to_xdr(env)).into();
+        env.storage().instance().set(&DataKey::Admins, &new_admins);
+        env.storage().instance().set(&DataKey::Pool, pool);
+        env.events().publish(
+            (symbol_short!("epoch_chg"), pool.signer_epoch),
+            pool.signer_set_hash.clone(),
+        );
+        Ok(())
+    }
+
+    fn check_proposal_status(
+        env: &Env,
+        proposal: &mut Proposal,
+        current_epoch: u32,
+    ) -> Result<(), Error> {
+        match proposal.status {
+            ProposalStatus::Executed => return Err(Error::ProposalAlreadyExecuted),
+            ProposalStatus::Cancelled => return Err(Error::ProposalCancelled),
+            ProposalStatus::Expired => return Err(Error::ProposalExpired),
+            ProposalStatus::Pending => {}
+        }
+
+        if proposal.epoch != current_epoch {
+            return Err(Error::StaleEpoch);
+        }
+
+        if env.ledger().timestamp() >= proposal.expires_at {
+            proposal.status = ProposalStatus::Expired;
+            return Err(Error::ProposalExpired);
+        }
+
+        Ok(())
+    }
+
     // ── Initialise ─────────────────────────────────────────────────────────
     pub fn create(env: Env, admin: Address) -> Result<(), Error> {
         admin.require_auth();
         if env.storage().instance().has(&DataKey::Pool) {
             return Err(Error::AlreadyInitialized);
         }
+        let admins: Vec<Address> = vec![&env, admin.clone()];
+        let signer_set_hash = env.crypto().sha256(&admins.clone().to_xdr(&env)).into();
         let pool = Pool {
             admin: admin.clone(),
             total_drips: 0,
@@ -143,8 +216,10 @@ impl DripPool {
             created_at: env.ledger().timestamp(),
             locked: false,
             proposal_nonce: 0,
+            signer_epoch: 1,
+            signer_set_hash,
+            threshold: SIG_THRESHOLD,
         };
-        let admins: Vec<Address> = vec![&env, admin.clone()];
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Admins, &admins);
         env.storage().instance().set(&DataKey::Pool, &pool);
@@ -156,14 +231,24 @@ impl DripPool {
     pub fn add_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
+        let mut pool: Pool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Pool)
+            .ok_or(Error::NotInitialized)?;
         let mut admins: Vec<Address> = env
             .storage()
             .instance()
             .get(&DataKey::Admins)
             .unwrap_or(vec![&env]);
+
+        if admins.len() >= pool.threshold {
+            return Err(Error::BootstrapComplete);
+        }
+
         if !admins.contains(&new_admin) {
             admins.push_back(new_admin);
-            env.storage().instance().set(&DataKey::Admins, &admins);
+            Self::update_signer_set(&env, &mut pool, admins)?;
         }
         Ok(())
     }
@@ -171,6 +256,12 @@ impl DripPool {
     pub fn remove_admin(env: Env, caller: Address, target: Address) -> Result<(), Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
+
+        let mut pool: Pool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Pool)
+            .ok_or(Error::NotInitialized)?;
 
         let admins: Vec<Address> = env
             .storage()
@@ -182,6 +273,10 @@ impl DripPool {
             return Err(Error::Unauthorized);
         }
 
+        if admins.len() >= pool.threshold {
+            return Err(Error::BootstrapComplete);
+        }
+
         let mut updated: Vec<Address> = Vec::new(&env);
         for a in admins.iter() {
             if a != target {
@@ -189,7 +284,7 @@ impl DripPool {
             }
         }
 
-        env.storage().instance().set(&DataKey::Admins, &updated);
+        Self::update_signer_set(&env, &mut pool, updated)?;
         Ok(())
     }
 
@@ -207,13 +302,38 @@ impl DripPool {
         pool.proposal_nonce += 1;
         env.storage().instance().set(&DataKey::Pool, &pool);
 
+        let expires_at = env.ledger().timestamp() + 7 * 24 * 60 * 60; // 7 days default expiry
+
+        let threshold_met = pool.threshold <= 1;
+
         let proposal = Proposal {
-            action,
-            approvals: vec![&env, signer],
+            id: nonce,
+            action: action.clone(),
+            approvals: vec![&env, signer.clone()],
+            epoch: pool.signer_epoch,
+            signer_set_hash: pool.signer_set_hash.clone(),
+            expires_at,
+            proposer: signer.clone(),
+            status: if threshold_met { ProposalStatus::Executed } else { ProposalStatus::Pending },
         };
+
         env.storage()
             .instance()
             .set(&DataKey::Proposal(nonce), &proposal);
+
+        if threshold_met {
+            Self::execute_proposal(&env, &proposal)?;
+            env.events().publish(
+                (symbol_short!("prop_exe"), nonce),
+                pool.signer_epoch,
+            );
+        }
+
+        env.events().publish(
+            (symbol_short!("prop_new"), nonce, signer),
+            pool.signer_epoch,
+        );
+
         Ok(nonce)
     }
 
@@ -222,32 +342,90 @@ impl DripPool {
         signer.require_auth();
         Self::require_signer(&env, &signer)?;
 
+        let pool: Pool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Pool)
+            .ok_or(Error::NotInitialized)?;
+
         let mut proposal: Proposal = env
             .storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
             .ok_or(Error::ProposalNotFound)?;
 
+        Self::check_proposal_status(&env, &mut proposal, pool.signer_epoch)?;
+
         if proposal.approvals.contains(&signer) {
             return Err(Error::AlreadySigned);
         }
-        proposal.approvals.push_back(signer);
+        proposal.approvals.push_back(signer.clone());
 
-        let threshold_met = proposal.approvals.len() >= SIG_THRESHOLD;
+        env.events().publish(
+            (symbol_short!("prop_app"), proposal_id, signer),
+            proposal.approvals.len() as u32,
+        );
+
+        let threshold_met = proposal.approvals.len() >= pool.threshold;
         if threshold_met {
+            proposal.status = ProposalStatus::Executed;
             Self::execute_proposal(&env, &proposal)?;
-            env.storage()
-                .instance()
-                .remove(&DataKey::Proposal(proposal_id));
-        } else {
-            env.storage()
-                .instance()
-                .set(&DataKey::Proposal(proposal_id), &proposal);
+            env.events().publish(
+                (symbol_short!("prop_exe"), proposal_id),
+                pool.signer_epoch,
+            );
         }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+
         Ok(threshold_met)
     }
 
+    /// Cancel a proposal. Only callable by its proposer.
+    pub fn cancel(env: Env, signer: Address, proposal_id: u32) -> Result<(), Error> {
+        signer.require_auth();
+        Self::require_signer(&env, &signer)?;
+
+        let pool: Pool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Pool)
+            .ok_or(Error::NotInitialized)?;
+
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(Error::ProposalNotFound)?;
+
+        Self::check_proposal_status(&env, &mut proposal, pool.signer_epoch)?;
+
+        if proposal.proposer != signer {
+            return Err(Error::Unauthorized);
+        }
+
+        proposal.status = ProposalStatus::Cancelled;
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (symbol_short!("prop_can"), proposal_id),
+            signer,
+        );
+
+        Ok(())
+    }
+
     fn execute_proposal(env: &Env, proposal: &Proposal) -> Result<(), Error> {
+        let mut pool: Pool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Pool)
+            .ok_or(Error::NotInitialized)?;
+
         match proposal.action.clone() {
             ProposalAction::AddAdmin(addr) => {
                 let mut admins: Vec<Address> = env
@@ -257,7 +435,7 @@ impl DripPool {
                     .unwrap_or(vec![env]);
                 if !admins.contains(&addr) {
                     admins.push_back(addr);
-                    env.storage().instance().set(&DataKey::Admins, &admins);
+                    Self::update_signer_set(env, &mut pool, admins)?;
                 }
             }
             ProposalAction::RemoveAdmin(addr) => {
@@ -272,14 +450,24 @@ impl DripPool {
                         new_admins.push_back(a);
                     }
                 }
-                env.storage().instance().set(&DataKey::Admins, &new_admins);
+                Self::update_signer_set(env, &mut pool, new_admins)?;
             }
-            ProposalAction::ReleaseEscrow(_recipient, _amount) => {
-                let mut pool: Pool = env
+            ProposalAction::ChangeThreshold(new_threshold) => {
+                let admins: Vec<Address> = env
                     .storage()
                     .instance()
-                    .get(&DataKey::Pool)
-                    .ok_or(Error::NotInitialized)?;
+                    .get(&DataKey::Admins)
+                    .unwrap_or(vec![env]);
+                Self::validate_quorum(admins.len() as u32, new_threshold)?;
+                pool.threshold = new_threshold;
+                env.storage().instance().set(&DataKey::Pool, &pool);
+
+                env.events().publish(
+                    (symbol_short!("thresh_ch"), pool.threshold),
+                    pool.signer_epoch,
+                );
+            }
+            ProposalAction::ReleaseEscrow(_recipient, _amount) => {
                 pool.total_deposited = pool.total_deposited.saturating_sub(_amount);
                 env.storage().instance().set(&DataKey::Pool, &pool);
             }

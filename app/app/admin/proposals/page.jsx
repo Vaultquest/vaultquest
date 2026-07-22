@@ -43,6 +43,8 @@ const MOCK_PROPOSALS = [
     createdAt: "2026-05-27T09:00:00Z",
     expiresAt: "2026-06-10T09:00:00Z",
     proposer: "0x1234...7890",
+    epoch: 2,
+    signerSetHash: "0x8a4ed68eb9827338101baf33c664f8f6012dd77c5f0b56fbd01beac90dbd43c6",
   },
   {
     id: "prop-002",
@@ -66,6 +68,8 @@ const MOCK_PROPOSALS = [
     createdAt: "2026-05-30T16:00:00Z",
     expiresAt: "2026-06-13T16:00:00Z",
     proposer: "0x1234...7890",
+    epoch: 2,
+    signerSetHash: "0x8a4ed68eb9827338101baf33c664f8f6012dd77c5f0b56fbd01beac90dbd43c6",
   },
   {
     id: "prop-003",
@@ -98,6 +102,8 @@ const MOCK_PROPOSALS = [
     expiresAt: "2026-06-08T10:00:00Z",
     proposer: "0xabcd...abcd",
     executedAt: "2026-05-26T10:00:00Z",
+    epoch: 1,
+    signerSetHash: "0x4e6b5b557f1949cf8c6b5b557f1949cf8c6b5b557f1949cf8c6b5b557f1949c",
   },
   {
     id: "prop-004",
@@ -106,18 +112,19 @@ const MOCK_PROPOSALS = [
       "Modify the prize distribution to allocate 70% to grand prize and 30% to runner-up prizes.",
     type: "configuration",
     icon: Settings,
-    status: "rejected",
+    status: "stale",
     requiredSignatures: 3,
-    currentSignatures: 0,
+    currentSignatures: 1,
     signers: [
-      { address: "0x1234...7890", signed: false, timestamp: null },
+      { address: "0x1234...7890", signed: true, timestamp: "2026-05-20T15:00:00Z" },
       { address: "0xabcd...abcd", signed: false, timestamp: null },
       { address: "0x9876...4321", signed: false, timestamp: null },
     ],
     createdAt: "2026-05-20T14:00:00Z",
     expiresAt: "2026-06-03T14:00:00Z",
     proposer: "0x9876...4321",
-    rejectedAt: "2026-05-22T16:30:00Z",
+    epoch: 1,
+    signerSetHash: "0x4e6b5b557f1949cf8c6b5b557f1949cf8c6b5b557f1949cf8c6b5b557f1949c",
   },
 ];
 
@@ -140,6 +147,22 @@ const STATUS_CONFIG = {
   },
   rejected: {
     label: "Rejected",
+    color: "red",
+    icon: XCircle,
+    bgClass: "bg-red-500/10",
+    borderClass: "border-red-500/40",
+    textClass: "text-red-600 dark:text-red-400",
+  },
+  stale: {
+    label: "Stale (Prior Epoch)",
+    color: "gray",
+    icon: AlertTriangle,
+    bgClass: "bg-neutral-500/10",
+    borderClass: "border-neutral-500/40",
+    textClass: "text-neutral-500 dark:text-neutral-400",
+  },
+  expired: {
+    label: "Expired",
     color: "red",
     icon: XCircle,
     bgClass: "bg-red-500/10",
@@ -243,6 +266,22 @@ function ProposalCard({ proposal, isAdmin, onApprove, onReject }) {
                 <span>Proposed by {proposal.proposer}</span>
                 <span>•</span>
                 <span>{new Date(proposal.createdAt).toLocaleDateString()}</span>
+                {proposal.epoch !== undefined && (
+                  <>
+                    <span>•</span>
+                    <span className="bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5 text-[10px] font-mono text-amber-600 dark:text-amber-400">
+                      Epoch {proposal.epoch}
+                    </span>
+                  </>
+                )}
+                {proposal.signerSetHash && (
+                  <>
+                    <span>•</span>
+                    <span className="font-mono text-[10px]" title={proposal.signerSetHash}>
+                      Hash: {proposal.signerSetHash.substring(0, 10)}...
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -431,6 +470,17 @@ export default function AdminProposalsPage() {
           authorization
         </p>
       </header>
+
+      {/* Epoch & Counted Approvals Banner/Explanation */}
+      <div className="vq-glass border-amber-500/20 bg-amber-500/5 p-4 rounded-xl flex items-start gap-3">
+        <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" aria-hidden="true" />
+        <div className="text-xs text-vault-muted space-y-1">
+          <p className="font-semibold text-vault-text">Epoch-Bound Approvals & Quorum Protection</p>
+          <p>
+            Approvals are bound to the signer set epoch. When the admin list or threshold changes, the epoch increments, rendering pending proposals from prior epochs stale. Removed signers are automatically disqualified, and every threshold modification preserves a reachable quorum.
+          </p>
+        </div>
+      </div>
 
       {/* Stats Overview */}
       <div className="grid gap-4 sm:grid-cols-3">
