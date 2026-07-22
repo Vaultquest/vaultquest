@@ -12,6 +12,9 @@ describe("LedgerService.getPortfolioSummary Unit Tests (No Database Required)", 
           expect(args.where.walletAddress).toBe(walletAddress);
           return [];
         }
+      },
+      indexerCheckpoint: {
+        findMany: async () => []
       }
     } as any;
 
@@ -81,6 +84,9 @@ describe("LedgerService.getPortfolioSummary Unit Tests (No Database Required)", 
           expect(args.where.walletAddress).toBe(walletAddress);
           return mockActions;
         }
+      },
+      indexerCheckpoint: {
+        findMany: async () => []
       }
     } as any;
 
@@ -104,5 +110,130 @@ describe("LedgerService.getPortfolioSummary Unit Tests (No Database Required)", 
     expect(summary.recent_activity[0]?.id).toBe("act-pending");
     expect(summary.recent_activity[0]?.status).toBe("pending");
     expect(summary.recent_activity[4]?.id).toBe("act-deposit-1");
+  });
+
+  it("handles a stale global indexer checkpoint correctly", async () => {
+    const mockActions = [
+      {
+        id: "act-1",
+        walletAddress,
+        actionType: "deposit",
+        status: "confirmed",
+        createdAt: new Date("2026-05-30T01:00:00Z"),
+        txHash: "tx-1",
+        actionPayload: { vault_id: "pool-A", amount: "100" }
+      }
+    ];
+
+    const mockPrisma = {
+      actionLedger: {
+        findMany: async () => mockActions
+      },
+      indexerCheckpoint: {
+        findMany: async (args: any) => {
+          expect(args.where.id.in).toContain("singleton");
+          expect(args.where.id.in).toContain("vault-pool-A");
+          return [
+            {
+              id: "singleton",
+              latestLedger: 100,
+              lastProcessedEventId: "1",
+              lastSyncTime: new Date("2026-05-30T00:00:00Z"),
+              lastError: null,
+              lastSuccessSyncTime: new Date("2026-05-30T00:00:00Z") // 1 hour ago
+            }
+          ];
+        }
+      }
+    } as any;
+
+    const svc = new LedgerService(mockPrisma);
+    const now = new Date("2026-05-30T01:00:00Z"); // 1 hour elapsed
+    const summary = await svc.getPortfolioSummary(walletAddress, {
+      staleAfterMs: 5 * 60 * 1000, // 5 minutes stale threshold
+      now
+    });
+
+    expect(summary.total_deposits).toBe(0);
+    expect(summary.total_stale_deposits).toBe(100);
+    expect(summary.is_stale).toBe(true);
+    expect(summary.active_positions).toHaveLength(1);
+    expect(summary.active_positions[0].is_stale).toBe(true);
+    expect(summary.active_positions[0].last_updated_at).toEqual(new Date("2026-05-30T00:00:00Z"));
+  });
+
+  it("handles mixed stale and fresh vaults based on vault-specific checkpoints", async () => {
+    const mockActions = [
+      {
+        id: "act-1",
+        walletAddress,
+        actionType: "deposit",
+        status: "confirmed",
+        createdAt: new Date("2026-05-30T01:00:00Z"),
+        txHash: "tx-1",
+        actionPayload: { vault_id: "pool-fresh", amount: "150" }
+      },
+      {
+        id: "act-2",
+        walletAddress,
+        actionType: "deposit",
+        status: "confirmed",
+        createdAt: new Date("2026-05-30T01:00:00Z"),
+        txHash: "tx-2",
+        actionPayload: { vault_id: "pool-stale", amount: "300" }
+      }
+    ];
+
+    const mockPrisma = {
+      actionLedger: {
+        findMany: async () => mockActions
+      },
+      indexerCheckpoint: {
+        findMany: async () => {
+          return [
+            {
+              id: "singleton",
+              latestLedger: 100,
+              lastProcessedEventId: "1",
+              lastSyncTime: new Date("2026-05-30T00:58:00Z"),
+              lastSuccessSyncTime: new Date("2026-05-30T00:58:00Z")
+            },
+            {
+              id: "vault-pool-fresh",
+              latestLedger: 100,
+              lastProcessedEventId: "1",
+              lastSyncTime: new Date("2026-05-30T00:59:00Z"),
+              lastSuccessSyncTime: new Date("2026-05-30T00:59:00Z") // 1 min ago -> fresh
+            },
+            {
+              id: "vault-pool-stale",
+              latestLedger: 90,
+              lastProcessedEventId: "0",
+              lastSyncTime: new Date("2026-05-30T00:40:00Z"),
+              lastSuccessSyncTime: new Date("2026-05-30T00:40:00Z") // 20 mins ago -> stale
+            }
+          ];
+        }
+      }
+    } as any;
+
+    const svc = new LedgerService(mockPrisma);
+    const now = new Date("2026-05-30T01:00:00Z");
+    const summary = await svc.getPortfolioSummary(walletAddress, {
+      staleAfterMs: 5 * 60 * 1000,
+      now
+    });
+
+    expect(summary.total_deposits).toBe(150);
+    expect(summary.total_stale_deposits).toBe(300);
+    expect(summary.is_stale).toBe(true);
+
+    const freshPos = summary.active_positions.find(p => p.vault_id === "pool-fresh");
+    const stalePos = summary.active_positions.find(p => p.vault_id === "pool-stale");
+
+    expect(freshPos?.is_stale).toBe(false);
+    expect(freshPos?.last_updated_at).toEqual(new Date("2026-05-30T00:59:00Z"));
+    expect(stalePos?.is_stale).toBe(true);
+    expect(stalePos?.last_updated_at).toEqual(new Date("2026-05-30T00:40:00Z"));
   });
 });

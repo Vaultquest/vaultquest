@@ -6,7 +6,8 @@ import {
   StellarIndexer,
   defaultXdrDecoder,
   type RawHorizonEvent,
-  type HorizonEventSource
+  type HorizonEventSource,
+  type XdrDecoder
 } from "../src/services/stellarIndexer.js";
 
 function b64(value: unknown): string {
@@ -207,7 +208,7 @@ describe("StellarIndexer", () => {
       source: {
         async fetchEvents({ cursor, limit }) {
           seenCursor = cursor;
-          expect(limit).toBe(200);
+          expect(limit).toBe(50);
           return cursor === "2"
             ? [makeEvent({ id: "3", ledger: 103, txHash: "tx_resume" })]
             : [];

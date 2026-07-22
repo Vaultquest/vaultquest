@@ -41,6 +41,8 @@ export interface IndexResult {
   imported: number;
   /** Events skipped because their tx hash was already recorded. */
   duplicates: number;
+  /** Events skipped due to decoding failures or malformed payloads. */
+  malformed: number;
   /** Cursor after this tick (last event id), or null if no events arrived. */
   cursor: string | null;
 }
@@ -163,6 +165,22 @@ export class StellarIndexer {
     }
   }
 
+  private async ensureCheckpointLoaded(): Promise<void> {
+    if (this.checkpointLoaded) return;
+    this.checkpointLoaded = true;
+    try {
+      const checkpoint = await this.opts.ledger.getIndexerCheckpoint();
+      if (checkpoint?.lastProcessedEventId) {
+        this.cursor = checkpoint.lastProcessedEventId;
+      }
+      if (checkpoint?.latestLedger) {
+        this.latestLedger = checkpoint.latestLedger;
+      }
+    } catch (err) {
+      this.opts.logger?.warn({ err }, "indexer: failed to load checkpoint, starting from scratch");
+    }
+  }
+
   setCursor(cursor: string | null): void {
     this.cursor = cursor;
   }
@@ -174,9 +192,13 @@ export class StellarIndexer {
   /**
    * Fetches one batch of events (with retry), decodes and reconciles each,
    * advances the cursor.
+   *
+   * Malformed events (decoding failures, invalid payloads) are logged and
+   * skipped without blocking subsequent events in the batch. The cursor
+   * always advances to the last fetched event ID to prevent reprocessing.
    */
   async tick(): Promise<IndexResult> {
-    await this.checkpointLoaded;
+    await this.ensureCheckpointLoaded();
     const { ledger, source, decoder } = this.opts;
     const batchSize = this.opts.batchSize;
 
@@ -188,6 +210,7 @@ export class StellarIndexer {
 
     let imported = 0;
     let duplicates = 0;
+    let malformed = 0;
 
     // Track txHashes seen within this batch to detect intra-batch duplicates
     // before they reach the DB (reconcileEvent uses upsert with update:{} so
@@ -203,7 +226,30 @@ export class StellarIndexer {
       }
       seenInBatch.add(raw.txHash);
 
-      const payload = decoder.decode(raw);
+      // Decode with error isolation: malformed XDR or payload should not
+      // prevent later valid events from being processed.
+      let payload: Record<string, unknown>;
+      try {
+        payload = decoder.decode(raw);
+      } catch (decodeErr: unknown) {
+        malformed += 1;
+        this.opts.logger?.warn(
+          { err: decodeErr, eventId: raw.id, txHash: raw.txHash },
+          "indexer: skipping malformed event (decode failure)"
+        );
+        continue;
+      }
+
+      // Validate decoded payload has minimal expected structure.
+      if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+        malformed += 1;
+        this.opts.logger?.warn(
+          { eventId: raw.id, txHash: raw.txHash, payload },
+          "indexer: skipping malformed event (invalid payload structure)"
+        );
+        continue;
+      }
+
       const statusHint: "confirmed" | "reverted" = raw.successful ? "confirmed" : "reverted";
 
       try {
@@ -255,6 +301,7 @@ export class StellarIndexer {
       processed: rawEvents.length,
       imported,
       duplicates,
+      malformed,
       cursor: this.cursor
     };
   }
