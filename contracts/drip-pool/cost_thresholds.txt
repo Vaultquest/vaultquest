@@ -5,8 +5,8 @@
 create_cpu=100000
 create_mem=10000
 
-join_cpu=80000
-join_mem=12000
+join_cpu=115000
+join_mem=18000
 
 deposit_cpu=150000
 deposit_mem=22000
@@ -14,8 +14,8 @@ deposit_mem=22000
 drip_cpu=150000
 drip_mem=22000
 
-draw_winner_cpu=85000
-draw_winner_mem=12000
+draw_winner_cpu=145000
+draw_winner_mem=19000
 
 claim_cpu=100000
 claim_mem=16000

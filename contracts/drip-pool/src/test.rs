@@ -719,7 +719,7 @@ fn draw_winner_emits_payout_event() {
     client.deposit(&alice, &1_000);
 
     let winner = client.draw_winner(&admin, &100);
-    assert_eq!(winner, admin);
+    assert_eq!(winner, alice);
 
     let events = env.events().all();
     let payout_event = events.iter().find(|(_, topics, _)| {
@@ -1086,4 +1086,216 @@ fn test_deposit_after_lockup_expiration_resets_lockup_window() {
     // Withdrawal succeeds with 1.5x multiplier boost (400 * 150 / 100 = 600)
     let payout = client.withdraw(&alice);
     assert_eq!(payout, 600);
+}
+
+fn generate_secret_and_commitment(env: &Env, secret_val: u8) -> (BytesN<32>, BytesN<32>) {
+    let mut secret_bytes = [0u8; 32];
+    secret_bytes[0] = secret_val;
+    let secret = BytesN::from_array(env, &secret_bytes);
+    let commitment: BytesN<32> = env.crypto().sha256(secret.as_ref()).into();
+    (secret, commitment)
+}
+
+#[test]
+fn test_commit_reveal_success() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    client.join(&alice);
+    client.deposit(&alice, &1_000);
+    client.join(&bob);
+    client.deposit(&bob, &2_000);
+
+    let current = env.ledger().sequence();
+    let freeze_ledger = current + 2;
+    let reveal_deadline = current + 10;
+
+    let (secret, commitment) = generate_secret_and_commitment(&env, 42);
+
+    client.commit_draw(
+        &admin,
+        &1, // round_id
+        &commitment,
+        &freeze_ledger,
+        &reveal_deadline,
+        &500, // prize
+    );
+
+    // Verify deposits/withdrawals are blocked while draw is active
+    assert_eq!(client.try_deposit(&alice, &100), Err(Ok(Error::DrawActive)));
+    assert_eq!(client.try_withdraw(&alice), Err(Ok(Error::DrawActive)));
+
+    // Verify finalize fails before freeze_ledger
+    assert_eq!(
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]),
+        Err(Ok(Error::DrawNotFrozen))
+    );
+
+    // Advance sequence past freeze ledger
+    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+
+    // Finalize draw
+    let winner = client.finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]);
+    assert!(winner == alice || winner == bob);
+
+    let win_p = client.savings(&winner);
+    assert_eq!(win_p.claimable, 500 + win_p.deposited); // deposit is 1000 or 2000, claimable starts as deposit + prize
+
+    // Verify idempotency: cannot finalize again
+    assert_eq!(
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]),
+        Err(Ok(Error::DrawNotCommitted))
+    );
+
+    // Verify deposits/withdrawals are unblocked
+    client.deposit(&alice, &100);
+    assert_eq!(client.savings(&alice).deposited, 1100);
+}
+
+#[test]
+fn test_commit_reveal_failure_and_cancellation() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &1_000);
+
+    let current = env.ledger().sequence();
+    let freeze_ledger = current + 2;
+    let reveal_deadline = current + 10;
+
+    let (secret, commitment) = generate_secret_and_commitment(&env, 99);
+
+    client.commit_draw(
+        &admin,
+        &1, // round_id
+        &commitment,
+        &freeze_ledger,
+        &reveal_deadline,
+        &500, // prize
+    );
+
+    // Try to cancel before deadline - should fail for non-admin
+    let rando = Address::generate(&env);
+    assert_eq!(
+        client.try_cancel_draw(&rando),
+        Err(Ok(Error::DeadlineNotReached))
+    );
+
+    // Advance sequence past deadline
+    env.ledger().with_mut(|li| li.sequence_number = reveal_deadline + 1);
+
+    // Verify finalize fails now
+    assert_eq!(
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone()]),
+        Err(Ok(Error::DeadlinePassed))
+    );
+
+    // Cancel draw (can be called by anyone after deadline)
+    client.cancel_draw(&rando);
+
+    // Verify deposits/withdrawals are unblocked
+    client.deposit(&alice, &100);
+    assert_eq!(client.savings(&alice).deposited, 1100);
+}
+
+#[test]
+fn test_commit_reveal_participants_validation() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &1_000);
+    client.join(&bob);
+    client.deposit(&bob, &2_000);
+
+    let current = env.ledger().sequence();
+    let freeze_ledger = current + 2;
+    let reveal_deadline = current + 10;
+
+    let (secret, commitment) = generate_secret_and_commitment(&env, 123);
+
+    client.commit_draw(
+        &admin,
+        &1,
+        &commitment,
+        &freeze_ledger,
+        &reveal_deadline,
+        &500,
+    );
+
+    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+
+    // 1. Omit Bob - total weight doesn't match total_deposited
+    assert_eq!(
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone()]),
+        Err(Ok(Error::InvalidParticipantsList))
+    );
+
+    // 2. Duplicate Alice
+    assert_eq!(
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone(), alice.clone(), bob.clone()]),
+        Err(Ok(Error::DuplicateParticipant))
+    );
+
+    // 3. Unjoined address
+    let rando = Address::generate(&env);
+    assert_eq!(
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone(), rando.clone()]),
+        Err(Ok(Error::NotJoined))
+    );
+}
+
+#[test]
+fn test_commit_reveal_rejection_sampling_unbiased() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &100); // 10% weight
+    client.join(&bob);
+    client.deposit(&bob, &900); // 90% weight
+
+    let mut alice_wins = 0;
+    let mut bob_wins = 0;
+
+    // Run 30 rounds of draws with different secrets to verify statistical distribution
+    for round in 1..=30 {
+        let current = env.ledger().sequence();
+        let freeze_ledger = current + 1;
+        let reveal_deadline = current + 5;
+
+        let (secret, commitment) = generate_secret_and_commitment(&env, round as u8);
+
+        client.commit_draw(
+            &admin,
+            &round,
+            &commitment,
+            &freeze_ledger,
+            &reveal_deadline,
+            &100,
+        );
+
+        env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+
+        let winner = client.finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]);
+        if winner == alice {
+            alice_wins += 1;
+        } else if winner == bob {
+            bob_wins += 1;
+        }
+    }
+
+    // Both should win at least once, and Bob should win significantly more
+    assert!(alice_wins > 0);
+    assert!(bob_wins > 0);
+    assert!(bob_wins > alice_wins);
 }
