@@ -182,6 +182,47 @@ Scrubbed rows are excluded from future export responses.
 
 Export the wallet's full activity history as JSON or CSV.
 
+**Authorization (required)**
+
+Activity export discloses transaction history, so `wallet` selects the data but
+does not authorize it. Every request must present one of the following
+principals, or the endpoint answers `401 UNAUTHORIZED`. There is no anonymous
+access, and unlike the `/api/*` API-key guard this is never disabled by missing
+configuration.
+
+*Wallet owner — signed challenge.* Prove control of the address's key by signing
+a challenge. Authorized for that wallet only; a wallet may export only its own
+history.
+
+| Header | Value |
+|---|---|
+| `X-Wallet-Address` | The `G...` address being exported |
+| `X-Wallet-Timestamp` | Current time in Unix milliseconds |
+| `X-Wallet-Signature` | Base64 ed25519 signature over the challenge string |
+
+The challenge string is:
+
+```
+vaultquest:actions-export:<wallet-address>:<timestamp-ms>
+```
+
+The timestamp must be within `EXPORT_SIGNATURE_TTL_MS` (default 5 minutes) of
+server time, in either direction, which bounds how long a captured signature
+stays usable. If the `wallet` query parameter names a different address than
+`X-Wallet-Address`, the request is rejected with `403 FORBIDDEN`.
+
+*Service — shared credential.* Internal and third-party consumers may export any
+wallet. Present exactly one of:
+
+| Header | Value |
+|---|---|
+| `X-Internal-Secret` | `INTERNAL_SERVICE_SECRET` (always configured) |
+| `X-Api-Key` | `API_KEY` (only when configured) |
+
+Existing internal consumers that already send `X-Internal-Secret` keep working
+with no change. Browser callers must migrate to the signed-challenge headers;
+the frontend `exportActivity` client accepts an `authHeaders` argument for this.
+
 **Query parameters**
 
 | Param | Required | Default | Description |
@@ -226,8 +267,12 @@ Returns `Content-Type: text/csv` with `Content-Disposition: attachment; filename
 - Scrubbed rows (`redacted_at != null`) are never included in export output.
 - Large histories: use `from`/`to` date ranges to paginate manually. The `limit`
   cap is 1 000 rows per request.
-- Wallet-scoping: the export only returns data for the `wallet` parameter value.
-  Never returns another user's data.
+- Wallet-scoping: the export only returns data for the `wallet` parameter value,
+  and a wallet-owner principal may only name its own address. Never returns
+  another user's data.
+- Errors follow the standard envelope: `401 UNAUTHORIZED` when no valid principal
+  is presented, `403 FORBIDDEN` when an authenticated wallet names a different
+  wallet.
 
 ---
 
