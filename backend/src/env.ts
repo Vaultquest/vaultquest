@@ -41,7 +41,15 @@ const schema = z.object({
    */
   BACKUP_DIR: z.string().min(1).optional(),
   BACKUP_RETAIN_DAYS: z.coerce.number().int().positive().default(7),
-  BACKUP_SCHEDULE: z.string().default("0 2 * * *")
+  BACKUP_SCHEDULE: z.string().default("0 2 * * *"),
+  /** Master key used for envelope encryption of PII fields (issue #76). */
+  PRIVACY_MASTER_KEY: z.string().min(16).optional(),
+  /**
+   * How long a signed export challenge stays valid, in milliseconds (issue #10).
+   * Wide enough to absorb clock skew between a browser and the server, short
+   * enough that a captured signature is not useful for long. Default 5 minutes.
+   */
+  EXPORT_SIGNATURE_TTL_MS: z.coerce.number().int().positive().default(5 * 60 * 1000)
 });
 
 export type Env = z.infer<typeof schema>;
@@ -73,7 +81,9 @@ export function getEnv(): Env {
       API_KEY: process.env.API_KEY || undefined,
       BACKUP_DIR: process.env.BACKUP_DIR || undefined,
       BACKUP_RETAIN_DAYS: Number(process.env.BACKUP_RETAIN_DAYS ?? 7),
-      BACKUP_SCHEDULE: process.env.BACKUP_SCHEDULE ?? "0 2 * * *"
+      BACKUP_SCHEDULE: process.env.BACKUP_SCHEDULE ?? "0 2 * * *",
+      PRIVACY_MASTER_KEY: process.env.PRIVACY_MASTER_KEY || undefined,
+      EXPORT_SIGNATURE_TTL_MS: Number(process.env.EXPORT_SIGNATURE_TTL_MS ?? 5 * 60 * 1000)
     } satisfies Env;
   }
   return parseEnv();

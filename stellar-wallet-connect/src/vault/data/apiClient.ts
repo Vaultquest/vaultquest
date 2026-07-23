@@ -189,12 +189,26 @@ export class VaultApiClient {
     return body.data.deleted;
   }
 
-  async exportActivity(options: { wallet: string; format: "json" | "csv"; from?: string; to?: string }): Promise<Blob> {
+  /**
+   * Export requires authorization (#10): `wallet` selects the data but no
+   * longer authorizes it. Pass `authHeaders` carrying either a signed wallet
+   * challenge (`x-wallet-address` / `x-wallet-timestamp` / `x-wallet-signature`)
+   * or a service credential. Without them the backend answers 401.
+   */
+  async exportActivity(options: {
+    wallet: string;
+    format: "json" | "csv";
+    from?: string;
+    to?: string;
+    authHeaders?: Record<string, string>;
+  }): Promise<Blob> {
     const params = new URLSearchParams({ wallet: options.wallet, format: options.format });
     if (options.from) params.set("from", options.from);
     if (options.to) params.set("to", options.to);
 
-    const res = await fetch(this.url("/actions/export", params));
+    const res = await fetch(this.url("/actions/export", params), {
+      headers: options.authHeaders ?? {},
+    });
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
       throw new Error(body.error?.message ?? `Export failed (${res.status})`);
