@@ -365,6 +365,11 @@ export interface ActivityExportOptions {
   to?: string;
   /** Base URL of the backend API. Defaults to the centralized data config. */
   baseUrl?: string;
+  /**
+   * Authorization headers for the export (#10): a signed wallet challenge or a
+   * service credential. The backend answers 401 without them.
+   */
+  authHeaders?: Record<string, string>;
 }
 
 export type ExportState =
@@ -385,12 +390,12 @@ export function useActivityExport(): ActivityExportResult {
   const reset = useCallback(() => setState({ status: "idle" }), []);
 
   const trigger = useCallback(async (options: ActivityExportOptions) => {
-    const { wallet, format, from, to, baseUrl } = options;
+    const { wallet, format, from, to, baseUrl, authHeaders } = options;
     setState({ status: "loading" });
 
     try {
       const api = createApiClient(baseUrl);
-      const blob = await api.exportActivity({ wallet, format, from, to });
+      const blob = await api.exportActivity({ wallet, format, from, to, authHeaders });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       const filename = `vaultquest-activity-${wallet.slice(0, 8)}.${format}`;

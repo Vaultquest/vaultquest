@@ -14,6 +14,7 @@ import { MetricsService } from "./services/metricsService.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { rateLimiter } from "./middleware/rateLimiter.js";
 import { requireApiKey } from "./middleware/api-key-auth.js";
+import { requireExportAuth } from "./middleware/export-auth.js";
 import { createLogger } from "./logger.js";
 import type { Logger } from "pino";
 import type { CacheService } from "./services/cacheService.js";
@@ -32,6 +33,8 @@ export type AppDeps = {
   logger?: Logger;
   cacheService?: CacheService;
   privacyMasterKey?: string;
+  /** Freshness window for signed export challenges (#10). Defaults to 5 minutes. */
+  exportSignatureTtlMs?: number;
 };
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -96,8 +99,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Guard is a no-op when apiKey is undefined (local dev without configuration).
   const apiKeyGuard = requireApiKey(deps.apiKey);
 
+  // Export authorization (#10). Deliberately not disabled by absent config:
+  // export discloses a wallet's history, so it always demands a principal.
+  const exportAuthGuard = requireExportAuth({
+    apiKey: deps.apiKey,
+    internalSecret: deps.internalSecret,
+    ...(deps.exportSignatureTtlMs === undefined ? {} : { signatureTtlMs: deps.exportSignatureTtlMs })
+  });
+
   app.register(healthRoutes(svc));
-  app.register(actionsRoutes(svc, apiKeyGuard));
+  app.register(actionsRoutes(svc, apiKeyGuard, exportAuthGuard));
   app.register(savedPoolsRoutes(savedPoolsSvc));
   app.register(internalRoutes(svc, deps.internalSecret));
   app.register(metricsRoutes(metricsSvc, apiKeyGuard));
