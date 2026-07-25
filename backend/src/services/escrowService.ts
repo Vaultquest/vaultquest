@@ -58,6 +58,11 @@ export interface EscrowServiceDeps {
   networkPassphrase: string;
   /** Injected sleep — override to `async () => {}` in tests. */
   sleep?: (ms: number) => Promise<void>;
+  logger?: {
+    info(obj: object, msg?: string): void;
+    warn(obj: object, msg?: string): void;
+    error(obj: object, msg?: string): void;
+  };
 }
 
 // ─── Settlement outcome ───────────────────────────────────────────────────────
@@ -117,11 +122,20 @@ export class EscrowService {
       verifyRuntimeAbiCompatibility(process.env.CONTRACT_WASM_HASH, networkPassphrase);
     }
 
+    this.deps.logger?.info(
+      { vaultId: input.vaultId, settlementType: input.settlementType, recipient: input.recipient, amount: input.amount },
+      "Starting vault settlement process"
+    );
+
     // ── Idempotency check ─────────────────────────────────────────────────
     const existing = await prisma.vaultSettlement.findUnique({
       where: { vaultId: input.vaultId }
     });
     if (existing && (existing.state === "Resolved" || existing.state === "Refunded")) {
+      this.deps.logger?.info(
+        { vaultId: input.vaultId, state: existing.state, txHash: existing.txHash },
+        "Vault already settled, returning cached result"
+      );
       return {
         state: "Resolved",
         txHash: existing.txHash!,
@@ -157,6 +171,11 @@ export class EscrowService {
 
     // ── Retry loop ────────────────────────────────────────────────────────
     for (attempt = 1; attempt <= maxAttempts; attempt++) {
+      this.deps.logger?.info(
+        { vaultId: input.vaultId, attempt, maxAttempts },
+        "Beginning settlement submission attempt"
+      );
+
       // Reload sequence on every attempt — essential for tx_bad_seq recovery.
       const sequence = await horizon.loadSequence(signer.publicKey);
 
@@ -177,9 +196,18 @@ export class EscrowService {
         // Network-level error — treat as retryable
         const msg = err instanceof Error ? err.message : String(err);
         lastResultCode = msg;
-        if (attempt < maxAttempts && isRetryableCode(msg)) {
+        const retryable = isRetryableCode(msg);
+        
+        this.deps.logger?.warn(
+          { vaultId: input.vaultId, attempt, error: msg, isRetryable: retryable },
+          "Horizon submit encountered network/RPC exception"
+        );
+
+        if (attempt < maxAttempts && retryable) {
           const cap = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt - 1));
-          await this.sleep(Math.floor(Math.random() * cap));
+          const delay = Math.floor(Math.random() * cap);
+          this.deps.logger?.info({ vaultId: input.vaultId, delayMs: delay }, "Backing off before retry");
+          await this.sleep(delay);
           continue;
         }
         break;
@@ -190,6 +218,10 @@ export class EscrowService {
       if (result.successful) {
         // ── Success ───────────────────────────────────────────────────────
         const finalState = input.settlementType === "refund" ? "Refunded" : "Resolved";
+        this.deps.logger?.info(
+          { vaultId: input.vaultId, attempt, txHash: result.hash, finalState },
+          "Horizon submission successful"
+        );
         try {
           await prisma.vaultSettlement.update({
             where: { vaultId: input.vaultId },
@@ -211,6 +243,11 @@ export class EscrowService {
               (updateErr as any).code === "P2002");
           if (!isHashConflict) throw updateErr;
 
+          this.deps.logger?.warn(
+            { vaultId: input.vaultId, txHash: result.hash },
+            "Transaction hash conflict detected (P2002). Recording state without hash."
+          );
+
           await prisma.vaultSettlement.update({
             where: { vaultId: input.vaultId },
             data: {
@@ -225,13 +262,21 @@ export class EscrowService {
       }
 
       // ── Failed attempt ────────────────────────────────────────────────
-      if (!isRetryableCode(result.resultCode) || attempt >= maxAttempts) {
+      const retryable = isRetryableCode(result.resultCode);
+      this.deps.logger?.warn(
+        { vaultId: input.vaultId, attempt, resultCode: result.resultCode, isRetryable: retryable },
+        "Horizon submission returned failure result code"
+      );
+
+      if (!retryable || attempt >= maxAttempts) {
         break;
       }
 
       // Exponential backoff before next attempt
       const cap = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt - 1));
-      await this.sleep(Math.floor(Math.random() * cap));
+      const delay = Math.floor(Math.random() * cap);
+      this.deps.logger?.info({ vaultId: input.vaultId, delayMs: delay }, "Backing off before retry");
+      await this.sleep(delay);
     }
 
     // ── All attempts exhausted or non-retryable failure ───────────────────
@@ -239,6 +284,11 @@ export class EscrowService {
       attempt >= maxAttempts
         ? ERROR_CODES.SETTLEMENT_RETRIES_EXHAUSTED
         : ERROR_CODES.SETTLEMENT_SUBMIT_FAILED;
+
+    this.deps.logger?.error(
+      { vaultId: input.vaultId, errorCode, lastResultCode, totalAttempts: attempt },
+      "Vault settlement pipeline finished in unresolved state"
+    );
 
     await prisma.vaultSettlement.update({
       where: { vaultId: input.vaultId },

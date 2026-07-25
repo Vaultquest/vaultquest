@@ -104,4 +104,51 @@ describe("QuestService", () => {
 
     expect(elapsed).toBeLessThan(100);
   });
+
+  it("returns stable results and does not double-apply state on duplicate evaluations", async () => {
+    await seedAction(db.prisma, {
+      walletAddress: WALLET, status: "confirmed",
+      actionPayload: { vault_id: "pool-a", amount: "120" }
+    });
+
+    const firstEval = await svc.evaluateWallet(WALLET);
+    const firstSave100 = firstEval.find((q) => q.questId === "save_100")!;
+    expect(firstSave100.status).toBe("completed");
+    expect(firstSave100.completedAt).toBeInstanceOf(Date);
+
+    // Run duplicate evaluation
+    const secondEval = await svc.evaluateWallet(WALLET);
+    const secondSave100 = secondEval.find((q) => q.questId === "save_100")!;
+    expect(secondSave100.status).toBe("completed");
+    // Ensure completedAt timestamp did not change
+    expect(secondSave100.completedAt?.getTime()).toBe(firstSave100.completedAt?.getTime());
+  });
+
+  it("handles partially completed operations when new actions are seeded incrementally", async () => {
+    // Seed $60 deposit initially (partial progress for save_100)
+    await seedAction(db.prisma, {
+      walletAddress: WALLET, status: "confirmed",
+      actionPayload: { vault_id: "pool-a", amount: "60" }
+    });
+
+    const firstEval = await svc.evaluateWallet(WALLET);
+    const firstSave100 = firstEval.find((q) => q.questId === "save_100")!;
+    expect(firstSave100.status).toBe("in_progress");
+    expect(firstSave100.progress).toBe(60);
+    expect(firstSave100.completedAt).toBeNull();
+
+    // Sleep a tiny bit to ensure date difference if needed, but not strictly required
+    
+    // Seed remaining $40 deposit to complete save_100 quest
+    await seedAction(db.prisma, {
+      walletAddress: WALLET, status: "confirmed",
+      actionPayload: { vault_id: "pool-a", amount: "40" }
+    });
+
+    const secondEval = await svc.evaluateWallet(WALLET);
+    const secondSave100 = secondEval.find((q) => q.questId === "save_100")!;
+    expect(secondSave100.status).toBe("completed");
+    expect(secondSave100.progress).toBe(100);
+    expect(secondSave100.completedAt).toBeInstanceOf(Date);
+  });
 });

@@ -160,4 +160,80 @@ describe("EscrowService settlement pipeline", () => {
     expect(result.resolved).toBe(1);
     expect(result.refunded).toBe(1);
   });
+
+  it("captures logs during successful and failed settlements", async () => {
+    const loggedInfo: any[] = [];
+    const loggedWarn: any[] = [];
+    const loggedError: any[] = [];
+    const logger = {
+      info: (obj: any, msg?: string) => loggedInfo.push({ obj, msg }),
+      warn: (obj: any, msg?: string) => loggedWarn.push({ obj, msg }),
+      error: (obj: any, msg?: string) => loggedError.push({ obj, msg })
+    };
+
+    const horizon = scriptedHorizon([
+      { hash: "", successful: false, resultCode: "tx_bad_seq" },
+      { hash: "tx_ok", successful: true, resultCode: "tx_success" }
+    ]);
+    const svc = new EscrowService({
+      prisma: db.prisma, horizon, signer: makeSigner(), assembler,
+      networkPassphrase: PASSPHRASE, sleep: async () => {}, logger
+    });
+
+    await svc.settleVault({ vaultId: "v_log_test", settlementType: "release", recipient: "GWIN", amount: "100" });
+
+    // Assert info logs exist for start and success
+    expect(loggedInfo.length).toBeGreaterThan(0);
+    expect(loggedInfo[0].msg).toBe("Starting vault settlement process");
+    expect(loggedInfo.some(l => l.msg === "Horizon submission successful")).toBe(true);
+
+    // Assert warn logs exist for transient failure
+    expect(loggedWarn.length).toBe(1);
+    expect(loggedWarn[0].obj.resultCode).toBe("tx_bad_seq");
+    expect(loggedWarn[0].obj.isRetryable).toBe(true);
+  });
+
+  it("distinguishes retryable vs permanent failures and logged error", async () => {
+    const loggedError: any[] = [];
+    const logger = {
+      info: () => {},
+      warn: () => {},
+      error: (obj: any, msg?: string) => loggedError.push({ obj, msg })
+    };
+
+    const horizon = scriptedHorizon([{ hash: "", successful: false, resultCode: "tx_bad_auth" }]);
+    const svc = new EscrowService({
+      prisma: db.prisma, horizon, signer: makeSigner(), assembler,
+      networkPassphrase: PASSPHRASE, sleep: async () => {}, logger
+    });
+
+    const outcome = await svc.settleVault({ vaultId: "v_perm_fail", settlementType: "release", recipient: "GWIN", amount: "100" });
+
+    expect(outcome.state).toBe("Unresolved");
+    expect(outcome.attempts).toBe(1); // stops immediately because tx_bad_auth is not retryable
+    expect(loggedError.length).toBe(1);
+    expect(loggedError[0].msg).toBe("Vault settlement pipeline finished in unresolved state");
+    expect(loggedError[0].obj.lastResultCode).toBe("tx_bad_auth");
+  });
+
+  it("subsequent duplicate settlement requests are idempotent and return identical cached results", async () => {
+    const horizon = scriptedHorizon([{ hash: "tx_cache", successful: true, resultCode: "tx_success" }]);
+    const svc = new EscrowService({
+      prisma: db.prisma, horizon, signer: makeSigner(), assembler,
+      networkPassphrase: PASSPHRASE, sleep: async () => {}
+    });
+
+    const outcome1 = await svc.settleVault({ vaultId: "v_dup", settlementType: "release", recipient: "GWIN", amount: "100" });
+    const outcome2 = await svc.settleVault({ vaultId: "v_dup", settlementType: "release", recipient: "GWIN", amount: "100" });
+
+    expect(outcome1.state).toBe("Resolved");
+    expect(outcome1.txHash).toBe("tx_cache");
+
+    expect(outcome2.state).toBe("Resolved");
+    expect(outcome2.txHash).toBe("tx_cache");
+    expect(outcome2.attempts).toBe(0);
+    expect(outcome2.alreadySettled).toBe(true);
+
+    expect(horizon.submits).toHaveLength(1); // submitted exactly once
+  });
 });
