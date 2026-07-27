@@ -2,7 +2,7 @@
 
 Welcome! This guide explains how to choose an issue, set up the project,
 validate your changes, and prepare a pull request that maintainers can merge
-quickly. (#66)
+quickly.
 
 Reading time: ~10 minutes. If something here is wrong or out of date, open
 an issue with the `docs` label — that's the kind of contribution that helps
@@ -61,13 +61,91 @@ section — read it before running commands inside that folder.
   contract work — `rustup target add wasm32-unknown-unknown`)
 - **Postgres 16** (only for backend work — `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres:16`)
 
-### Bootstrap
+### Fork and clone
+
+Outside contributors do not have permission to push branches directly to
+`Vaultquest/vaultquest`. That is expected: push your branch to your own fork,
+then open a pull request back to this repository.
+
+1. Open <https://github.com/Vaultquest/vaultquest> and select **Fork**. On the
+   new repository page, verify the banner says **forked from
+   Vaultquest/vaultquest** before cloning it. Repositories copied or forked
+   from similarly named projects are not in the same pull-request network.
+2. Clone your fork. SSH is recommended if you have added an SSH key to GitHub:
 
 ```bash
-git clone https://github.com/<your-username>/vaultquest.git
+git clone git@github.com:<your-username>/vaultquest.git
 cd vaultquest
+git remote add upstream https://github.com/Vaultquest/vaultquest.git
+git remote -v
+```
+
+The remote output must show your fork as `origin` and the canonical repository
+as `upstream`:
+
+```text
+origin    git@github.com:<your-username>/vaultquest.git (push)
+upstream  https://github.com/Vaultquest/vaultquest.git (fetch)
+```
+
+If you prefer HTTPS, clone
+`https://github.com/<your-username>/vaultquest.git`; GitHub will prompt for a
+personal access token rather than your account password when authentication is
+required.
+
+Install the workspace dependencies after the remotes are correct:
+
+```bash
 pnpm install
 ```
+
+### Create a branch and push it
+
+Never develop on or push directly to `upstream/main`. Start each issue from the
+latest canonical `main`, then push the new branch to `origin` (your fork):
+
+```bash
+git fetch upstream
+git switch main
+git merge --ff-only upstream/main
+git push origin main
+
+git switch -c fix/issue-<number>-short-description
+# Make and test your changes, then commit them.
+git add <changed-files>
+git commit -m "fix: short description"
+git push -u origin fix/issue-<number>-short-description
+```
+
+Open the URL printed by `git push`, or create the pull request from the command
+line:
+
+```bash
+gh pr create \
+  --repo Vaultquest/vaultquest \
+  --base main \
+  --head <your-username>:fix/issue-<number>-short-description
+```
+
+Confirm the GitHub comparison page says:
+`base repository: Vaultquest/vaultquest`, `base: main`, and
+`head repository: <your-username>/vaultquest`.
+
+### Push and pull-request troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Permission to Vaultquest/vaultquest denied` | `origin` points at the canonical repository | Run `git remote set-url origin git@github.com:<your-username>/vaultquest.git`, then push again. |
+| `Repository not found` over SSH | The SSH key is missing or belongs to another GitHub account | Run `ssh -T git@github.com`, then add or select the correct key in GitHub. HTTPS with a token is also supported. |
+| `remote origin already exists` | The clone already has an `origin` remote | Use `git remote set-url origin ...` instead of `git remote add origin ...`. |
+| `non-fast-forward` when updating `main` | Your fork is behind or has diverged | Fetch `upstream`, update your work, and push your fork. Do not force-push shared branches. |
+| GitHub says there is nothing to compare | The branch has no commits relative to canonical `main`, or the wrong head repository was selected | Check `git log upstream/main..HEAD`, push the branch to your fork, and select your fork as the PR head. |
+| Your repository is not available as a PR head | It is a standalone copy or belongs to a different fork network | Preserve any work, rename the existing GitHub repository if it occupies the `vaultquest` name, then use **Fork** on `Vaultquest/vaultquest` and push the branch to that fork. |
+| A fork already exists | GitHub allows one fork of a repository per account | Reuse the existing fork and sync it from `upstream/main`. |
+
+If a push still fails, include the output of `git remote -v`,
+`git branch --show-current`, and the exact error message in the related issue.
+Never post access tokens, private SSH keys, or `.env` contents.
 
 Then follow the per-package setup that matches your issue:
 

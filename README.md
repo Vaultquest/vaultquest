@@ -19,7 +19,7 @@ remains withdrawable in full.
 ## Quick start
 
 ```bash
-git clone https://github.com/Obiajulu-gif/vaultquest.git
+git clone https://github.com/Vaultquest/vaultquest.git
 cd vaultquest
 pnpm install
 
@@ -37,6 +37,7 @@ For per-package setup, see the README inside each folder.
 We welcome contributions from everyone. Before opening a PR, please read
 [**CONTRIBUTING.md**](./CONTRIBUTING.md) — it covers:
 
+- How to fork the canonical repository and push to your own fork
 - How to choose an issue (good-first, frontend, backend, contracts, docs)
 - Local setup and validation commands
 - PR expectations (screenshots, tests, linked issues)
@@ -46,5 +47,3 @@ We welcome contributions from everyone. Before opening a PR, please read
 ## License
 
 License details are managed separately.
-
-// Comment befire starting
