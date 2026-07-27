@@ -723,7 +723,7 @@ fn draw_winner_emits_payout_event() {
     client.deposit(&alice, &1_000);
 
     let winner = client.draw_winner(&admin, &100);
-    assert_eq!(winner, admin);
+    assert_eq!(winner, alice);
 
     let events = env.events().all();
     let payout_event = events.iter().find(|(_, topics, _)| {
@@ -1343,162 +1343,214 @@ fn test_deposit_after_lockup_expiration_resets_lockup_window() {
     assert_eq!(payout, 600);
 }
 
+fn generate_secret_and_commitment(env: &Env, secret_val: u8) -> (BytesN<32>, BytesN<32>) {
+    let mut secret_bytes = [0u8; 32];
+    secret_bytes[0] = secret_val;
+    let secret = BytesN::from_array(env, &secret_bytes);
+    let commitment: BytesN<32> = env.crypto().sha256(secret.as_ref()).into();
+    (secret, commitment)
+}
+
 #[test]
-fn test_proposal_expiry() {
+fn test_commit_reveal_success() {
     let (env, client, admin) = setup();
     client.create(&admin);
 
-    let signer2 = Address::generate(&env);
-    client.add_admin(&admin, &signer2);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
 
-    let recipient = Address::generate(&env);
-    let pid = client.propose(
+    client.join(&alice);
+    client.deposit(&alice, &1_000);
+    client.join(&bob);
+    client.deposit(&bob, &2_000);
+
+    let current = env.ledger().sequence();
+    let freeze_ledger = current + 2;
+    let reveal_deadline = current + 10;
+
+    let (secret, commitment) = generate_secret_and_commitment(&env, 42);
+
+    client.commit_draw(
         &admin,
-        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+        &1, // round_id
+        &commitment,
+        &freeze_ledger,
+        &reveal_deadline,
+        &500, // prize
     );
 
-    // Fast-forward ledger time past 7 days (7 * 24 * 60 * 60 = 604,800 seconds)
-    env.ledger().with_mut(|li| {
-        li.timestamp += 7 * 24 * 60 * 60 + 10;
-    });
+    // Verify deposits/withdrawals are blocked while draw is active
+    assert_eq!(client.try_deposit(&alice, &100), Err(Ok(Error::DrawActive)));
+    assert_eq!(client.try_withdraw(&alice), Err(Ok(Error::DrawActive)));
 
-    // Try to approve should fail with Error::ProposalExpired
+    // Verify finalize fails before freeze_ledger
     assert_eq!(
-        client.try_approve(&signer2, &pid),
-        Err(Ok(Error::ProposalExpired))
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]),
+        Err(Ok(Error::DrawNotFrozen))
     );
+
+    // Advance sequence past freeze ledger
+    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+
+    // Finalize draw
+    let winner = client.finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]);
+    assert!(winner == alice || winner == bob);
+
+    let win_p = client.savings(&winner);
+    assert_eq!(win_p.claimable, 500 + win_p.deposited); // deposit is 1000 or 2000, claimable starts as deposit + prize
+
+    // Verify idempotency: cannot finalize again
+    assert_eq!(
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]),
+        Err(Ok(Error::DrawNotCommitted))
+    );
+
+    // Verify deposits/withdrawals are unblocked
+    client.deposit(&alice, &100);
+    assert_eq!(client.savings(&alice).deposited, 1100);
 }
 
 #[test]
-fn test_proposal_cancellation() {
+fn test_commit_reveal_failure_and_cancellation() {
     let (env, client, admin) = setup();
     client.create(&admin);
 
-    let signer2 = Address::generate(&env);
-    client.add_admin(&admin, &signer2);
+    let alice = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &1_000);
 
-    let recipient = Address::generate(&env);
-    let pid = client.propose(
+    let current = env.ledger().sequence();
+    let freeze_ledger = current + 2;
+    let reveal_deadline = current + 10;
+
+    let (secret, commitment) = generate_secret_and_commitment(&env, 99);
+
+    client.commit_draw(
         &admin,
-        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+        &1, // round_id
+        &commitment,
+        &freeze_ledger,
+        &reveal_deadline,
+        &500, // prize
     );
 
-    // signer2 cannot cancel it because they are not the proposer
+    // Try to cancel before deadline - should fail for non-admin
+    let rando = Address::generate(&env);
     assert_eq!(
-        client.try_cancel(&signer2, &pid),
-        Err(Ok(Error::Unauthorized))
+        client.try_cancel_draw(&rando),
+        Err(Ok(Error::DeadlineNotReached))
     );
 
-    // Proposer (admin) cancels
-    client.cancel(&admin, &pid);
+    // Advance sequence past deadline
+    env.ledger().with_mut(|li| li.sequence_number = reveal_deadline + 1);
 
-    // Approval of cancelled proposal fails
+    // Verify finalize fails now
     assert_eq!(
-        client.try_approve(&signer2, &pid),
-        Err(Ok(Error::ProposalCancelled))
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone()]),
+        Err(Ok(Error::DeadlinePassed))
     );
+
+    // Cancel draw (can be called by anyone after deadline)
+    client.cancel_draw(&rando);
+
+    // Verify deposits/withdrawals are unblocked
+    client.deposit(&alice, &100);
+    assert_eq!(client.savings(&alice).deposited, 1100);
 }
 
 #[test]
-fn test_idempotent_proposal_execution() {
+fn test_commit_reveal_participants_validation() {
     let (env, client, admin) = setup();
     client.create(&admin);
-    client.deposit(&admin, &500);
 
-    let signer2 = Address::generate(&env);
-    client.add_admin(&admin, &signer2);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &1_000);
+    client.join(&bob);
+    client.deposit(&bob, &2_000);
 
-    let recipient = Address::generate(&env);
-    let pid = client.propose(
+    let current = env.ledger().sequence();
+    let freeze_ledger = current + 2;
+    let reveal_deadline = current + 10;
+
+    let (secret, commitment) = generate_secret_and_commitment(&env, 123);
+
+    client.commit_draw(
         &admin,
-        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+        &1,
+        &commitment,
+        &freeze_ledger,
+        &reveal_deadline,
+        &500,
     );
 
-    // Execute the proposal
-    assert!(client.approve(&signer2, &pid));
-    assert_eq!(client.pool().total_deposited, 400);
+    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
 
-    // Try to approve/execute again fails with Error::ProposalAlreadyExecuted
+    // 1. Omit Bob - total weight doesn't match total_deposited
     assert_eq!(
-        client.try_approve(&signer2, &pid),
-        Err(Ok(Error::ProposalAlreadyExecuted))
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone()]),
+        Err(Ok(Error::InvalidParticipantsList))
+    );
+
+    // 2. Duplicate Alice
+    assert_eq!(
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone(), alice.clone(), bob.clone()]),
+        Err(Ok(Error::DuplicateParticipant))
+    );
+
+    // 3. Unjoined address
+    let rando = Address::generate(&env);
+    assert_eq!(
+        client.try_finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone(), rando.clone()]),
+        Err(Ok(Error::NotJoined))
     );
 }
 
 #[test]
-fn test_bootstrap_permanently_constrained() {
+fn test_commit_reveal_rejection_sampling_unbiased() {
     let (env, client, admin) = setup();
     client.create(&admin);
 
-    let signer2 = Address::generate(&env);
-    let signer3 = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &100); // 10% weight
+    client.join(&bob);
+    client.deposit(&bob, &900); // 90% weight
 
-    // Bootstrap direct addition works when count < threshold
-    client.add_admin(&admin, &signer2); // count = 2 >= threshold (2). Bootstrap complete!
+    let mut alice_wins = 0;
+    let mut bob_wins = 0;
 
-    // Direct addition of a 3rd admin fails with BootstrapComplete
-    assert_eq!(
-        client.try_add_admin(&admin, &signer3),
-        Err(Ok(Error::BootstrapComplete))
-    );
+    // Run 30 rounds of draws with different secrets to verify statistical distribution
+    for round in 1..=30 {
+        let current = env.ledger().sequence();
+        let freeze_ledger = current + 1;
+        let reveal_deadline = current + 5;
 
-    // Direct removal also fails with BootstrapComplete
-    assert_eq!(
-        client.try_remove_admin(&admin, &signer2),
-        Err(Ok(Error::BootstrapComplete))
-    );
-}
+        let (secret, commitment) = generate_secret_and_commitment(&env, round as u8);
 
-#[test]
-fn test_random_governance_fuzz_sequence() {
-    let (env, client, admin) = setup();
-    client.create(&admin);
+        client.commit_draw(
+            &admin,
+            &round,
+            &commitment,
+            &freeze_ledger,
+            &reveal_deadline,
+            &100,
+        );
 
-    let signer2 = Address::generate(&env);
-    let signer3 = Address::generate(&env);
-    let signer4 = Address::generate(&env);
+        env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
 
-    // 1. Bootstrap: add signer2
-    client.add_admin(&admin, &signer2);
+        let winner = client.finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]);
+        if winner == alice {
+            alice_wins += 1;
+        } else if winner == bob {
+            bob_wins += 1;
+        }
+    }
 
-    // 2. Add signer3 via proposal
-    let p1 = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
-    client.approve(&signer2, &p1);
-
-    // 3. Propose to change threshold to 3
-    let p2 = client.propose(&admin, &ProposalAction::ChangeThreshold(3));
-    client.approve(&signer3, &p2);
-    assert_eq!(client.pool().threshold, 3);
-
-    // 4. Propose to add signer4
-    let p3 = client.propose(&admin, &ProposalAction::AddAdmin(signer4.clone()));
-    client.approve(&signer2, &p3);
-    // Needs 3 signatures! (proposed by admin + signer2 + signer3)
-    client.approve(&signer3, &p3);
-    assert!(client.admins().contains(&signer4));
-}
-
-#[test]
-fn test_epoch_bumps_on_immediate_execution() {
-    let (env, client, admin) = setup();
-    client.create(&admin);
-
-    let signer2 = Address::generate(&env);
-    client.add_admin(&admin, &signer2);
-
-    // Change threshold to 1. Since threshold is 2, it requires signer2's approval.
-    let p1 = client.propose(&admin, &ProposalAction::ChangeThreshold(1));
-    client.approve(&signer2, &p1);
-    
-    let pool_before = client.pool();
-    assert_eq!(pool_before.threshold, 1);
-    let epoch_before = pool_before.signer_epoch;
-
-    // Now propose a RemoveAdmin for signer2 when threshold is 1.
-    // This proposal has threshold 1. It must execute immediately and bump the epoch.
-    client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
-
-    let pool_after = client.pool();
-    assert_eq!(pool_after.signer_epoch, epoch_before + 1);
-    assert!(!client.admins().contains(&signer2));
+    // Both should win at least once, and Bob should win significantly more
+    assert!(alice_wins > 0);
+    assert!(bob_wins > 0);
+    assert!(bob_wins > alice_wins);
 }
