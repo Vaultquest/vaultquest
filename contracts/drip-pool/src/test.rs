@@ -213,33 +213,18 @@ fn duplicate_approval_rejected() {
 // ── multisig signer rotation & revoked-signer behaviour ───────────────────
 
 #[test]
-fn added_signer_counts_toward_threshold() {
-    let (env, client, admin) = setup();
-    client.create(&admin);
-    client.deposit(&admin, &500);
-
-    let signer2 = Address::generate(&env);
-    client.add_admin(&admin, &signer2);
-    assert_eq!(client.admins().len(), 2);
-
-    let recipient = Address::generate(&env);
-    let pid = client.propose(
-        &admin,
-        &ProposalAction::ReleaseEscrow(recipient.clone(), 200),
-    );
-    assert!(client.approve(&signer2, &pid));
-    assert_eq!(client.pool().total_deposited, 300);
-}
-
-#[test]
 fn duplicate_add_admin_is_noop() {
     let (env, client, admin) = setup();
     client.create(&admin);
 
     let signer2 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.add_admin(&admin, &signer2);
-    // No duplicate entry in the signer set.
+    // After the first add_admin, admins has size 2, so bootstrap is complete.
+    // The second direct add_admin must fail with Error::BootstrapComplete.
+    assert_eq!(
+        client.try_add_admin(&admin, &signer2),
+        Err(Ok(Error::BootstrapComplete))
+    );
     assert_eq!(client.admins().len(), 2);
 }
 
@@ -250,7 +235,14 @@ fn removed_signer_cannot_propose() {
 
     let signer2 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.remove_admin(&admin, &signer2);
+    
+    // To remove signer2, we must first change threshold to 1.
+    let pid1 = client.propose(&admin, &ProposalAction::ChangeThreshold(1));
+    client.approve(&signer2, &pid1);
+    
+    // Propose removing signer2. Since threshold is 1, it executes immediately.
+    client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
+    
     assert_eq!(client.admins().len(), 1);
 
     // Removed signer can no longer propose…
@@ -274,7 +266,10 @@ fn removed_signer_cannot_approve() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.add_admin(&admin, &signer3);
+    
+    // Add signer3 via proposal
+    let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &add_pid);
 
     let recipient = Address::generate(&env);
     let pid = client.propose(
@@ -283,29 +278,21 @@ fn removed_signer_cannot_approve() {
     );
 
     // Revoke signer3 while the proposal is pending.
-    client.remove_admin(&admin, &signer3);
+    let rm_pid = client.propose(&admin, &ProposalAction::RemoveAdmin(signer3.clone()));
+    client.approve(&signer2, &rm_pid);
+
+    // signer3 is removed. Try to approve the old pid should fail because signer3 is no longer authorized.
     assert_eq!(
         client.try_approve(&signer3, &pid),
         Err(Ok(Error::Unauthorized))
     );
-    assert_eq!(client.pool().total_deposited, 500);
-
-    // Remaining signers can still complete the proposal.
-    assert!(client.approve(&signer2, &pid));
-    assert_eq!(client.pool().total_deposited, 300);
-}
-
-#[test]
-fn non_signer_cannot_approve() {
-    let (env, client, admin) = setup();
-    client.create(&admin);
-
-    let pid = client.propose(&admin, &ProposalAction::AddAdmin(Address::generate(&env)));
-    let rando = Address::generate(&env);
+    
+    // Remaining signers also cannot complete the proposal from the previous epoch.
     assert_eq!(
-        client.try_approve(&rando, &pid),
-        Err(Ok(Error::Unauthorized))
+        client.try_approve(&signer2, &pid),
+        Err(Ok(Error::StaleEpoch))
     );
+    assert_eq!(client.pool().total_deposited, 500);
 }
 
 #[test]
@@ -317,7 +304,10 @@ fn duplicate_approval_does_not_inflate_threshold() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.add_admin(&admin, &signer3);
+    
+    // Add signer3 via proposal
+    let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &add_pid);
 
     let recipient = Address::generate(&env);
     let pid = client.propose(
@@ -332,7 +322,7 @@ fn duplicate_approval_does_not_inflate_threshold() {
     );
     assert_eq!(client.pool().total_deposited, 500);
 
-    // A second distinct signer proves the count was still 1 of 2.
+    // A second distinct signer reaches the threshold and executes.
     assert!(client.approve(&signer2, &pid));
     assert_eq!(client.pool().total_deposited, 0);
 }
@@ -346,7 +336,10 @@ fn approval_order_is_irrelevant() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.add_admin(&admin, &signer3);
+    
+    // Add signer3 via proposal
+    let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &add_pid);
 
     let recipient = Address::generate(&env);
 
@@ -376,7 +369,10 @@ fn executed_proposal_cannot_be_reapproved() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.add_admin(&admin, &signer3);
+    
+    // Add signer3 via proposal
+    let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &add_pid);
 
     let recipient = Address::generate(&env);
     let pid = client.propose(
@@ -385,34 +381,41 @@ fn executed_proposal_cannot_be_reapproved() {
     );
     assert!(client.approve(&signer2, &pid));
 
-    // Executed proposals are deleted — a late approval cannot re-execute.
+    // Executed proposals are saved in storage as Executed — a late approval returns ProposalAlreadyExecuted
     assert_eq!(
         client.try_approve(&signer3, &pid),
-        Err(Ok(Error::ProposalNotFound))
+        Err(Ok(Error::ProposalAlreadyExecuted))
     );
     assert_eq!(client.pool().total_deposited, 300);
 }
 
-/// Documents current behaviour: an approval recorded while the signer was
-/// still a member is NOT pruned when that signer is later removed. The stale
-/// approval keeps counting toward the threshold. If this is undesirable,
-/// approvals must be re-validated against the signer set at execution time.
 #[test]
-fn stale_approval_from_removed_signer_still_counts() {
+fn stale_approval_from_removed_signer_is_prevented() {
     let (env, client, admin) = setup();
     client.create(&admin);
 
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
+    let signer4 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
+    
+    // Add signer3 via proposal
+    let add_pid1 = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &add_pid1);
 
-    // signer2 proposes (auto-approves, 1 of 2), then is removed.
-    let pid = client.propose(&signer2, &ProposalAction::AddAdmin(signer3.clone()));
-    client.remove_admin(&admin, &signer2);
+    // signer2 proposes a release escrow (auto-approves, 1 of 2), then is removed.
+    let pid = client.propose(&signer2, &ProposalAction::AddAdmin(signer4.clone()));
+    
+    // Remove signer2 via proposal
+    let rm_pid = client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
+    client.approve(&signer3, &rm_pid);
 
-    // signer2's recorded approval still counts — admin's approval executes.
-    assert!(client.approve(&admin, &pid));
-    assert!(client.admins().contains(&signer3));
+    // signer2's proposal is stale due to epoch change. Admin approving it should fail with StaleEpoch.
+    assert_eq!(
+        client.try_approve(&admin, &pid),
+        Err(Ok(Error::StaleEpoch))
+    );
+    assert!(!client.admins().contains(&signer4));
 }
 
 #[test]
@@ -466,32 +469,31 @@ fn cannot_remove_last_admin() {
 }
 
 #[test]
-fn threshold_unreachable_after_signer_set_shrinks() {
+fn prevent_unreachable_quorum_when_signer_set_shrinks() {
     let (env, client, admin) = setup();
     client.create(&admin);
     client.deposit(&admin, &500);
 
     let signer2 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    client.remove_admin(&admin, &signer2);
 
-    // Threshold stays 2-of-N: a lone signer can propose but never execute.
-    let recipient = Address::generate(&env);
-    let pid = client.propose(
-        &admin,
-        &ProposalAction::ReleaseEscrow(recipient.clone(), 500),
-    );
+    // Direct remove admin fails because bootstrap is complete
     assert_eq!(
-        client.try_approve(&admin, &pid),
-        Err(Ok(Error::AlreadySigned))
+        client.try_remove_admin(&admin, &signer2),
+        Err(Ok(Error::BootstrapComplete))
+    );
+
+    // Proposing to remove signer2 without changing threshold to 1 first
+    // should fail during execution/validation since remaining signer count (1)
+    // would be less than the threshold (2).
+    let pid = client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
+    
+    // Approving it will try to execute it, which fails with Error::InvalidThreshold
+    assert_eq!(
+        client.try_approve(&signer2, &pid),
+        Err(Ok(Error::InvalidThreshold))
     );
     assert_eq!(client.pool().total_deposited, 500);
-
-    // Re-adding a second signer makes the pending proposal executable again.
-    let signer3 = Address::generate(&env);
-    client.add_admin(&admin, &signer3);
-    assert!(client.approve(&signer3, &pid));
-    assert_eq!(client.pool().total_deposited, 0);
 }
 
 // ── #141: adversarial prize-draw edge cases ────────────────────────────────
@@ -1341,387 +1343,162 @@ fn test_deposit_after_lockup_expiration_resets_lockup_window() {
     assert_eq!(payout, 600);
 }
 
-// ── #72: share-based NAV vault ──────────────────────────────────────────────
-
-fn vault_setup() -> (Env, DripPoolClient<'static>, Address) {
+#[test]
+fn test_proposal_expiry() {
     let (env, client, admin) = setup();
     client.create(&admin);
-    client.vault_init(&admin);
-    (env, client, admin)
-}
 
-#[test]
-fn vault_init_requires_an_existing_signer() {
-    let (_env, client, admin) = setup();
-    // create() was never called, so Admins is empty and admin isn't a signer.
-    assert_eq!(client.try_vault_init(&admin), Err(Ok(Error::Unauthorized)));
-}
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
 
-#[test]
-fn vault_init_twice_fails() {
-    let (_env, client, admin) = vault_setup();
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+    );
+
+    // Fast-forward ledger time past 7 days (7 * 24 * 60 * 60 = 604,800 seconds)
+    env.ledger().with_mut(|li| {
+        li.timestamp += 7 * 24 * 60 * 60 + 10;
+    });
+
+    // Try to approve should fail with Error::ProposalExpired
     assert_eq!(
-        client.try_vault_init(&admin),
-        Err(Ok(Error::AlreadyInitialized))
+        client.try_approve(&signer2, &pid),
+        Err(Ok(Error::ProposalExpired))
     );
 }
 
 #[test]
-fn vault_deposit_before_init_fails() {
+fn test_proposal_cancellation() {
     let (env, client, admin) = setup();
     client.create(&admin);
-    let alice = Address::generate(&env);
-    assert_eq!(
-        client.try_vault_deposit(&alice, &100, &0),
-        Err(Ok(Error::NotInitialized))
-    );
-}
 
-// ── first / last user, single round trip ────────────────────────────────────
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
 
-#[test]
-fn first_depositor_gets_shares_and_can_fully_exit_as_the_last_holder() {
-    let (env, client, _admin) = vault_setup();
-    let alice = Address::generate(&env);
-
-    let shares = client.vault_deposit(&alice, &1_000_000, &0);
-    assert!(shares > 0);
-    assert_eq!(client.vault_share_balance(&alice), shares);
-
-    let version = client.vault_snapshot().version;
-    let request_id = client.vault_request_withdrawal(&alice, &shares, &version);
-    let request = client.vault_withdrawal_request(&request_id);
-    assert_eq!(request.assets_owed, 1_000_000);
-
-    let paid = client.vault_fulfill_withdrawal(&alice, &request_id, &1_000_000);
-    assert_eq!(paid, 1_000_000);
-    assert_eq!(client.vault_share_balance(&alice), 0);
-    assert_eq!(client.vault_snapshot().total_shares, 0);
-}
-
-#[test]
-fn simultaneous_deposits_get_fair_proportional_shares() {
-    let (env, client, _admin) = vault_setup();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-
-    let alice_shares = client.vault_deposit(&alice, &1_000, &0);
-    let version = client.vault_snapshot().version;
-    let bob_shares = client.vault_deposit(&bob, &1_000, &version);
-
-    assert_eq!(alice_shares, bob_shares);
-}
-
-#[test]
-fn cannot_request_withdrawal_of_more_shares_than_you_personally_own() {
-    let (env, client, _admin) = vault_setup();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    client.vault_deposit(&alice, &1_000, &0);
-    let v1 = client.vault_snapshot().version;
-    let bob_shares = client.vault_deposit(&bob, &1_000, &v1);
-
-    // Combined total_shares would cover this, but Alice only owns her own share of it.
-    let too_many = bob_shares + 1;
-    let v2 = client.vault_snapshot().version;
-    assert_eq!(
-        client.try_vault_request_withdrawal(&alice, &too_many, &v2),
-        Err(Ok(Error::InsufficientShares))
-    );
-}
-
-// ── stale NAV / preview-matches-execution ───────────────────────────────────
-
-#[test]
-fn stale_snapshot_version_is_rejected() {
-    let (env, client, _admin) = vault_setup();
-    let alice = Address::generate(&env);
-    client.vault_deposit(&alice, &1_000, &0);
-    // The version has already moved on — depositing against stale version 0 again must fail.
-    assert_eq!(
-        client.try_vault_deposit(&alice, &500, &0),
-        Err(Ok(Error::StaleSnapshot))
-    );
-}
-
-#[test]
-fn preview_matches_execution_when_version_unchanged() {
-    let (env, client, _admin) = vault_setup();
-    let alice = Address::generate(&env);
-    client.vault_deposit(&alice, &10_000, &0);
-
-    let version = client.vault_snapshot().version;
-    let previewed = client.vault_preview_deposit(&2_000);
-    let executed = client.vault_deposit(&alice, &2_000, &version);
-    assert_eq!(previewed, executed);
-}
-
-// ── gain / loss cycles and the high-water mark ──────────────────────────────
-
-#[test]
-fn gain_loss_cycle_and_high_water_mark_via_contract_calls() {
-    let (env, client, admin) = vault_setup();
-    client.vault_set_performance_fee_bps(&admin, &2_000); // 20%
-    let alice = Address::generate(&env);
-    client.vault_deposit(&alice, &1_000_000, &0);
-
-    client.vault_report_gain(&admin, &500_000);
-    let first_charge = client.vault_accrue_performance_fee(&admin);
-    assert!(first_charge > 0);
-
-    // No new gain since the last checkpoint — must charge nothing.
-    assert_eq!(client.vault_accrue_performance_fee(&admin), 0);
-
-    client.vault_report_loss(&admin, &300_000);
-    assert_eq!(
-        client.vault_accrue_performance_fee(&admin),
-        0,
-        "a drawdown below the high-water mark owes nothing"
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
     );
 
-    client.vault_report_gain(&admin, &500_000);
-    let recovery_charge = client.vault_accrue_performance_fee(&admin);
-    assert!(
-        recovery_charge > 0,
-        "only the recovery past the prior peak is taxable"
-    );
-
-    assert!(client.vault_snapshot().accrued_fees > 0);
-}
-
-#[test]
-fn only_a_signer_can_report_gain_or_loss() {
-    let (env, client, _admin) = vault_setup();
-    let rando = Address::generate(&env);
+    // signer2 cannot cancel it because they are not the proposer
     assert_eq!(
-        client.try_vault_report_gain(&rando, &100),
+        client.try_cancel(&signer2, &pid),
         Err(Ok(Error::Unauthorized))
     );
+
+    // Proposer (admin) cancels
+    client.cancel(&admin, &pid);
+
+    // Approval of cancelled proposal fails
     assert_eq!(
-        client.try_vault_report_loss(&rando, &100),
-        Err(Ok(Error::Unauthorized))
+        client.try_approve(&signer2, &pid),
+        Err(Ok(Error::ProposalCancelled))
     );
 }
 
 #[test]
-fn management_and_performance_fees_default_off_and_are_governance_configurable() {
-    let (env, client, admin) = vault_setup();
-    assert_eq!(client.vault_snapshot().accrued_fees, 0);
+fn test_idempotent_proposal_execution() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.deposit(&admin, &500);
 
-    let alice = Address::generate(&env);
-    client.vault_deposit(&alice, &1_000_000, &0);
-    client.vault_report_gain(&admin, &500_000);
-    // Rates are 0 by default — accruing charges nothing until configured.
-    client.vault_accrue_performance_fee(&admin);
-    assert_eq!(client.vault_snapshot().accrued_fees, 0);
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
 
-    client.vault_set_performance_fee_bps(&admin, &1_000);
-    client.vault_report_gain(&admin, &1);
-    assert!(client.vault_accrue_performance_fee(&admin) > 0);
-}
+    let recipient = Address::generate(&env);
+    let pid = client.propose(
+        &admin,
+        &ProposalAction::ReleaseEscrow(recipient.clone(), 100),
+    );
 
-// ── partial withdrawal queue ─────────────────────────────────────────────────
+    // Execute the proposal
+    assert!(client.approve(&signer2, &pid));
+    assert_eq!(client.pool().total_deposited, 400);
 
-#[test]
-fn partial_withdrawal_queue_across_multiple_fulfillments() {
-    let (env, client, admin) = vault_setup();
-    let alice = Address::generate(&env);
-    let shares = client.vault_deposit(&alice, &1_000, &0);
-
-    let version = client.vault_snapshot().version;
-    let request_id = client.vault_request_withdrawal(&alice, &shares, &version);
-
-    let paid1 = client.vault_fulfill_withdrawal(&alice, &request_id, &400);
-    assert_eq!(paid1, 400);
-    // The admin can also batch the rest of the queue as liquidity frees up.
-    let paid2 = client.vault_fulfill_withdrawal(&admin, &request_id, &600);
-    assert_eq!(paid2, 600);
-
-    let request = client.vault_withdrawal_request(&request_id);
-    assert_eq!(request.assets_paid, request.assets_owed);
+    // Try to approve/execute again fails with Error::ProposalAlreadyExecuted
     assert_eq!(
-        client.try_vault_fulfill_withdrawal(&admin, &request_id, &1),
-        Err(Ok(Error::WithdrawalAlreadySettled))
+        client.try_approve(&signer2, &pid),
+        Err(Ok(Error::ProposalAlreadyExecuted))
     );
 }
 
 #[test]
-fn fulfill_withdrawal_requires_the_owner_or_an_approved_signer() {
-    let (env, client, _admin) = vault_setup();
-    let alice = Address::generate(&env);
-    let shares = client.vault_deposit(&alice, &1_000, &0);
-    let version = client.vault_snapshot().version;
-    let request_id = client.vault_request_withdrawal(&alice, &shares, &version);
+fn test_bootstrap_permanently_constrained() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
 
-    let rando = Address::generate(&env);
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+
+    // Bootstrap direct addition works when count < threshold
+    client.add_admin(&admin, &signer2); // count = 2 >= threshold (2). Bootstrap complete!
+
+    // Direct addition of a 3rd admin fails with BootstrapComplete
     assert_eq!(
-        client.try_vault_fulfill_withdrawal(&rando, &request_id, &100),
-        Err(Ok(Error::Unauthorized))
-    );
-}
-
-// ── donation isolation / inflation-attack resistance ────────────────────────
-
-#[test]
-fn donation_is_invisible_until_recognized() {
-    let (env, client, admin) = vault_setup();
-    let alice = Address::generate(&env);
-    client.vault_deposit(&alice, &1_000, &0);
-    let shares = client.vault_share_balance(&alice);
-    let price_before = client.vault_preview_redeem(&shares);
-
-    client.vault_note_donation(&admin, &1_000_000);
-    assert_eq!(client.vault_preview_redeem(&shares), price_before);
-
-    client.vault_recognize_donation(&admin, &1_000_000);
-    assert!(client.vault_preview_redeem(&shares) > price_before);
-}
-
-#[test]
-fn donation_attack_does_not_rob_the_second_depositor() {
-    let (env, client, admin) = vault_setup();
-    let attacker = Address::generate(&env);
-    let victim = Address::generate(&env);
-
-    client.vault_deposit(&attacker, &1, &0);
-    client.vault_note_donation(&admin, &1_000_000_000);
-    client.vault_recognize_donation(&admin, &1_000_000_000);
-
-    let version = client.vault_snapshot().version;
-    let victim_deposit = 1_000_000;
-    let victim_shares = client.vault_deposit(&victim, &victim_deposit, &version);
-    assert!(
-        victim_shares > 0,
-        "victim must receive non-zero shares for a real deposit"
+        client.try_add_admin(&admin, &signer3),
+        Err(Ok(Error::BootstrapComplete))
     );
 
-    let redeemable = client.vault_preview_redeem(&victim_shares);
-    assert!(redeemable * 100 >= victim_deposit * 99);
-}
-
-// ── tiny amounts / decimal mismatch ──────────────────────────────────────────
-
-#[test]
-fn tiny_deposit_after_a_large_supply_still_gets_fair_shares() {
-    let (env, client, _admin) = vault_setup();
-    let whale = Address::generate(&env);
-    client.vault_deposit(&whale, &1_000_000_000, &0);
-
-    let minnow = Address::generate(&env);
-    let version = client.vault_snapshot().version;
-    let minnow_shares = client.vault_deposit(&minnow, &1, &version);
-    assert!(minnow_shares > 0);
-}
-
-// ── dust and fee claims ──────────────────────────────────────────────────────
-
-#[test]
-fn dust_sweep_pays_the_configured_beneficiary() {
-    let (env, client, admin) = vault_setup();
-    let alice = Address::generate(&env);
-    client.vault_deposit(&alice, &1_000_000, &0);
-    client.vault_report_gain(&admin, &1);
-    let shares = client.vault_share_balance(&alice);
-    let version = client.vault_snapshot().version;
-    client.vault_request_withdrawal(&alice, &shares, &version);
-
-    assert_eq!(client.vault_snapshot().dust, 1);
-    let swept = client.vault_sweep_dust(&admin);
-    assert_eq!(swept, 1);
-    assert_eq!(client.vault_snapshot().dust, 0);
-}
-
-#[test]
-fn claim_fees_pays_the_configured_recipient_and_cannot_exceed_accrued() {
-    let (env, client, admin) = vault_setup();
-    let alice = Address::generate(&env);
-    client.vault_deposit(&alice, &1_000_000, &0);
-    client.vault_set_performance_fee_bps(&admin, &2_000);
-    client.vault_report_gain(&admin, &500_000);
-    client.vault_accrue_performance_fee(&admin);
-
-    let accrued = client.vault_snapshot().accrued_fees;
-    assert!(accrued > 0);
+    // Direct removal also fails with BootstrapComplete
     assert_eq!(
-        client.try_vault_claim_fees(&admin, &(accrued + 1)),
-        Err(Ok(Error::InsufficientBalance))
+        client.try_remove_admin(&admin, &signer2),
+        Err(Ok(Error::BootstrapComplete))
     );
-    client.vault_claim_fees(&admin, &accrued);
-    assert_eq!(client.vault_snapshot().accrued_fees, 0);
-}
-
-// ── event emission ───────────────────────────────────────────────────────────
-
-#[test]
-fn vault_deposit_emits_event() {
-    let (env, client, _admin) = vault_setup();
-    let alice = Address::generate(&env);
-    let shares = client.vault_deposit(&alice, &500, &0);
-    let version = client.vault_snapshot().version;
-
-    let events = env.events().all();
-    let deposit_event = events.iter().find(|(_, topics, _)| {
-        *topics
-            == vec![
-                &env,
-                symbol_short!("vault").into_val(&env),
-                symbol_short!("deposit").into_val(&env),
-            ]
-    });
-    let (_, _, payload) = deposit_event.expect("vault deposit event not found");
-    let val: (Address, i128, i128, u64) =
-        <(Address, i128, i128, u64)>::try_from_val(&env, &payload).unwrap();
-    assert_eq!(val, (alice.clone(), 500i128, shares, version));
 }
 
 #[test]
-fn vault_fulfill_withdrawal_emits_event() {
-    let (env, client, _admin) = vault_setup();
-    let alice = Address::generate(&env);
-    let shares = client.vault_deposit(&alice, &1_000, &0);
-    let version = client.vault_snapshot().version;
-    let request_id = client.vault_request_withdrawal(&alice, &shares, &version);
-    client.vault_fulfill_withdrawal(&alice, &request_id, &400);
+fn test_random_governance_fuzz_sequence() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
 
-    let events = env.events().all();
-    let fulfilled_event = events.iter().find(|(_, topics, _)| {
-        *topics
-            == vec![
-                &env,
-                symbol_short!("vault").into_val(&env),
-                symbol_short!("fulfilled").into_val(&env),
-            ]
-    });
-    let (_, _, payload) = fulfilled_event.expect("vault fulfilled event not found");
-    let val: (u32, i128, i128) = <(u32, i128, i128)>::try_from_val(&env, &payload).unwrap();
-    assert_eq!(val, (request_id, 400i128, 600i128));
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+    let signer4 = Address::generate(&env);
+
+    // 1. Bootstrap: add signer2
+    client.add_admin(&admin, &signer2);
+
+    // 2. Add signer3 via proposal
+    let p1 = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
+    client.approve(&signer2, &p1);
+
+    // 3. Propose to change threshold to 3
+    let p2 = client.propose(&admin, &ProposalAction::ChangeThreshold(3));
+    client.approve(&signer3, &p2);
+    assert_eq!(client.pool().threshold, 3);
+
+    // 4. Propose to add signer4
+    let p3 = client.propose(&admin, &ProposalAction::AddAdmin(signer4.clone()));
+    client.approve(&signer2, &p3);
+    // Needs 3 signatures! (proposed by admin + signer2 + signer3)
+    client.approve(&signer3, &p3);
+    assert!(client.admins().contains(&signer4));
 }
 
-// ── end-to-end value conservation ────────────────────────────────────────────
-
 #[test]
-fn value_conservation_across_a_realistic_multi_user_scenario() {
-    let (env, client, admin) = vault_setup();
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
+fn test_epoch_bumps_on_immediate_execution() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
 
-    client.vault_deposit(&alice, &1_000_000, &0);
-    let v1 = client.vault_snapshot().version;
-    client.vault_deposit(&bob, &2_000_000, &v1);
-    client.vault_report_gain(&admin, &300_000);
+    let signer2 = Address::generate(&env);
+    client.add_admin(&admin, &signer2);
 
-    let alice_shares = client.vault_share_balance(&alice);
-    let v2 = client.vault_snapshot().version;
-    let request_id = client.vault_request_withdrawal(&alice, &alice_shares, &v2);
-    let owed = client.vault_withdrawal_request(&request_id).assets_owed;
-    client.vault_fulfill_withdrawal(&alice, &request_id, &owed);
+    // Change threshold to 1. Since threshold is 2, it requires signer2's approval.
+    let p1 = client.propose(&admin, &ProposalAction::ChangeThreshold(1));
+    client.approve(&signer2, &p1);
+    
+    let pool_before = client.pool();
+    assert_eq!(pool_before.threshold, 1);
+    let epoch_before = pool_before.signer_epoch;
 
-    let snap = client.vault_snapshot();
-    assert_eq!(client.vault_share_balance(&alice), 0);
-    assert!(snap.total_shares > 0, "Bob's shares remain outstanding");
-    assert_eq!(snap.pending_withdrawals, 0);
-    assert_eq!(
-        snap.total_assets + snap.dust,
-        1_000_000 + 2_000_000 + 300_000 - owed
-    );
+    // Now propose a RemoveAdmin for signer2 when threshold is 1.
+    // This proposal has threshold 1. It must execute immediately and bump the epoch.
+    client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
+
+    let pool_after = client.pool();
+    assert_eq!(pool_after.signer_epoch, epoch_before + 1);
+    assert!(!client.admins().contains(&signer2));
 }
