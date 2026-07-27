@@ -10,6 +10,7 @@
 import type { LedgerService } from "./ledger.js";
 import { withRetry, type RetryOptions } from "../utils/retry.js";
 import type { Logger } from "pino";
+import { decodeDripPoolEvent } from "../generated/drip-pool-events.js";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 

@@ -474,6 +474,15 @@ curl -X DELETE \
 
 Export wallet activity history as JSON or CSV.
 
+**Authorization (required).** Export discloses transaction history and is never
+anonymous. Present either a signed wallet challenge (`X-Wallet-Address`,
+`X-Wallet-Timestamp`, `X-Wallet-Signature` — a base64 ed25519 signature over
+`vaultquest:actions-export:<wallet>:<timestamp-ms>`, authorized for that wallet
+only) or a service credential (`X-Internal-Secret`, or `X-Api-Key` when
+configured — authorized for any wallet). Missing or invalid credentials return
+`401`; an authenticated wallet naming a different `wallet` returns `403`. See
+[API.md](./API.md#get-actionsexport) for the full model.
+
 **Query Parameters**
 
 | Parameter | Type | Required | Default | Description |

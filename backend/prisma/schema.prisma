@@ -135,3 +135,96 @@ model SavedPool {
   @@index([poolId])
   @@map("saved_pools")
 }
+
+model UserNotificationPref {
+  id            String   @id @default(uuid()) @db.Uuid
+  walletAddress String   @map("wallet_address")
+  category      String
+  encryptedPref Json     @map("encrypted_pref")
+  keyVersion    Int      @default(1) @map("key_version")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([walletAddress, category])
+  @@index([walletAddress])
+  @@map("user_notification_prefs")
+}
+
+model UserSupportEvidence {
+  id            String   @id @default(uuid()) @db.Uuid
+  walletAddress String   @map("wallet_address")
+  ticketId      String   @map("ticket_id")
+  encryptedData Json     @map("encrypted_data")
+  keyVersion    Int      @default(1) @map("key_version")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([walletAddress])
+  @@map("user_support_evidence")
+}
+
+model UserActivityLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  walletAddress String   @map("wallet_address")
+  activityType  String   @map("activity_type")
+  encryptedIp   Json?    @map("encrypted_ip")
+  encryptedMeta Json?    @map("encrypted_meta")
+  keyVersion    Int      @default(1) @map("key_version")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([walletAddress, createdAt(sort: Desc)])
+  @@map("user_activity_logs")
+}
+
+model LegalHold {
+  id            String    @id @default(uuid()) @db.Uuid
+  walletAddress String    @unique @map("wallet_address")
+  reason        String
+  createdBy     String    @map("created_by")
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  releasedAt    DateTime? @map("released_at")
+
+  @@index([walletAddress, active])
+  @@map("legal_holds")
+}
+
+model DeletionManifest {
+  id                String   @id @default(uuid()) @db.Uuid
+  walletAddressHash String   @map("wallet_address_hash")
+  status            String
+  deletedCounts     Json     @map("deleted_counts")
+  heldCounts        Json     @map("held_counts")
+  manifestHash      String   @map("manifest_hash")
+  keyVersion        Int      @default(1) @map("key_version")
+  completedAt       DateTime @default(now()) @map("completed_at")
+
+  @@index([walletAddressHash])
+  @@map("deletion_manifests")
+}
+
+model BackupExpiryManifest {
+  id                    String   @id @default(uuid()) @db.Uuid
+  deletionManifestId    String   @map("deletion_manifest_id") @db.Uuid
+  walletAddressHash     String   @map("wallet_address_hash")
+  backupRetentionCutoff DateTime @map("backup_retention_cutoff")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  @@index([walletAddressHash])
+  @@map("backup_expiry_manifests")
+}
+
+model PrivacyAuditLog {
+  id               String   @id @default(uuid()) @db.Uuid
+  action           String
+  actorWalletHash  String?  @map("actor_wallet_hash")
+  targetWalletHash String?  @map("target_wallet_hash")
+  details          Json
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([action, createdAt(sort: Desc)])
+  @@index([targetWalletHash])
+  @@map("privacy_audit_logs")
+}
+

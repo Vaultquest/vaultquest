@@ -39,10 +39,33 @@ export async function startTestDb(): Promise<TestDb> {
   };
 }
 
+async function safeDelete(deleteFn: () => Promise<any>) {
+  try {
+    await deleteFn();
+  } catch (err: any) {
+    if (
+      err.message &&
+      (err.message.includes("does not exist") ||
+        err.message.includes("P2021") ||
+        err.code === "P2021")
+    ) {
+      return;
+    }
+    throw err;
+  }
+}
+
 export async function resetDb(prisma: PrismaClient): Promise<void> {
-  await prisma.pendingEvent.deleteMany({});
-  await prisma.savedPool.deleteMany({});
-  await prisma.userQuest.deleteMany({});
-  await prisma.actionLedger.deleteMany({});
-  await prisma.indexerCheckpoint.deleteMany({});
+  await safeDelete(() => prisma.pendingEvent.deleteMany({}));
+  await safeDelete(() => prisma.savedPool.deleteMany({}));
+  await safeDelete(() => prisma.userQuest.deleteMany({}));
+  await safeDelete(() => prisma.actionLedger.deleteMany({}));
+  await safeDelete(() => prisma.indexerCheckpoint.deleteMany({}));
+  await safeDelete(() => prisma.userNotificationPref.deleteMany({}));
+  await safeDelete(() => prisma.userSupportEvidence.deleteMany({}));
+  await safeDelete(() => prisma.userActivityLog.deleteMany({}));
+  await safeDelete(() => prisma.legalHold.deleteMany({}));
+  await safeDelete(() => prisma.deletionManifest.deleteMany({}));
+  await safeDelete(() => prisma.backupExpiryManifest.deleteMany({}));
+  await safeDelete(() => prisma.privacyAuditLog.deleteMany({}));
 }

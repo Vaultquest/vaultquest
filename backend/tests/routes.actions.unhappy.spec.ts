@@ -5,6 +5,10 @@ import { randomUUID } from "node:crypto";
 const VALID_API_KEY = "a".repeat(32);
 const INTERNAL_SECRET = "test-internal-secret-123456";
 
+// Export now authenticates before it validates (#10), so these query-validation
+// cases present a service credential to reach the schema at all.
+const EXPORT_SERVICE_HEADERS = { "x-internal-secret": INTERNAL_SECRET };
+
 function getMockPrisma() {
   return {
     actionLedger: {
@@ -397,7 +401,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
 
     it("rejects GET /actions/export with invalid format", async () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
-      const res = await injectWithUniqueIp(app, "GET", "/actions/export?wallet=GABC&format=pdf");
+      const res = await injectWithUniqueIp(app, "GET", "/actions/export?wallet=GABC&format=pdf", undefined, EXPORT_SERVICE_HEADERS);
       expect(res.statusCode).toBe(400);
       const body = res.json();
       expect(body.error.code).toBe("INVALID_PAYLOAD");
@@ -407,7 +411,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
 
     it("rejects GET /actions/export with non-ISO8601 offset datetime", async () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
-      const res = await injectWithUniqueIp(app, "GET", "/actions/export?wallet=GABC&from=2026-07-20");
+      const res = await injectWithUniqueIp(app, "GET", "/actions/export?wallet=GABC&from=2026-07-20", undefined, EXPORT_SERVICE_HEADERS);
       expect(res.statusCode).toBe(400);
       const body = res.json();
       expect(body.error.code).toBe("INVALID_PAYLOAD");
@@ -417,7 +421,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
 
     it("rejects GET /actions/export with too high limit (limit 1001)", async () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
-      const res = await injectWithUniqueIp(app, "GET", "/actions/export?wallet=GABC&limit=1001");
+      const res = await injectWithUniqueIp(app, "GET", "/actions/export?wallet=GABC&limit=1001", undefined, EXPORT_SERVICE_HEADERS);
       expect(res.statusCode).toBe(400);
       const body = res.json();
       expect(body.error.code).toBe("INVALID_PAYLOAD");

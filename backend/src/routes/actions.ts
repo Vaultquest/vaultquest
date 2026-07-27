@@ -39,7 +39,8 @@ function serialize(row: Awaited<ReturnType<LedgerService["getAction"]>>) {
 
 export const actionsRoutes = (
   svc: LedgerService,
-  apiKeyGuard: preHandlerHookHandler
+  apiKeyGuard: preHandlerHookHandler,
+  exportAuthGuard: preHandlerHookHandler
 ): FastifyPluginAsync =>
   async (app) => {
     app.post("/actions", async (req, reply) => {
@@ -147,12 +148,15 @@ export const actionsRoutes = (
      *
      * Activity export endpoint (#91): returns the authenticated wallet's full
      * action history as JSON or CSV. Excludes scrubbed rows (redactedAt != null).
-     * Wallet-scoping relies on the `wallet` query param — there is no session
-     * auth on this API; the caller is responsible for passing their own address.
+     *
+     * Authorization (#10): `?wallet=` selects the data but no longer authorizes
+     * it. The caller proves who they are with either a signed wallet challenge
+     * (authorized for that wallet only) or a service credential (authorized for
+     * any wallet). See `middleware/export-auth.ts`.
      *
      * CSV sets Content-Disposition so browsers trigger a file download.
      */
-    app.get("/actions/export", async (req, reply) => {
+    app.get("/actions/export", { preHandler: exportAuthGuard }, async (req, reply) => {
       const q = exportQuery.parse(req.query);
       const rows = await svc.exportActivity({
         walletAddress: q.wallet,
