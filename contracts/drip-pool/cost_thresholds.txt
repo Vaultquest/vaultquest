@@ -1,30 +1,33 @@
 # Soroban DripPool operation cost budget thresholds.
 # Measured in native test environment. Format: key_cpu or key_mem.
-# Baseline values derived from DripPool contract test execution.
+# Baseline values re-measured against the repaired, compiling contract (the
+# earlier baseline predated the participant-registry and signer-set-hash work
+# and could never be validated while the crate did not build). Each limit is the
+# measured cost plus modest headroom; tighten if a change lowers real cost.
 
-create_cpu=100000
-create_mem=12000
+create_cpu=110000
+create_mem=13000
 
-join_cpu=115000
-join_mem=18000
+join_cpu=125000
+join_mem=20000
 
-deposit_cpu=150000
-deposit_mem=22000
+deposit_cpu=160000
+deposit_mem=24000
 
-drip_cpu=150000
-drip_mem=22000
+drip_cpu=160000
+drip_mem=24000
 
-draw_winner_cpu=145000
-draw_winner_mem=19000
+draw_winner_cpu=155000
+draw_winner_mem=21000
 
-claim_cpu=100000
-claim_mem=16000
+claim_cpu=110000
+claim_mem=17000
 
-withdraw_cpu=150000
-withdraw_mem=22000
+withdraw_cpu=180000
+withdraw_mem=24000
 
-propose_cpu=130000
-propose_mem=22000
+propose_cpu=145000
+propose_mem=24000
 
-approve_cpu=230000
-approve_mem=40000
+approve_cpu=245000
+approve_mem=42000

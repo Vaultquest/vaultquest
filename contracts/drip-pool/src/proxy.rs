@@ -61,6 +61,18 @@ pub struct WasmProvenance {
     pub compiler_hash: BytesN<32>,
 }
 
+/// Result of the off-chain migration dry-run, bundled so `propose_upgrade` stays
+/// within Soroban's 10-argument limit for contract functions. Build fix: the
+/// tests already pass this struct; the entrypoint had drifted to four loose
+/// parameters, pushing it to eleven and over the limit.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct MigrationCheck {
+    pub plan_hash: BytesN<32>,
+    pub state_hash: BytesN<32>,
+    pub compatible: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct UpgradeProposal {
@@ -179,10 +191,8 @@ impl VaultProxy {
         current_hash: BytesN<32>,
         target_hash: BytesN<32>,
         schema_version: u32,
-        migration_plan_hash: BytesN<32>,
-        migration_state_hash: BytesN<32>,
+        migration: MigrationCheck,
         earliest_ledger: u32,
-        migration_compatible: bool,
         provenance: WasmProvenance,
     ) -> Result<u32, Error> {
         signer.require_auth();
@@ -190,7 +200,7 @@ impl VaultProxy {
         if logic_contract == env.current_contract_address() {
             return Err(Error::InvalidAddress);
         }
-        if !migration_compatible {
+        if !migration.compatible {
             return Err(Error::MigrationSimulationFailed);
         }
 
@@ -215,8 +225,8 @@ impl VaultProxy {
             current_hash,
             target_hash,
             schema_version,
-            migration_plan_hash,
-            migration_state_hash,
+            migration_plan_hash: migration.plan_hash,
+            migration_state_hash: migration.state_hash,
             earliest_ledger,
             signer_epoch: Self::governance_epoch(env.clone())?,
             state_write_version: Self::state_write_version(env.clone())?,
@@ -433,7 +443,7 @@ impl VaultProxy {
                 unique.push_back(signer);
             }
         }
-        if unique.len() == 0 {
+        if unique.is_empty() {
             return Err(Error::Unauthorized);
         }
         Ok(unique)
@@ -471,13 +481,15 @@ impl VaultProxy {
         if env.ledger().sequence() < proposal.earliest_ledger {
             return Err(Error::TimelockActive);
         }
-        if proposal.signer_epoch
-            != env
-                .storage()
-                .instance()
-                .get(&DataKey::GovernanceEpoch)
-                .ok_or(Error::NotInitialized)?
-        {
+        // Build fix: without the explicit `u32`, the generic `get` cannot infer
+        // the value type and defaults to `()`, which does not compare against
+        // `signer_epoch`.
+        let current_epoch = env
+            .storage()
+            .instance()
+            .get::<_, u32>(&DataKey::GovernanceEpoch)
+            .ok_or(Error::NotInitialized)?;
+        if proposal.signer_epoch != current_epoch {
             return Err(Error::StaleProposal);
         }
         if proposal.current_hash != Self::current_hash(env.clone())? {
