@@ -22,8 +22,13 @@
 //! #72 Share-based NAV vault (`shares.rs` + the `vault_*` methods below) — additive, on its own storage keys.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Bytes, BytesN, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Bytes, BytesN,
+    Env, Vec,
 };
+// Build fix: `.to_xdr(&env)` on Vec/Address (signer-set and draw-seed hashing)
+// comes from this trait, which a bad merge dropped from the imports while its
+// call sites remained.
+use soroban_sdk::xdr::ToXdr;
 
 // ── Lockup duration (ledgers, ~7 days at 5 s/ledger) ──────────────────────
 const LOCKUP_LEDGERS: u32 = 120_960;
@@ -43,6 +48,19 @@ pub enum DataKey {
     Proposal(u32), // pending admin proposal
     ParticipantsList,
     Draw,
+
+    // ── #72 share-based NAV vault keys ──
+    // Used by shares.rs and the vault_* entrypoints; dropped from this enum in a
+    // bad merge while their users remained, so the crate stopped compiling.
+    VaultShares,
+    ShareBalance(Address),
+    WithdrawalNonce,
+    WithdrawalRequest(u32),
+    WithdrawalOwner(u32),
+    FeeRecipient,
+    DustBeneficiary,
+    ManagementFeeBps,
+    PerformanceFeeBps,
 }
 
 // ── Errors ─────────────────────────────────────────────────────────────────
@@ -70,6 +88,23 @@ pub enum Error {
     DuplicateParticipant = 18,
     InvalidParticipantsList = 19,
     DrawNotFrozen = 20,
+    // Build fix: variants referenced across the share-vault, sweep, and
+    // governance code but dropped from this enum in a bad merge.
+    MathOverflow = 21,
+    StaleSnapshot = 22,
+    RoundsToZero = 23,
+    InsufficientShares = 24,
+    NothingToSweep = 25,
+    WithdrawalNotFound = 26,
+    WithdrawalAlreadySettled = 27,
+    ExceedsOwed = 28,
+    InsufficientBalance = 29,
+    InvalidThreshold = 30,
+    BootstrapComplete = 31,
+    StaleEpoch = 32,
+    ProposalAlreadyExecuted = 33,
+    ProposalCancelled = 34,
+    ProposalExpired = 35,
 }
 
 // ── Structs ────────────────────────────────────────────────────────────────
@@ -143,6 +178,17 @@ pub enum ProposalAction {
     ChangeThreshold(u32),
 }
 
+/// Lifecycle of a multi-sig proposal. Build fix: referenced by `Proposal.status`
+/// and the approve/cancel flow but dropped from the module in a bad merge.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub enum ProposalStatus {
+    Pending,
+    Executed,
+    Cancelled,
+    Expired,
+}
+
 // ── Contract ───────────────────────────────────────────────────────────────
 #[contract]
 pub struct DripPool;
@@ -164,7 +210,9 @@ impl DripPool {
 
     fn check_draw_inactive(env: &Env) -> Result<(), Error> {
         if let Some(draw) = env.storage().instance().get::<_, Draw>(&DataKey::Draw) {
-            if draw.status == DrawStatus::Committed && env.ledger().sequence() <= draw.reveal_deadline {
+            if draw.status == DrawStatus::Committed
+                && env.ledger().sequence() <= draw.reveal_deadline
+            {
                 return Err(Error::DrawActive);
             }
         }
@@ -179,7 +227,9 @@ impl DripPool {
             .unwrap_or(Vec::new(env));
         if !participants.contains(who) {
             participants.push_back(who.clone());
-            env.storage().instance().set(&DataKey::ParticipantsList, &participants);
+            env.storage()
+                .instance()
+                .set(&DataKey::ParticipantsList, &participants);
         }
     }
 
@@ -195,7 +245,9 @@ impl DripPool {
                 updated.push_back(p);
             }
         }
-        env.storage().instance().set(&DataKey::ParticipantsList, &updated);
+        env.storage()
+            .instance()
+            .set(&DataKey::ParticipantsList, &updated);
     }
 
     // ── Multi-sig helpers ──────────────────────────────────────────────────
@@ -218,8 +270,12 @@ impl DripPool {
         Ok(())
     }
 
-    fn update_signer_set(env: &Env, pool: &mut Pool, new_admins: Vec<Address>) -> Result<(), Error> {
-        Self::validate_quorum(new_admins.len() as u32, pool.threshold)?;
+    fn update_signer_set(
+        env: &Env,
+        pool: &mut Pool,
+        new_admins: Vec<Address>,
+    ) -> Result<(), Error> {
+        Self::validate_quorum(new_admins.len(), pool.threshold)?;
         pool.signer_epoch += 1;
         pool.signer_set_hash = env.crypto().sha256(&new_admins.clone().to_xdr(env)).into();
         env.storage().instance().set(&DataKey::Admins, &new_admins);
@@ -368,7 +424,11 @@ impl DripPool {
             signer_set_hash: pool.signer_set_hash.clone(),
             expires_at,
             proposer: signer.clone(),
-            status: if threshold_met { ProposalStatus::Executed } else { ProposalStatus::Pending },
+            status: if threshold_met {
+                ProposalStatus::Executed
+            } else {
+                ProposalStatus::Pending
+            },
         };
 
         env.storage()
@@ -377,10 +437,8 @@ impl DripPool {
 
         if threshold_met {
             Self::execute_proposal(&env, &proposal)?;
-            env.events().publish(
-                (symbol_short!("prop_exe"), nonce),
-                pool.signer_epoch,
-            );
+            env.events()
+                .publish((symbol_short!("prop_exe"), nonce), pool.signer_epoch);
         }
 
         env.events().publish(
@@ -417,17 +475,15 @@ impl DripPool {
 
         env.events().publish(
             (symbol_short!("prop_app"), proposal_id, signer),
-            proposal.approvals.len() as u32,
+            proposal.approvals.len(),
         );
 
         let threshold_met = proposal.approvals.len() >= pool.threshold;
         if threshold_met {
             proposal.status = ProposalStatus::Executed;
             Self::execute_proposal(&env, &proposal)?;
-            env.events().publish(
-                (symbol_short!("prop_exe"), proposal_id),
-                pool.signer_epoch,
-            );
+            env.events()
+                .publish((symbol_short!("prop_exe"), proposal_id), pool.signer_epoch);
         }
 
         env.storage()
@@ -465,10 +521,8 @@ impl DripPool {
             .instance()
             .set(&DataKey::Proposal(proposal_id), &proposal);
 
-        env.events().publish(
-            (symbol_short!("prop_can"), proposal_id),
-            signer,
-        );
+        env.events()
+            .publish((symbol_short!("prop_can"), proposal_id), signer);
 
         Ok(())
     }
@@ -512,7 +566,7 @@ impl DripPool {
                     .instance()
                     .get(&DataKey::Admins)
                     .unwrap_or(vec![env]);
-                Self::validate_quorum(admins.len() as u32, new_threshold)?;
+                Self::validate_quorum(admins.len(), new_threshold)?;
                 pool.threshold = new_threshold;
                 env.storage().instance().set(&DataKey::Pool, &pool);
 
@@ -575,8 +629,11 @@ impl DripPool {
             lockup_multiplier: 100,
         });
 
-        p.deposited += amount;
-        p.claimable += amount;
+        // #33: guard the accounting against i128 overflow. A silent wrap or a
+        // panic here would corrupt a participant's principal or the pool total,
+        // so an overflow returns MathOverflow and rolls the whole call back.
+        p.deposited = p.deposited.checked_add(amount).ok_or(Error::MathOverflow)?;
+        p.claimable = p.claimable.checked_add(amount).ok_or(Error::MathOverflow)?;
         env.storage().persistent().set(&key, &p);
 
         if is_new {
@@ -589,7 +646,10 @@ impl DripPool {
             .get(&DataKey::Pool)
             .ok_or(Error::NotInitialized)?;
         pool.total_drips += 1;
-        pool.total_deposited += amount;
+        pool.total_deposited = pool
+            .total_deposited
+            .checked_add(amount)
+            .ok_or(Error::MathOverflow)?;
         env.storage().instance().set(&DataKey::Pool, &pool);
 
         // #255: Deposit event
@@ -623,8 +683,9 @@ impl DripPool {
             lockup_multiplier: 100,
         });
 
-        p.deposited += amount;
-        p.claimable += amount;
+        // #33: overflow-guarded, as in `deposit`.
+        p.deposited = p.deposited.checked_add(amount).ok_or(Error::MathOverflow)?;
+        p.claimable = p.claimable.checked_add(amount).ok_or(Error::MathOverflow)?;
         p.lockup_multiplier = vault::multiplier_for(lockup_days)?;
         let ledgers = vault::lockup_ledgers_for(lockup_days)?;
         let new_locked_until = env.ledger().sequence() + ledgers;
@@ -643,7 +704,10 @@ impl DripPool {
             .get(&DataKey::Pool)
             .ok_or(Error::NotInitialized)?;
         pool.total_drips += 1;
-        pool.total_deposited += amount;
+        pool.total_deposited = pool
+            .total_deposited
+            .checked_add(amount)
+            .ok_or(Error::MathOverflow)?;
         env.storage().instance().set(&DataKey::Pool, &pool);
 
         env.events().publish(
@@ -753,7 +817,8 @@ impl DripPool {
             if let Some(p) = env
                 .storage()
                 .persistent()
-                .get::<_, Participant>(&DataKey::Participant(addr.clone())) {
+                .get::<_, Participant>(&DataKey::Participant(addr.clone()))
+            {
                 if p.deposited > 0 {
                     total_weight += p.deposited as u64;
                 }
@@ -781,7 +846,8 @@ impl DripPool {
             if let Some(p) = env
                 .storage()
                 .persistent()
-                .get::<_, Participant>(&DataKey::Participant(addr.clone())) {
+                .get::<_, Participant>(&DataKey::Participant(addr.clone()))
+            {
                 if p.deposited > 0 {
                     current_sum += p.deposited as u64;
                     if current_sum > random_val {
@@ -833,7 +899,9 @@ impl DripPool {
 
         // Verify no active draw is currently running
         if let Some(draw) = env.storage().instance().get::<_, Draw>(&DataKey::Draw) {
-            if draw.status == DrawStatus::Committed && env.ledger().sequence() <= draw.reveal_deadline {
+            if draw.status == DrawStatus::Committed
+                && env.ledger().sequence() <= draw.reveal_deadline
+            {
                 return Err(Error::DrawActive);
             }
         }
@@ -958,8 +1026,8 @@ impl DripPool {
             let hash: BytesN<32> = env.crypto().sha256(&input).into();
 
             let mut bytes = [0u8; 8];
-            for i in 0..8 {
-                bytes[i] = hash.get_unchecked(i as u32);
+            for (i, b) in bytes.iter_mut().enumerate() {
+                *b = hash.get_unchecked(i as u32);
             }
             let x = u64::from_be_bytes(bytes);
 
@@ -1494,8 +1562,20 @@ pub mod vault;
 
 pub mod shares;
 
+// #35: rent-aware TTL management and verifiable state archival — the pure
+// classification, bounded-extension, batched-sweep, and hash-chained archive
+// logic consumed by the sweeper and upgrade paths.
+pub mod ttl;
+
 #[cfg(not(target_family = "wasm"))]
 pub mod proxy;
 
 #[cfg(test)]
 mod test;
+
+// #33: implementation-independent reference model + state-machine property
+// tests and fuzzing for pool solvency.
+#[cfg(test)]
+mod model;
+#[cfg(test)]
+mod model_test;

@@ -16,3 +16,6 @@ target/
 tsc_output.txt
 scratch/
 CUsersgooglAppDataLocalpnpmstorev3/
+
+# Claude Code local settings
+.claude/settings.local.json
