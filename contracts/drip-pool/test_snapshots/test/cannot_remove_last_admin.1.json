@@ -131,6 +131,30 @@
                             },
                             {
                               "key": {
+                                "symbol": "signer_epoch"
+                              },
+                              "val": {
+                                "u32": 1
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "signer_set_hash"
+                              },
+                              "val": {
+                                "bytes": "3d3ee91a1860e08ae9560e87cd67bb4201c6c29730bd11ca8fa9f2b0a3d16e2b"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold"
+                              },
+                              "val": {
+                                "u32": 2
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "total_deposited"
                               },
                               "val": {

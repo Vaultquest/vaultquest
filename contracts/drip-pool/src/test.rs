@@ -235,14 +235,14 @@ fn removed_signer_cannot_propose() {
 
     let signer2 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    
+
     // To remove signer2, we must first change threshold to 1.
     let pid1 = client.propose(&admin, &ProposalAction::ChangeThreshold(1));
     client.approve(&signer2, &pid1);
-    
+
     // Propose removing signer2. Since threshold is 1, it executes immediately.
     client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
-    
+
     assert_eq!(client.admins().len(), 1);
 
     // Removed signer can no longer propose…
@@ -266,7 +266,7 @@ fn removed_signer_cannot_approve() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    
+
     // Add signer3 via proposal
     let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
     client.approve(&signer2, &add_pid);
@@ -286,7 +286,7 @@ fn removed_signer_cannot_approve() {
         client.try_approve(&signer3, &pid),
         Err(Ok(Error::Unauthorized))
     );
-    
+
     // Remaining signers also cannot complete the proposal from the previous epoch.
     assert_eq!(
         client.try_approve(&signer2, &pid),
@@ -304,7 +304,7 @@ fn duplicate_approval_does_not_inflate_threshold() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    
+
     // Add signer3 via proposal
     let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
     client.approve(&signer2, &add_pid);
@@ -336,7 +336,7 @@ fn approval_order_is_irrelevant() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    
+
     // Add signer3 via proposal
     let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
     client.approve(&signer2, &add_pid);
@@ -369,7 +369,7 @@ fn executed_proposal_cannot_be_reapproved() {
     let signer2 = Address::generate(&env);
     let signer3 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    
+
     // Add signer3 via proposal
     let add_pid = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
     client.approve(&signer2, &add_pid);
@@ -398,23 +398,20 @@ fn stale_approval_from_removed_signer_is_prevented() {
     let signer3 = Address::generate(&env);
     let signer4 = Address::generate(&env);
     client.add_admin(&admin, &signer2);
-    
+
     // Add signer3 via proposal
     let add_pid1 = client.propose(&admin, &ProposalAction::AddAdmin(signer3.clone()));
     client.approve(&signer2, &add_pid1);
 
     // signer2 proposes a release escrow (auto-approves, 1 of 2), then is removed.
     let pid = client.propose(&signer2, &ProposalAction::AddAdmin(signer4.clone()));
-    
+
     // Remove signer2 via proposal
     let rm_pid = client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
     client.approve(&signer3, &rm_pid);
 
     // signer2's proposal is stale due to epoch change. Admin approving it should fail with StaleEpoch.
-    assert_eq!(
-        client.try_approve(&admin, &pid),
-        Err(Ok(Error::StaleEpoch))
-    );
+    assert_eq!(client.try_approve(&admin, &pid), Err(Ok(Error::StaleEpoch)));
     assert!(!client.admins().contains(&signer4));
 }
 
@@ -487,7 +484,7 @@ fn prevent_unreachable_quorum_when_signer_set_shrinks() {
     // should fail during execution/validation since remaining signer count (1)
     // would be less than the threshold (2).
     let pid = client.propose(&admin, &ProposalAction::RemoveAdmin(signer2.clone()));
-    
+
     // Approving it will try to execute it, which fails with Error::InvalidThreshold
     assert_eq!(
         client.try_approve(&signer2, &pid),
@@ -1343,6 +1340,90 @@ fn test_deposit_after_lockup_expiration_resets_lockup_window() {
     assert_eq!(payout, 600);
 }
 
+#[test]
+fn vault_withdrawal_queue_enforces_fifo_and_partial_claims_survive_pause() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.vault_init(&admin);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let alice_shares = client.vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
+    let bob_shares = client.vault_deposit(&bob, &1_000, &client.vault_snapshot().version);
+
+    let alice_request = client.vault_request_withdrawal(
+        &alice,
+        &(alice_shares / 2),
+        &client.vault_snapshot().version,
+    );
+    let bob_request =
+        client.vault_request_withdrawal(&bob, &(bob_shares / 2), &client.vault_snapshot().version);
+
+    assert_eq!(
+        client.try_vault_fulfill_withdrawal(&admin, &bob_request, &100),
+        Err(Ok(Error::QueueBlocked))
+    );
+
+    assert_eq!(
+        client.vault_fulfill_withdrawal(&admin, &alice_request, &100),
+        100
+    );
+    let alice_status = client.vault_withdrawal_status(&alice_request);
+    assert_eq!(alice_status.claimable_assets, 100);
+    assert!(alice_status.remaining_assets > 0);
+
+    client.vault_set_paused(&admin, &true);
+    assert_eq!(
+        client.try_vault_deposit(&alice, &1, &client.vault_snapshot().version),
+        Err(Ok(Error::Paused))
+    );
+    assert_eq!(client.vault_claim_withdrawal(&alice, &alice_request), 100);
+    assert_eq!(
+        client
+            .vault_withdrawal_status(&alice_request)
+            .claimable_assets,
+        0
+    );
+}
+
+#[test]
+fn vault_cancel_and_expiry_restore_shares_and_unblock_queue() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.vault_init(&admin);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let alice_shares = client.vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
+    let bob_shares = client.vault_deposit(&bob, &1_000, &client.vault_snapshot().version);
+
+    let alice_request = client.vault_request_withdrawal(
+        &alice,
+        &(alice_shares / 2),
+        &client.vault_snapshot().version,
+    );
+    let bob_request = client.vault_request_withdrawal_to(
+        &bob,
+        &bob,
+        &(bob_shares / 2),
+        &0,
+        &2,
+        &client.vault_snapshot().version,
+    );
+
+    let restored = client.vault_cancel_withdrawal(&alice, &alice_request);
+    assert_eq!(restored, alice_shares / 2);
+    assert_eq!(client.vault_share_balance(&alice), alice_shares);
+
+    env.ledger().with_mut(|li| li.sequence_number += 3);
+    let expired = client.vault_expire_withdrawal(&bob, &bob_request);
+    assert_eq!(expired, bob_shares / 2);
+    assert_eq!(client.vault_withdrawal_head(), 2);
+
+    let status = client.vault_withdrawal_status(&bob_request);
+    assert_eq!(status.state, shares::WithdrawalState::Expired);
+}
+
 fn generate_secret_and_commitment(env: &Env, secret_val: u8) -> (BytesN<32>, BytesN<32>) {
     let mut secret_bytes = [0u8; 32];
     secret_bytes[0] = secret_val;
@@ -1390,7 +1471,8 @@ fn test_commit_reveal_success() {
     );
 
     // Advance sequence past freeze ledger
-    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+    env.ledger()
+        .with_mut(|li| li.sequence_number = freeze_ledger + 1);
 
     // Finalize draw
     let winner = client.finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]);
@@ -1442,7 +1524,8 @@ fn test_commit_reveal_failure_and_cancellation() {
     );
 
     // Advance sequence past deadline
-    env.ledger().with_mut(|li| li.sequence_number = reveal_deadline + 1);
+    env.ledger()
+        .with_mut(|li| li.sequence_number = reveal_deadline + 1);
 
     // Verify finalize fails now
     assert_eq!(
@@ -1485,7 +1568,8 @@ fn test_commit_reveal_participants_validation() {
         &500,
     );
 
-    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+    env.ledger()
+        .with_mut(|li| li.sequence_number = freeze_ledger + 1);
 
     // 1. Omit Bob - total weight doesn't match total_deposited
     assert_eq!(
@@ -1495,14 +1579,20 @@ fn test_commit_reveal_participants_validation() {
 
     // 2. Duplicate Alice
     assert_eq!(
-        client.try_finalize_draw(&secret, &vec![&env, alice.clone(), alice.clone(), bob.clone()]),
+        client.try_finalize_draw(
+            &secret,
+            &vec![&env, alice.clone(), alice.clone(), bob.clone()]
+        ),
         Err(Ok(Error::DuplicateParticipant))
     );
 
     // 3. Unjoined address
     let rando = Address::generate(&env);
     assert_eq!(
-        client.try_finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone(), rando.clone()]),
+        client.try_finalize_draw(
+            &secret,
+            &vec![&env, alice.clone(), bob.clone(), rando.clone()]
+        ),
         Err(Ok(Error::NotJoined))
     );
 }
@@ -1539,7 +1629,8 @@ fn test_commit_reveal_rejection_sampling_unbiased() {
             &100,
         );
 
-        env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+        env.ledger()
+            .with_mut(|li| li.sequence_number = freeze_ledger + 1);
 
         let winner = client.finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]);
         if winner == alice {
