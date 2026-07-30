@@ -5,14 +5,14 @@
 create_cpu=100000
 create_mem=12000
 
-join_cpu=115000
-join_mem=18000
+join_cpu=123000
+join_mem=19500
 
-deposit_cpu=150000
-deposit_mem=22000
+deposit_cpu=158000
+deposit_mem=23800
 
-drip_cpu=150000
-drip_mem=22000
+drip_cpu=159000
+drip_mem=24200
 
 draw_winner_cpu=145000
 draw_winner_mem=19000
@@ -20,11 +20,11 @@ draw_winner_mem=19000
 claim_cpu=100000
 claim_mem=16000
 
-withdraw_cpu=150000
-withdraw_mem=22000
+withdraw_cpu=176000
+withdraw_mem=24200
 
-propose_cpu=130000
+propose_cpu=145000
 propose_mem=22000
 
-approve_cpu=230000
+approve_cpu=245000
 approve_mem=40000

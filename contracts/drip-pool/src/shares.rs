@@ -29,8 +29,24 @@ pub struct VaultSnapshot {
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct WithdrawalRequest {
+    pub shares_burned: i128,
     pub assets_owed: i128,
     pub assets_paid: i128,
+    pub assets_claimed: i128,
+    pub min_output: i128,
+    pub requested_ledger: u32,
+    pub expires_ledger: u32,
+    pub emergency_haircut_bps: u32,
+    pub state: WithdrawalState,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub enum WithdrawalState {
+    Active,
+    Cancelled,
+    Expired,
+    Settled,
 }
 
 /// Numbers a caller needs to assert/emit the post-deposit invariant.
@@ -225,10 +241,27 @@ pub fn request_withdrawal(
     shares: i128,
     expected_version: u64,
 ) -> Result<WithdrawalRequest, Error> {
+    request_withdrawal_with_controls(snapshot, shares, 0, 0, 0, expected_version)
+}
+
+pub fn request_withdrawal_with_controls(
+    snapshot: &mut VaultSnapshot,
+    shares: i128,
+    min_output: i128,
+    requested_ledger: u32,
+    expires_ledger: u32,
+    expected_version: u64,
+) -> Result<WithdrawalRequest, Error> {
     if snapshot.version != expected_version {
         return Err(Error::StaleSnapshot);
     }
+    if min_output < 0 || (expires_ledger != 0 && expires_ledger <= requested_ledger) {
+        return Err(Error::InvalidAmount);
+    }
     let assets_owed = compute_redeem_assets(snapshot, shares)?;
+    if assets_owed < min_output {
+        return Err(Error::InsufficientBalance);
+    }
 
     snapshot.total_shares = snapshot
         .total_shares
@@ -257,8 +290,15 @@ pub fn request_withdrawal(
     bump_version(snapshot)?;
 
     Ok(WithdrawalRequest {
+        shares_burned: shares,
         assets_owed,
         assets_paid: 0,
+        assets_claimed: 0,
+        min_output,
+        requested_ledger,
+        expires_ledger,
+        emergency_haircut_bps: 0,
+        state: WithdrawalState::Active,
     })
 }
 
@@ -270,6 +310,9 @@ pub fn fulfill_withdrawal(
 ) -> Result<i128, Error> {
     if amount <= 0 {
         return Err(Error::InvalidAmount);
+    }
+    if request.state != WithdrawalState::Active {
+        return Err(Error::WithdrawalAlreadySettled);
     }
     let remaining = request
         .assets_owed
@@ -297,9 +340,117 @@ pub fn fulfill_withdrawal(
         .assets_paid
         .checked_add(amount)
         .ok_or(Error::MathOverflow)?;
+    if request.assets_paid == request.assets_owed {
+        request.state = WithdrawalState::Settled;
+    }
     bump_version(snapshot)?;
 
     Ok(amount)
+}
+
+pub fn claim_withdrawal(request: &mut WithdrawalRequest) -> Result<i128, Error> {
+    let claimable = request
+        .assets_paid
+        .checked_sub(request.assets_claimed)
+        .ok_or(Error::MathOverflow)?;
+    if claimable <= 0 {
+        return Err(Error::WithdrawalAlreadySettled);
+    }
+    request.assets_claimed = request
+        .assets_claimed
+        .checked_add(claimable)
+        .ok_or(Error::MathOverflow)?;
+    if request.assets_claimed == request.assets_owed {
+        request.state = WithdrawalState::Settled;
+    }
+    Ok(claimable)
+}
+
+pub fn cancel_withdrawal(
+    snapshot: &mut VaultSnapshot,
+    request: &mut WithdrawalRequest,
+) -> Result<i128, Error> {
+    if request.state != WithdrawalState::Active {
+        return Err(Error::WithdrawalNotCancellable);
+    }
+    if request.assets_paid != 0 || request.assets_claimed != 0 {
+        return Err(Error::WithdrawalNotCancellable);
+    }
+    snapshot.pending_withdrawals = snapshot
+        .pending_withdrawals
+        .checked_sub(request.assets_owed)
+        .ok_or(Error::MathOverflow)?;
+    snapshot.total_shares = snapshot
+        .total_shares
+        .checked_add(request.shares_burned)
+        .ok_or(Error::MathOverflow)?;
+    request.state = WithdrawalState::Cancelled;
+    bump_version(snapshot)?;
+    Ok(request.shares_burned)
+}
+
+pub fn expire_withdrawal(
+    snapshot: &mut VaultSnapshot,
+    request: &mut WithdrawalRequest,
+) -> Result<i128, Error> {
+    if request.state != WithdrawalState::Active {
+        return Err(Error::WithdrawalNotCancellable);
+    }
+    if request.assets_paid != 0 || request.assets_claimed != 0 {
+        return Err(Error::WithdrawalNotCancellable);
+    }
+    snapshot.pending_withdrawals = snapshot
+        .pending_withdrawals
+        .checked_sub(request.assets_owed)
+        .ok_or(Error::MathOverflow)?;
+    snapshot.total_shares = snapshot
+        .total_shares
+        .checked_add(request.shares_burned)
+        .ok_or(Error::MathOverflow)?;
+    request.state = WithdrawalState::Expired;
+    bump_version(snapshot)?;
+    Ok(request.shares_burned)
+}
+
+pub fn apply_emergency_haircut(
+    snapshot: &mut VaultSnapshot,
+    request: &mut WithdrawalRequest,
+    haircut_bps: u32,
+) -> Result<i128, Error> {
+    if request.state != WithdrawalState::Active {
+        return Err(Error::WithdrawalAlreadySettled);
+    }
+    if haircut_bps == 0 || haircut_bps > BPS_DENOMINATOR as u32 {
+        return Err(Error::InvalidHaircut);
+    }
+    let remaining = request
+        .assets_owed
+        .checked_sub(request.assets_paid)
+        .ok_or(Error::MathOverflow)?;
+    if remaining <= 0 {
+        return Err(Error::WithdrawalAlreadySettled);
+    }
+    let reduction = mul_div_floor(remaining, haircut_bps as i128, BPS_DENOMINATOR)?;
+    if reduction <= 0 {
+        return Err(Error::RoundsToZero);
+    }
+    request.assets_owed = request
+        .assets_owed
+        .checked_sub(reduction)
+        .ok_or(Error::MathOverflow)?;
+    request.emergency_haircut_bps = request
+        .emergency_haircut_bps
+        .checked_add(haircut_bps)
+        .ok_or(Error::MathOverflow)?;
+    snapshot.pending_withdrawals = snapshot
+        .pending_withdrawals
+        .checked_sub(reduction)
+        .ok_or(Error::MathOverflow)?;
+    if request.assets_paid == request.assets_owed {
+        request.state = WithdrawalState::Settled;
+    }
+    bump_version(snapshot)?;
+    Ok(reduction)
 }
 
 /// Pro-rata time-based fee on `net_assets`. Always advances `last_fee_time` so a rate enabled later only accrues from that point forward.
@@ -848,6 +999,75 @@ mod tests {
     }
 
     // ── fee claim ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn withdrawal_cancel_restores_burned_shares_and_pending_liability() {
+        let mut snap = fresh();
+        deposit(&mut snap, 1_000, 0).unwrap();
+        let original_shares = snap.total_shares;
+        let half = original_shares / 2;
+        let version = snap.version;
+        let mut request = request_withdrawal(&mut snap, half, version).unwrap();
+        assert_eq!(snap.total_shares, original_shares - half);
+        assert!(snap.pending_withdrawals > 0);
+
+        let restored = cancel_withdrawal(&mut snap, &mut request).unwrap();
+        assert_eq!(restored, half);
+        assert_eq!(snap.total_shares, original_shares);
+        assert_eq!(snap.pending_withdrawals, 0);
+        assert_eq!(request.state, WithdrawalState::Cancelled);
+    }
+
+    #[test]
+    fn withdrawal_expiry_restores_unpaid_requests_only() {
+        let mut snap = fresh();
+        deposit(&mut snap, 1_000, 0).unwrap();
+        let half = snap.total_shares / 2;
+        let version = snap.version;
+        let mut request =
+            request_withdrawal_with_controls(&mut snap, half, 0, 10, 15, version).unwrap();
+        fulfill_withdrawal(&mut snap, &mut request, 1).unwrap();
+
+        assert_eq!(
+            expire_withdrawal(&mut snap, &mut request),
+            Err(Error::WithdrawalNotCancellable)
+        );
+    }
+
+    #[test]
+    fn emergency_haircut_reduces_only_unpaid_liability() {
+        let mut snap = fresh();
+        deposit(&mut snap, 1_000, 0).unwrap();
+        let version = snap.version;
+        let total_shares = snap.total_shares;
+        let mut request = request_withdrawal(&mut snap, total_shares, version).unwrap();
+        fulfill_withdrawal(&mut snap, &mut request, 200).unwrap();
+
+        let reduction = apply_emergency_haircut(&mut snap, &mut request, 2_500).unwrap();
+        assert_eq!(reduction, 200);
+        assert_eq!(request.assets_owed, 800);
+        assert_eq!(request.assets_paid, 200);
+        assert_eq!(snap.pending_withdrawals, 600);
+    }
+
+    #[test]
+    fn claim_withdrawal_is_idempotent_over_newly_paid_assets() {
+        let mut snap = fresh();
+        deposit(&mut snap, 1_000, 0).unwrap();
+        let version = snap.version;
+        let total_shares = snap.total_shares;
+        let mut request = request_withdrawal(&mut snap, total_shares, version).unwrap();
+        fulfill_withdrawal(&mut snap, &mut request, 400).unwrap();
+
+        assert_eq!(claim_withdrawal(&mut request).unwrap(), 400);
+        assert_eq!(
+            claim_withdrawal(&mut request),
+            Err(Error::WithdrawalAlreadySettled)
+        );
+        fulfill_withdrawal(&mut snap, &mut request, 600).unwrap();
+        assert_eq!(claim_withdrawal(&mut request).unwrap(), 600);
+        assert_eq!(request.state, WithdrawalState::Settled);
+    }
 
     #[test]
     fn claim_fees_cannot_exceed_accrued_amount() {

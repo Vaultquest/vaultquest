@@ -22,7 +22,8 @@
 //! #72 Share-based NAV vault (`shares.rs` + the `vault_*` methods below) — additive, on its own storage keys.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, vec, Address, Bytes, BytesN, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, vec, xdr::ToXdr, Address,
+    Bytes, BytesN, Env, Vec,
 };
 
 // ── Lockup duration (ledgers, ~7 days at 5 s/ledger) ──────────────────────
@@ -43,6 +44,24 @@ pub enum DataKey {
     Proposal(u32), // pending admin proposal
     ParticipantsList,
     Draw,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub enum VaultKey {
+    VaultShares,
+    ShareBalance(Address),
+    WithdrawalNonce,
+    WithdrawalRequest(u32),
+    WithdrawalOwner(u32),
+    WithdrawalDestination(u32),
+    WithdrawalQueue,
+    WithdrawalHead,
+    FeeRecipient,
+    DustBeneficiary,
+    ManagementFeeBps,
+    PerformanceFeeBps,
+    VaultPaused,
 }
 
 // ── Errors ─────────────────────────────────────────────────────────────────
@@ -70,6 +89,25 @@ pub enum Error {
     DuplicateParticipant = 18,
     InvalidParticipantsList = 19,
     DrawNotFrozen = 20,
+    InvalidThreshold = 21,
+    BootstrapComplete = 22,
+    ProposalAlreadyExecuted = 23,
+    ProposalCancelled = 24,
+    ProposalExpired = 25,
+    StaleEpoch = 26,
+    StaleSnapshot = 27,
+    InsufficientShares = 28,
+    MathOverflow = 29,
+    RoundsToZero = 30,
+    InsufficientBalance = 31,
+    WithdrawalNotFound = 32,
+    WithdrawalAlreadySettled = 33,
+    ExceedsOwed = 34,
+    NothingToSweep = 35,
+    QueueBlocked = 36,
+    WithdrawalNotCancellable = 37,
+    Paused = 38,
+    InvalidHaircut = 39,
 }
 
 // ── Structs ────────────────────────────────────────────────────────────────
@@ -120,6 +158,25 @@ pub enum DrawStatus {
     Cancelled,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct WithdrawalQueueStatus {
+    pub request_id: u32,
+    pub owner: Address,
+    pub destination: Address,
+    pub shares_burned: i128,
+    pub assets_owed: i128,
+    pub assets_paid: i128,
+    pub assets_claimed: i128,
+    pub claimable_assets: i128,
+    pub remaining_assets: i128,
+    pub min_output: i128,
+    pub requested_ledger: u32,
+    pub expires_ledger: u32,
+    pub emergency_haircut_bps: u32,
+    pub state: shares::WithdrawalState,
+}
+
 /// A pending admin action that requires multi-sig approval.
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
@@ -143,6 +200,15 @@ pub enum ProposalAction {
     ChangeThreshold(u32),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub enum ProposalStatus {
+    Pending,
+    Executed,
+    Cancelled,
+    Expired,
+}
+
 // ── Contract ───────────────────────────────────────────────────────────────
 #[contract]
 pub struct DripPool;
@@ -164,7 +230,9 @@ impl DripPool {
 
     fn check_draw_inactive(env: &Env) -> Result<(), Error> {
         if let Some(draw) = env.storage().instance().get::<_, Draw>(&DataKey::Draw) {
-            if draw.status == DrawStatus::Committed && env.ledger().sequence() <= draw.reveal_deadline {
+            if draw.status == DrawStatus::Committed
+                && env.ledger().sequence() <= draw.reveal_deadline
+            {
                 return Err(Error::DrawActive);
             }
         }
@@ -179,7 +247,9 @@ impl DripPool {
             .unwrap_or(Vec::new(env));
         if !participants.contains(who) {
             participants.push_back(who.clone());
-            env.storage().instance().set(&DataKey::ParticipantsList, &participants);
+            env.storage()
+                .instance()
+                .set(&DataKey::ParticipantsList, &participants);
         }
     }
 
@@ -195,7 +265,9 @@ impl DripPool {
                 updated.push_back(p);
             }
         }
-        env.storage().instance().set(&DataKey::ParticipantsList, &updated);
+        env.storage()
+            .instance()
+            .set(&DataKey::ParticipantsList, &updated);
     }
 
     // ── Multi-sig helpers ──────────────────────────────────────────────────
@@ -218,7 +290,11 @@ impl DripPool {
         Ok(())
     }
 
-    fn update_signer_set(env: &Env, pool: &mut Pool, new_admins: Vec<Address>) -> Result<(), Error> {
+    fn update_signer_set(
+        env: &Env,
+        pool: &mut Pool,
+        new_admins: Vec<Address>,
+    ) -> Result<(), Error> {
         Self::validate_quorum(new_admins.len() as u32, pool.threshold)?;
         pool.signer_epoch += 1;
         pool.signer_set_hash = env.crypto().sha256(&new_admins.clone().to_xdr(env)).into();
@@ -368,7 +444,11 @@ impl DripPool {
             signer_set_hash: pool.signer_set_hash.clone(),
             expires_at,
             proposer: signer.clone(),
-            status: if threshold_met { ProposalStatus::Executed } else { ProposalStatus::Pending },
+            status: if threshold_met {
+                ProposalStatus::Executed
+            } else {
+                ProposalStatus::Pending
+            },
         };
 
         env.storage()
@@ -377,10 +457,8 @@ impl DripPool {
 
         if threshold_met {
             Self::execute_proposal(&env, &proposal)?;
-            env.events().publish(
-                (symbol_short!("prop_exe"), nonce),
-                pool.signer_epoch,
-            );
+            env.events()
+                .publish((symbol_short!("prop_exe"), nonce), pool.signer_epoch);
         }
 
         env.events().publish(
@@ -424,10 +502,8 @@ impl DripPool {
         if threshold_met {
             proposal.status = ProposalStatus::Executed;
             Self::execute_proposal(&env, &proposal)?;
-            env.events().publish(
-                (symbol_short!("prop_exe"), proposal_id),
-                pool.signer_epoch,
-            );
+            env.events()
+                .publish((symbol_short!("prop_exe"), proposal_id), pool.signer_epoch);
         }
 
         env.storage()
@@ -465,10 +541,8 @@ impl DripPool {
             .instance()
             .set(&DataKey::Proposal(proposal_id), &proposal);
 
-        env.events().publish(
-            (symbol_short!("prop_can"), proposal_id),
-            signer,
-        );
+        env.events()
+            .publish((symbol_short!("prop_can"), proposal_id), signer);
 
         Ok(())
     }
@@ -753,7 +827,8 @@ impl DripPool {
             if let Some(p) = env
                 .storage()
                 .persistent()
-                .get::<_, Participant>(&DataKey::Participant(addr.clone())) {
+                .get::<_, Participant>(&DataKey::Participant(addr.clone()))
+            {
                 if p.deposited > 0 {
                     total_weight += p.deposited as u64;
                 }
@@ -781,7 +856,8 @@ impl DripPool {
             if let Some(p) = env
                 .storage()
                 .persistent()
-                .get::<_, Participant>(&DataKey::Participant(addr.clone())) {
+                .get::<_, Participant>(&DataKey::Participant(addr.clone()))
+            {
                 if p.deposited > 0 {
                     current_sum += p.deposited as u64;
                     if current_sum > random_val {
@@ -833,7 +909,9 @@ impl DripPool {
 
         // Verify no active draw is currently running
         if let Some(draw) = env.storage().instance().get::<_, Draw>(&DataKey::Draw) {
-            if draw.status == DrawStatus::Committed && env.ledger().sequence() <= draw.reveal_deadline {
+            if draw.status == DrawStatus::Committed
+                && env.ledger().sequence() <= draw.reveal_deadline
+            {
                 return Err(Error::DrawActive);
             }
         }
@@ -937,7 +1015,6 @@ impl DripPool {
 
         // Generate the seed with Domain Separation:
         // Hash of (network_id, contract_address, round_id, freeze_ledger, revealed_secret)
-        use soroban_sdk::xdr::ToXdr;
         let mut seed_bytes = Bytes::new(&env);
         seed_bytes.append(env.ledger().network_id().as_ref());
         seed_bytes.append(&env.current_contract_address().to_xdr(&env));
@@ -1092,28 +1169,35 @@ impl DripPool {
     pub fn vault_init(env: Env, caller: Address) -> Result<(), Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
-        if env.storage().instance().has(&DataKey::VaultShares) {
+        if env.storage().instance().has(&VaultKey::VaultShares) {
             return Err(Error::AlreadyInitialized);
         }
         let snapshot = shares::VaultSnapshot::new(env.ledger().timestamp())?;
         env.storage()
             .instance()
-            .set(&DataKey::VaultShares, &snapshot);
+            .set(&VaultKey::VaultShares, &snapshot);
         env.storage()
             .instance()
-            .set(&DataKey::WithdrawalNonce, &0u32);
+            .set(&VaultKey::WithdrawalNonce, &0u32);
         env.storage()
             .instance()
-            .set(&DataKey::FeeRecipient, &caller);
+            .set(&VaultKey::WithdrawalQueue, &Vec::<u32>::new(&env));
         env.storage()
             .instance()
-            .set(&DataKey::DustBeneficiary, &caller);
+            .set(&VaultKey::WithdrawalHead, &0u32);
         env.storage()
             .instance()
-            .set(&DataKey::ManagementFeeBps, &0u32);
+            .set(&VaultKey::FeeRecipient, &caller);
         env.storage()
             .instance()
-            .set(&DataKey::PerformanceFeeBps, &0u32);
+            .set(&VaultKey::DustBeneficiary, &caller);
+        env.storage()
+            .instance()
+            .set(&VaultKey::ManagementFeeBps, &0u32);
+        env.storage()
+            .instance()
+            .set(&VaultKey::PerformanceFeeBps, &0u32);
+        env.storage().instance().set(&VaultKey::VaultPaused, &false);
         env.events()
             .publish((symbol_short!("vault"), symbol_short!("init")), caller);
         Ok(())
@@ -1122,26 +1206,26 @@ impl DripPool {
     fn load_vault(env: &Env) -> Result<shares::VaultSnapshot, Error> {
         env.storage()
             .instance()
-            .get(&DataKey::VaultShares)
+            .get(&VaultKey::VaultShares)
             .ok_or(Error::NotInitialized)
     }
 
     fn save_vault(env: &Env, snapshot: &shares::VaultSnapshot) {
         env.storage()
             .instance()
-            .set(&DataKey::VaultShares, snapshot);
+            .set(&VaultKey::VaultShares, snapshot);
     }
 
     fn fee_config(env: &Env) -> Result<(u32, u32), Error> {
         let management: u32 = env
             .storage()
             .instance()
-            .get(&DataKey::ManagementFeeBps)
+            .get(&VaultKey::ManagementFeeBps)
             .ok_or(Error::NotInitialized)?;
         let performance: u32 = env
             .storage()
             .instance()
-            .get(&DataKey::PerformanceFeeBps)
+            .get(&VaultKey::PerformanceFeeBps)
             .ok_or(Error::NotInitialized)?;
         Ok((management, performance))
     }
@@ -1169,6 +1253,138 @@ impl DripPool {
         Ok(())
     }
 
+    fn ensure_vault_unpaused(env: &Env) -> Result<(), Error> {
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get(&VaultKey::VaultPaused)
+            .unwrap_or(false);
+        if paused {
+            return Err(Error::Paused);
+        }
+        Ok(())
+    }
+
+    fn is_terminal_withdrawal(request: &shares::WithdrawalRequest) -> bool {
+        request.state != shares::WithdrawalState::Active
+    }
+
+    fn queue_head(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&VaultKey::WithdrawalHead)
+            .unwrap_or(0)
+    }
+
+    fn withdrawal_queue(env: &Env) -> Vec<u32> {
+        env.storage()
+            .instance()
+            .get(&VaultKey::WithdrawalQueue)
+            .unwrap_or(Vec::new(env))
+    }
+
+    fn save_withdrawal_head(env: &Env, head: u32) {
+        env.storage()
+            .instance()
+            .set(&VaultKey::WithdrawalHead, &head);
+    }
+
+    fn first_queued_request(env: &Env) -> Option<u32> {
+        let queue = Self::withdrawal_queue(env);
+        let mut head = Self::queue_head(env);
+        while head < queue.len() {
+            let request_id = queue.get_unchecked(head);
+            match env
+                .storage()
+                .persistent()
+                .get::<_, shares::WithdrawalRequest>(&VaultKey::WithdrawalRequest(request_id))
+            {
+                Some(request) if Self::is_terminal_withdrawal(&request) => {
+                    head += 1;
+                    Self::save_withdrawal_head(env, head);
+                }
+                Some(_) => return Some(request_id),
+                None => {
+                    head += 1;
+                    Self::save_withdrawal_head(env, head);
+                }
+            }
+        }
+        None
+    }
+
+    fn refresh_withdrawal_head(env: &Env) {
+        let _ = Self::first_queued_request(env);
+    }
+
+    fn maybe_expire_request(
+        env: &Env,
+        snapshot: &mut shares::VaultSnapshot,
+        request_id: u32,
+        request: &mut shares::WithdrawalRequest,
+    ) -> Result<bool, Error> {
+        if request.expires_ledger == 0 || env.ledger().sequence() <= request.expires_ledger {
+            return Ok(false);
+        }
+        let restored = shares::expire_withdrawal(snapshot, request)?;
+        let owner: Address = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalOwner(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        let balance_key = VaultKey::ShareBalance(owner.clone());
+        let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&balance_key, &(balance + restored));
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("q_expire")),
+            (request_id, owner, restored),
+        );
+        Ok(true)
+    }
+
+    fn withdrawal_status(
+        env: &Env,
+        request_id: u32,
+        request: shares::WithdrawalRequest,
+    ) -> Result<WithdrawalQueueStatus, Error> {
+        let owner: Address = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalOwner(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        let destination: Address = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalDestination(request_id))
+            .unwrap_or(owner.clone());
+        let claimable_assets = request
+            .assets_paid
+            .checked_sub(request.assets_claimed)
+            .ok_or(Error::MathOverflow)?;
+        let remaining_assets = request
+            .assets_owed
+            .checked_sub(request.assets_paid)
+            .ok_or(Error::MathOverflow)?;
+        Ok(WithdrawalQueueStatus {
+            request_id,
+            owner,
+            destination,
+            shares_burned: request.shares_burned,
+            assets_owed: request.assets_owed,
+            assets_paid: request.assets_paid,
+            assets_claimed: request.assets_claimed,
+            claimable_assets,
+            remaining_assets,
+            min_output: request.min_output,
+            requested_ledger: request.requested_ledger,
+            expires_ledger: request.expires_ledger,
+            emergency_haircut_bps: request.emergency_haircut_bps,
+            state: request.state,
+        })
+    }
+
     pub fn vault_preview_deposit(env: Env, assets: i128) -> Result<i128, Error> {
         shares::preview_deposit(&Self::load_vault(&env)?, assets)
     }
@@ -1192,6 +1408,7 @@ impl DripPool {
         expected_version: u64,
     ) -> Result<i128, Error> {
         who.require_auth();
+        Self::ensure_vault_unpaused(&env)?;
         let mut snapshot = Self::load_vault(&env)?;
         if snapshot.version != expected_version {
             return Err(Error::StaleSnapshot);
@@ -1201,7 +1418,7 @@ impl DripPool {
         let post_checkpoint_version = snapshot.version;
         let receipt = shares::deposit(&mut snapshot, assets, post_checkpoint_version)?;
 
-        let balance_key = DataKey::ShareBalance(who.clone());
+        let balance_key = VaultKey::ShareBalance(who.clone());
         let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
         env.storage()
             .persistent()
@@ -1221,14 +1438,35 @@ impl DripPool {
         shares_amount: i128,
         expected_version: u64,
     ) -> Result<u32, Error> {
+        Self::vault_request_withdrawal_to(
+            env,
+            who.clone(),
+            who,
+            shares_amount,
+            0,
+            0,
+            expected_version,
+        )
+    }
+
+    pub fn vault_request_withdrawal_to(
+        env: Env,
+        who: Address,
+        destination: Address,
+        shares_amount: i128,
+        min_output: i128,
+        expiry_ledgers: u32,
+        expected_version: u64,
+    ) -> Result<u32, Error> {
         who.require_auth();
+        Self::ensure_vault_unpaused(&env)?;
         let mut snapshot = Self::load_vault(&env)?;
         if snapshot.version != expected_version {
             return Err(Error::StaleSnapshot);
         }
         Self::checkpoint_fees(&env, &mut snapshot)?;
 
-        let balance_key = DataKey::ShareBalance(who.clone());
+        let balance_key = VaultKey::ShareBalance(who.clone());
         let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
         if shares_amount > balance {
             return Err(Error::InsufficientShares);
@@ -1236,8 +1474,22 @@ impl DripPool {
 
         // Already validated above — checkpoint_fees' own version bumps must not re-trip this.
         let post_checkpoint_version = snapshot.version;
-        let request =
-            shares::request_withdrawal(&mut snapshot, shares_amount, post_checkpoint_version)?;
+        let requested_ledger = env.ledger().sequence();
+        let expires_ledger = if expiry_ledgers == 0 {
+            0
+        } else {
+            requested_ledger
+                .checked_add(expiry_ledgers)
+                .ok_or(Error::MathOverflow)?
+        };
+        let request = shares::request_withdrawal_with_controls(
+            &mut snapshot,
+            shares_amount,
+            min_output,
+            requested_ledger,
+            expires_ledger,
+            post_checkpoint_version,
+        )?;
         env.storage()
             .persistent()
             .set(&balance_key, &(balance - shares_amount));
@@ -1245,27 +1497,34 @@ impl DripPool {
         let nonce: u32 = env
             .storage()
             .instance()
-            .get(&DataKey::WithdrawalNonce)
+            .get(&VaultKey::WithdrawalNonce)
             .unwrap_or(0);
         env.storage()
             .instance()
-            .set(&DataKey::WithdrawalNonce, &(nonce + 1));
+            .set(&VaultKey::WithdrawalNonce, &(nonce + 1));
         env.storage()
             .persistent()
-            .set(&DataKey::WithdrawalRequest(nonce), &request);
+            .set(&VaultKey::WithdrawalRequest(nonce), &request);
         env.storage()
             .persistent()
-            .set(&DataKey::WithdrawalOwner(nonce), &who);
+            .set(&VaultKey::WithdrawalOwner(nonce), &who);
+        env.storage()
+            .persistent()
+            .set(&VaultKey::WithdrawalDestination(nonce), &destination);
+        let mut queue = Self::withdrawal_queue(&env);
+        queue.push_back(nonce);
+        env.storage()
+            .instance()
+            .set(&VaultKey::WithdrawalQueue, &queue);
 
         Self::save_vault(&env, &snapshot);
         env.events().publish(
-            (symbol_short!("vault"), symbol_short!("requested")),
-            (who, nonce, shares_amount, request.assets_owed),
+            (symbol_short!("vault"), symbol_short!("q_req")),
+            (who, destination, nonce, shares_amount, request.assets_owed),
         );
         Ok(nonce)
     }
 
-    /// Callable by the request's own owner (self-service) or any approved signer (batching).
     pub fn vault_fulfill_withdrawal(
         env: Env,
         caller: Address,
@@ -1273,10 +1532,167 @@ impl DripPool {
         amount: i128,
     ) -> Result<i128, Error> {
         caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        Self::ensure_vault_unpaused(&env)?;
+        if Some(request_id) != Self::first_queued_request(&env) {
+            return Err(Error::QueueBlocked);
+        }
+
+        let mut request: shares::WithdrawalRequest = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalRequest(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        let mut snapshot = Self::load_vault(&env)?;
+        if Self::maybe_expire_request(&env, &mut snapshot, request_id, &mut request)? {
+            env.storage()
+                .persistent()
+                .set(&VaultKey::WithdrawalRequest(request_id), &request);
+            Self::save_vault(&env, &snapshot);
+            return Err(Error::DeadlinePassed);
+        }
+        let paid = shares::fulfill_withdrawal(&mut snapshot, &mut request, amount)?;
+
+        env.storage()
+            .persistent()
+            .set(&VaultKey::WithdrawalRequest(request_id), &request);
+        if Self::is_terminal_withdrawal(&request) {
+            Self::refresh_withdrawal_head(&env);
+        }
+        Self::save_vault(&env, &snapshot);
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("q_fulfill")),
+            (request_id, paid, request.assets_owed - request.assets_paid),
+        );
+        Ok(paid)
+    }
+
+    pub fn vault_process_withdrawal_batch(
+        env: Env,
+        caller: Address,
+        available_assets: i128,
+        max_requests: u32,
+    ) -> Result<(u32, i128), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        Self::ensure_vault_unpaused(&env)?;
+        if available_assets <= 0 || max_requests == 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let queue = Self::withdrawal_queue(&env);
+        let mut head = Self::queue_head(&env);
+        let mut snapshot = Self::load_vault(&env)?;
+        let mut remaining_budget = available_assets;
+        let mut processed = 0u32;
+        let mut total_paid = 0i128;
+
+        while head < queue.len() && processed < max_requests && remaining_budget > 0 {
+            let request_id = queue.get_unchecked(head);
+            let mut request: shares::WithdrawalRequest = match env
+                .storage()
+                .persistent()
+                .get(&VaultKey::WithdrawalRequest(request_id))
+            {
+                Some(request) => request,
+                None => {
+                    head += 1;
+                    continue;
+                }
+            };
+
+            if Self::is_terminal_withdrawal(&request) {
+                head += 1;
+                continue;
+            }
+
+            processed += 1;
+            if Self::maybe_expire_request(&env, &mut snapshot, request_id, &mut request)? {
+                env.storage()
+                    .persistent()
+                    .set(&VaultKey::WithdrawalRequest(request_id), &request);
+                head += 1;
+                continue;
+            }
+
+            let remaining_owed = request
+                .assets_owed
+                .checked_sub(request.assets_paid)
+                .ok_or(Error::MathOverflow)?;
+            let pay = remaining_budget
+                .min(remaining_owed)
+                .min(snapshot.total_assets);
+            if pay <= 0 {
+                break;
+            }
+            let paid = shares::fulfill_withdrawal(&mut snapshot, &mut request, pay)?;
+            remaining_budget = remaining_budget
+                .checked_sub(paid)
+                .ok_or(Error::MathOverflow)?;
+            total_paid = total_paid.checked_add(paid).ok_or(Error::MathOverflow)?;
+            env.storage()
+                .persistent()
+                .set(&VaultKey::WithdrawalRequest(request_id), &request);
+            env.events().publish(
+                (symbol_short!("vault"), symbol_short!("q_fulfill")),
+                (request_id, paid, request.assets_owed - request.assets_paid),
+            );
+            if Self::is_terminal_withdrawal(&request) {
+                head += 1;
+            }
+        }
+
+        Self::save_withdrawal_head(&env, head);
+        Self::save_vault(&env, &snapshot);
+        Ok((processed, total_paid))
+    }
+
+    pub fn vault_claim_withdrawal(
+        env: Env,
+        caller: Address,
+        request_id: u32,
+    ) -> Result<i128, Error> {
+        caller.require_auth();
         let owner: Address = env
             .storage()
             .persistent()
-            .get(&DataKey::WithdrawalOwner(request_id))
+            .get(&VaultKey::WithdrawalOwner(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        let destination: Address = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalDestination(request_id))
+            .unwrap_or(owner.clone());
+        if caller != owner && caller != destination {
+            Self::require_signer(&env, &caller)?;
+        }
+        let mut request: shares::WithdrawalRequest = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalRequest(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        let claimed = shares::claim_withdrawal(&mut request)?;
+        env.storage()
+            .persistent()
+            .set(&VaultKey::WithdrawalRequest(request_id), &request);
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("q_claim")),
+            (request_id, destination, claimed),
+        );
+        Ok(claimed)
+    }
+
+    pub fn vault_cancel_withdrawal(
+        env: Env,
+        caller: Address,
+        request_id: u32,
+    ) -> Result<i128, Error> {
+        caller.require_auth();
+        Self::ensure_vault_unpaused(&env)?;
+        let owner: Address = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalOwner(request_id))
             .ok_or(Error::WithdrawalNotFound)?;
         if caller != owner {
             Self::require_signer(&env, &caller)?;
@@ -1285,20 +1701,109 @@ impl DripPool {
         let mut request: shares::WithdrawalRequest = env
             .storage()
             .persistent()
-            .get(&DataKey::WithdrawalRequest(request_id))
+            .get(&VaultKey::WithdrawalRequest(request_id))
             .ok_or(Error::WithdrawalNotFound)?;
         let mut snapshot = Self::load_vault(&env)?;
-        let paid = shares::fulfill_withdrawal(&mut snapshot, &mut request, amount)?;
-
+        let restored = shares::cancel_withdrawal(&mut snapshot, &mut request)?;
+        let balance_key = VaultKey::ShareBalance(owner.clone());
+        let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
         env.storage()
             .persistent()
-            .set(&DataKey::WithdrawalRequest(request_id), &request);
+            .set(&balance_key, &(balance + restored));
+        env.storage()
+            .persistent()
+            .set(&VaultKey::WithdrawalRequest(request_id), &request);
+        if Self::is_terminal_withdrawal(&request) {
+            Self::refresh_withdrawal_head(&env);
+        }
         Self::save_vault(&env, &snapshot);
         env.events().publish(
-            (symbol_short!("vault"), symbol_short!("fulfilled")),
-            (request_id, paid, request.assets_owed - request.assets_paid),
+            (symbol_short!("vault"), symbol_short!("q_cancel")),
+            (request_id, owner, restored),
         );
-        Ok(paid)
+        Ok(restored)
+    }
+
+    pub fn vault_expire_withdrawal(
+        env: Env,
+        caller: Address,
+        request_id: u32,
+    ) -> Result<i128, Error> {
+        caller.require_auth();
+        let owner: Address = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalOwner(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        if caller != owner {
+            Self::require_signer(&env, &caller)?;
+        }
+
+        let mut request: shares::WithdrawalRequest = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalRequest(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        if request.expires_ledger == 0 || env.ledger().sequence() <= request.expires_ledger {
+            return Err(Error::DeadlineNotReached);
+        }
+        let mut snapshot = Self::load_vault(&env)?;
+        let restored = shares::expire_withdrawal(&mut snapshot, &mut request)?;
+        let balance_key = VaultKey::ShareBalance(owner.clone());
+        let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&balance_key, &(balance + restored));
+        env.storage()
+            .persistent()
+            .set(&VaultKey::WithdrawalRequest(request_id), &request);
+        Self::refresh_withdrawal_head(&env);
+        Self::save_vault(&env, &snapshot);
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("q_expire")),
+            (request_id, owner, restored),
+        );
+        Ok(restored)
+    }
+
+    pub fn vault_apply_emergency_haircut(
+        env: Env,
+        caller: Address,
+        request_id: u32,
+        haircut_bps: u32,
+    ) -> Result<i128, Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        let mut request: shares::WithdrawalRequest = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalRequest(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        let mut snapshot = Self::load_vault(&env)?;
+        let reduction = shares::apply_emergency_haircut(&mut snapshot, &mut request, haircut_bps)?;
+        env.storage()
+            .persistent()
+            .set(&VaultKey::WithdrawalRequest(request_id), &request);
+        if Self::is_terminal_withdrawal(&request) {
+            Self::refresh_withdrawal_head(&env);
+        }
+        Self::save_vault(&env, &snapshot);
+        env.events().publish(
+            (symbol_short!("vault"), symbol_short!("q_haircut")),
+            (request_id, haircut_bps, reduction),
+        );
+        Ok(reduction)
+    }
+
+    pub fn vault_set_paused(env: Env, caller: Address, paused: bool) -> Result<(), Error> {
+        caller.require_auth();
+        Self::require_signer(&env, &caller)?;
+        env.storage()
+            .instance()
+            .set(&VaultKey::VaultPaused, &paused);
+        env.events()
+            .publish((symbol_short!("vault"), symbol_short!("pause")), paused);
+        Ok(())
     }
 
     pub fn vault_accrue_management_fee(env: Env, caller: Address) -> Result<i128, Error> {
@@ -1383,7 +1888,7 @@ impl DripPool {
         let beneficiary: Address = env
             .storage()
             .instance()
-            .get(&DataKey::DustBeneficiary)
+            .get(&VaultKey::DustBeneficiary)
             .ok_or(Error::NotInitialized)?;
         env.events().publish(
             (symbol_short!("vault"), symbol_short!("dustswep")),
@@ -1397,7 +1902,7 @@ impl DripPool {
         let recipient: Address = env
             .storage()
             .instance()
-            .get(&DataKey::FeeRecipient)
+            .get(&VaultKey::FeeRecipient)
             .ok_or(Error::NotInitialized)?;
         if caller != recipient {
             Self::require_signer(&env, &caller)?;
@@ -1421,7 +1926,7 @@ impl DripPool {
         Self::require_signer(&env, &caller)?;
         env.storage()
             .instance()
-            .set(&DataKey::FeeRecipient, &recipient);
+            .set(&VaultKey::FeeRecipient, &recipient);
         Ok(())
     }
 
@@ -1434,7 +1939,7 @@ impl DripPool {
         Self::require_signer(&env, &caller)?;
         env.storage()
             .instance()
-            .set(&DataKey::DustBeneficiary, &beneficiary);
+            .set(&VaultKey::DustBeneficiary, &beneficiary);
         Ok(())
     }
 
@@ -1443,7 +1948,7 @@ impl DripPool {
         Self::require_signer(&env, &caller)?;
         env.storage()
             .instance()
-            .set(&DataKey::ManagementFeeBps, &bps);
+            .set(&VaultKey::ManagementFeeBps, &bps);
         Ok(())
     }
 
@@ -1452,7 +1957,7 @@ impl DripPool {
         Self::require_signer(&env, &caller)?;
         env.storage()
             .instance()
-            .set(&DataKey::PerformanceFeeBps, &bps);
+            .set(&VaultKey::PerformanceFeeBps, &bps);
         Ok(())
     }
 
@@ -1464,7 +1969,7 @@ impl DripPool {
     pub fn vault_share_balance(env: Env, who: Address) -> i128 {
         env.storage()
             .persistent()
-            .get(&DataKey::ShareBalance(who))
+            .get(&VaultKey::ShareBalance(who))
             .unwrap_or(0)
     }
 
@@ -1474,15 +1979,42 @@ impl DripPool {
     ) -> Result<shares::WithdrawalRequest, Error> {
         env.storage()
             .persistent()
-            .get(&DataKey::WithdrawalRequest(request_id))
+            .get(&VaultKey::WithdrawalRequest(request_id))
             .ok_or(Error::WithdrawalNotFound)
+    }
+
+    pub fn vault_withdrawal_status(
+        env: Env,
+        request_id: u32,
+    ) -> Result<WithdrawalQueueStatus, Error> {
+        let request: shares::WithdrawalRequest = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalRequest(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        Self::withdrawal_status(&env, request_id, request)
     }
 
     pub fn vault_withdrawal_owner(env: Env, request_id: u32) -> Result<Address, Error> {
         env.storage()
             .persistent()
-            .get(&DataKey::WithdrawalOwner(request_id))
+            .get(&VaultKey::WithdrawalOwner(request_id))
             .ok_or(Error::WithdrawalNotFound)
+    }
+
+    pub fn vault_withdrawal_queue(env: Env) -> Vec<u32> {
+        Self::withdrawal_queue(&env)
+    }
+
+    pub fn vault_withdrawal_head(env: Env) -> u32 {
+        Self::queue_head(&env)
+    }
+
+    pub fn vault_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&VaultKey::VaultPaused)
+            .unwrap_or(false)
     }
 }
 
