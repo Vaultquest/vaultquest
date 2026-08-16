@@ -38,10 +38,22 @@ const schema = z.object({
    *   When unset, the backup cron is not started.
    * BACKUP_RETAIN_DAYS: delete backup files older than this many days (default 7).
    * BACKUP_SCHEDULE: cron expression for the backup job (default: daily at 02:00).
+   * BACKUP_REMOTE_RETENTION_DAYS: off-site backup retention window in days.
+   * BACKUP_REMOTE_IMMUTABLE_DAYS: off-site retention immutability period in days.
+   * BACKUP_RESTORE_DRILL_SCHEDULE: cron expression for restore verification drill (default: weekly at 04:00 on Sunday).
+   * BACKUP_MAX_RTO_MS: max allowed Recovery Time Objective in ms (default: 300,000 ms).
+   * BACKUP_MAX_RPO_MINUTES: max allowed Recovery Point Objective in minutes (default: 1,440 mins).
+   * BACKUP_PG_RESTORE_PATH: path to pg_restore binary (default: "pg_restore").
    */
   BACKUP_DIR: z.string().min(1).optional(),
   BACKUP_RETAIN_DAYS: z.coerce.number().int().positive().default(7),
   BACKUP_SCHEDULE: z.string().default("0 2 * * *"),
+  BACKUP_REMOTE_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
+  BACKUP_REMOTE_IMMUTABLE_DAYS: z.coerce.number().int().nonnegative().default(0),
+  BACKUP_RESTORE_DRILL_SCHEDULE: z.string().default("0 4 * * 0"),
+  BACKUP_MAX_RTO_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
+  BACKUP_MAX_RPO_MINUTES: z.coerce.number().int().positive().default(24 * 60),
+  BACKUP_PG_RESTORE_PATH: z.string().default("pg_restore"),
   /** Master key used for envelope encryption of PII fields (issue #76). */
   PRIVACY_MASTER_KEY: z.string().min(16).optional(),
   /**
@@ -82,6 +94,14 @@ export function getEnv(): Env {
       BACKUP_DIR: process.env.BACKUP_DIR || undefined,
       BACKUP_RETAIN_DAYS: Number(process.env.BACKUP_RETAIN_DAYS ?? 7),
       BACKUP_SCHEDULE: process.env.BACKUP_SCHEDULE ?? "0 2 * * *",
+      BACKUP_REMOTE_RETENTION_DAYS: process.env.BACKUP_REMOTE_RETENTION_DAYS
+        ? Number(process.env.BACKUP_REMOTE_RETENTION_DAYS)
+        : undefined,
+      BACKUP_REMOTE_IMMUTABLE_DAYS: Number(process.env.BACKUP_REMOTE_IMMUTABLE_DAYS ?? 0),
+      BACKUP_RESTORE_DRILL_SCHEDULE: process.env.BACKUP_RESTORE_DRILL_SCHEDULE ?? "0 4 * * 0",
+      BACKUP_MAX_RTO_MS: Number(process.env.BACKUP_MAX_RTO_MS ?? 5 * 60 * 1000),
+      BACKUP_MAX_RPO_MINUTES: Number(process.env.BACKUP_MAX_RPO_MINUTES ?? 24 * 60),
+      BACKUP_PG_RESTORE_PATH: process.env.BACKUP_PG_RESTORE_PATH ?? "pg_restore",
       PRIVACY_MASTER_KEY: process.env.PRIVACY_MASTER_KEY || undefined,
       EXPORT_SIGNATURE_TTL_MS: Number(process.env.EXPORT_SIGNATURE_TTL_MS ?? 5 * 60 * 1000)
     } satisfies Env;
