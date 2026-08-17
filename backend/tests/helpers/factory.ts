@@ -10,7 +10,7 @@ export function makeIntentInput(overrides: Partial<{
   return {
     walletAddress: overrides.walletAddress ?? "GABCDEF1234567890",
     actionType: overrides.actionType ?? "deposit",
-    actionPayload: overrides.actionPayload ?? { vault_id: "42", amount: "1000000", token: "USDC" },
+    actionPayload: overrides.actionPayload ?? { schema_version: 1, vault_id: "42", amount: "1000000", token: "USDC" },
     idempotencyKey: overrides.idempotencyKey ?? randomUUID()
   };
 }
@@ -28,7 +28,7 @@ export async function seedAction(prisma: PrismaClient, overrides: Partial<{
       idempotencyKey: overrides.idempotencyKey ?? randomUUID(),
       walletAddress: overrides.walletAddress ?? "GABCDEF1234567890",
       actionType: overrides.actionType ?? "deposit",
-      actionPayload: (overrides.actionPayload ?? { vault_id: "1", amount: "100" }) as object,
+      actionPayload: (overrides.actionPayload ?? { schema_version: 1, vault_id: "1", amount: "100", token: "USDC" }) as object,
       status: overrides.status ?? "pending",
       txHash: overrides.txHash ?? null
     }
