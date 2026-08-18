@@ -23,6 +23,7 @@ const app = buildApp({
   prisma,
   internalSecret: env.INTERNAL_SERVICE_SECRET,
   apiKey: env.API_KEY,
+  prometheusScrapeKey: env.PROMETHEUS_SCRAPE_KEY,
   exportSignatureTtlMs: env.EXPORT_SIGNATURE_TTL_MS,
   logger,
   cacheService
