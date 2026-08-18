@@ -3,8 +3,26 @@ import { randomUUID } from "node:crypto";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { seedAction } from "./helpers/factory.js";
 import { QuestService } from "../src/services/questService.js";
+import { CANONICAL_DEPOSIT_ASSET } from "../src/constants.js";
 
 const WALLET = "GQUESTWALLET000000000000000000000000000000000000000000";
+
+/**
+ * Builds a versioned, asset-aware deposit payload (issue #94) for the
+ * canonical deposit asset. `dollars` must be an integer number of whole
+ * units for these tests (the asset has 7 decimals).
+ */
+function depositPayload(dollars: number, extra: Record<string, unknown> = {}) {
+  const amountMinor = BigInt(dollars) * 10n ** BigInt(CANONICAL_DEPOSIT_ASSET.decimals);
+  return {
+    payload_version: 1,
+    asset_code: CANONICAL_DEPOSIT_ASSET.code,
+    asset_issuer: CANONICAL_DEPOSIT_ASSET.issuer,
+    decimals: CANONICAL_DEPOSIT_ASSET.decimals,
+    amount_minor: amountMinor.toString(),
+    ...extra
+  };
+}
 
 describe("QuestService", () => {
   let db: TestDb;
@@ -21,15 +39,15 @@ describe("QuestService", () => {
     // Three deposits across two pools, $60 total, two distinct months.
     await seedAction(db.prisma, {
       walletAddress: WALLET, status: "confirmed",
-      actionPayload: { vault_id: "pool-a", amount: "40" }
+      actionPayload: depositPayload(40, { vault_id: "pool-a" })
     });
     await seedAction(db.prisma, {
       walletAddress: WALLET, status: "confirmed",
-      actionPayload: { vault_id: "pool-b", amount: "20" }
+      actionPayload: depositPayload(20, { vault_id: "pool-b" })
     });
     const winter = await seedAction(db.prisma, {
       walletAddress: WALLET, status: "confirmed",
-      actionPayload: { pool_id: "pool-a", amount: "0" }
+      actionPayload: depositPayload(0, { pool_id: "pool-a" })
     });
     await db.prisma.actionLedger.update({
       where: { id: winter.id },
@@ -50,11 +68,39 @@ describe("QuestService", () => {
   it("ignores non-confirmed and redacted rows", async () => {
     await seedAction(db.prisma, {
       walletAddress: WALLET, status: "pending",
-      actionPayload: { vault_id: "p", amount: "1000" }
+      actionPayload: depositPayload(1000, { vault_id: "p" })
     });
     const metrics = await svc.computeMetrics(WALLET);
     expect(metrics.totalDeposited).toBe(0);
     expect(metrics.depositCount).toBe(0);
+  });
+
+  it("quarantines legacy payloads without asset identity from the money metric (issue #94)", async () => {
+    // Old-shape payload: a bare `amount` with no asset/decimals identity.
+    // It must not be summed as if it were dollars, but it still counts
+    // toward deposit-count/pool/month metrics that don't depend on value.
+    await seedAction(db.prisma, {
+      walletAddress: WALLET, status: "confirmed",
+      actionPayload: { vault_id: "pool-legacy", amount: "9999" }
+    });
+    const metrics = await svc.computeMetrics(WALLET);
+    expect(metrics.totalDeposited).toBe(0);
+    expect(metrics.totalDepositedMinor).toBe(0n);
+    expect(metrics.depositCount).toBe(1);
+  });
+
+  it("never sums a non-canonical asset into the fiat-target metric (issue #94)", async () => {
+    await seedAction(db.prisma, {
+      walletAddress: WALLET, status: "confirmed",
+      actionPayload: depositPayload(500, {
+        vault_id: "pool-xlm",
+        asset_code: "XLM",
+        asset_issuer: "native"
+      })
+    });
+    const metrics = await svc.computeMetrics(WALLET);
+    expect(metrics.totalDeposited).toBe(0);
+    expect(metrics.totalDepositedMinor).toBe(0n);
   });
 
   it("marks a quest completed and stamps completedAt once", async () => {
@@ -76,7 +122,7 @@ describe("QuestService", () => {
   it("evaluateRecent picks up wallets with fresh confirmed activity", async () => {
     await seedAction(db.prisma, {
       walletAddress: WALLET, status: "confirmed",
-      actionPayload: { vault_id: "p", amount: "150" }
+      actionPayload: depositPayload(150, { vault_id: "p" })
     });
     const result = await svc.evaluateRecent(new Date(Date.now() - 60_000));
     expect(result.wallets).toBe(1);
@@ -108,7 +154,7 @@ describe("QuestService", () => {
   it("returns stable results and does not double-apply state on duplicate evaluations", async () => {
     await seedAction(db.prisma, {
       walletAddress: WALLET, status: "confirmed",
-      actionPayload: { vault_id: "pool-a", amount: "120" }
+      actionPayload: depositPayload(120, { vault_id: "pool-a" })
     });
 
     const firstEval = await svc.evaluateWallet(WALLET);
@@ -128,7 +174,7 @@ describe("QuestService", () => {
     // Seed $60 deposit initially (partial progress for save_100)
     await seedAction(db.prisma, {
       walletAddress: WALLET, status: "confirmed",
-      actionPayload: { vault_id: "pool-a", amount: "60" }
+      actionPayload: depositPayload(60, { vault_id: "pool-a" })
     });
 
     const firstEval = await svc.evaluateWallet(WALLET);
@@ -138,11 +184,11 @@ describe("QuestService", () => {
     expect(firstSave100.completedAt).toBeNull();
 
     // Sleep a tiny bit to ensure date difference if needed, but not strictly required
-    
+
     // Seed remaining $40 deposit to complete save_100 quest
     await seedAction(db.prisma, {
       walletAddress: WALLET, status: "confirmed",
-      actionPayload: { vault_id: "pool-a", amount: "40" }
+      actionPayload: depositPayload(40, { vault_id: "pool-a" })
     });
 
     const secondEval = await svc.evaluateWallet(WALLET);
