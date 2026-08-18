@@ -1,3 +1,7 @@
+import { getAssetDisplayName } from "../../lib/assets";
+import { EXPECTED_NETWORK } from "../../lib/wallets";
+import { useStore } from "@nanostores/react";
+import { connectedNetwork } from "../../core/store.js";
 import type { FC } from "react";
 import { useState, useCallback } from "react";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
@@ -26,6 +30,8 @@ function estimateWinChanceChange(currentTvl: bigint, depositAmount: bigint, part
 }
 
 export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDeposit, onClose }) => {
+  const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
+  const assetDisplayName = pool ? getAssetDisplayName(network, pool.asset) : "";
   const [step, setStep] = useState<Step>("input");
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -98,18 +104,18 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
                   placeholder="0.00"
                 />
                 <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400">
-                  {pool.asset}
+                  {assetDisplayName}
                 </span>
               </div>
               <p className="mt-1 text-xs text-gray-500">
-                Balance: {formatAmount(walletBalance, pool.asset)}
+                Balance: {formatAmount(walletBalance, assetDisplayName)}
               </p>
             </div>
 
             {exceedsBalance && (
               <div className="flex items-start gap-2 rounded-lg border border-amber-900/40 bg-amber-900/10 p-3 text-sm text-amber-300">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>Amount exceeds available balance (leave ~{GAS_BUFFER} {pool.asset} for gas)</span>
+                <span>Amount exceeds available balance (leave ~{GAS_BUFFER} {assetDisplayName} for gas)</span>
               </div>
             )}
 
@@ -153,7 +159,7 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
             <div className="rounded-xl border border-red-900/30 bg-[#1A0505]/60 p-4 space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Amount</span>
-                <span className="text-white font-semibold">{formatAmount(amount, pool.asset)}</span>
+                <span className="text-white font-semibold">{formatAmount(amount, assetDisplayName)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Pool</span>
@@ -241,7 +247,7 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
               Deposit successful!
             </p>
             <p className="text-sm text-gray-400 text-center max-w-xs">
-              Your deposit of {amount} {pool.asset} has been successfully submitted and confirmed on-chain.
+              Your deposit of {amount} {assetDisplayName} has been successfully submitted and confirmed on-chain.
             </p>
             <button
               type="button"
