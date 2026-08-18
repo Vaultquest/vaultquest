@@ -1,5 +1,8 @@
 import type { FC, ReactNode } from "react";
-import { useMemo } from "react";
+import { useMemo } from "react";import { getAssetDisplayName } from "../../lib/assets";
+import { EXPECTED_NETWORK } from "../../lib/wallets";
+import { useStore } from "@nanostores/react";
+import { connectedNetwork } from "../../core/store.js";
 import { Columns, Plus, X } from "lucide-react";
 import { EmptyState, LoadingState, StaleIndicator } from "../../components/FallbackStates";
 import type { PoolStatus, PoolSummary } from "../contract/types";
@@ -36,8 +39,8 @@ const ROWS: ComparisonRow[] = [
       </span>
     );
   }},
-  { label: "TVL", render: (p) => formatAmount(p.tvl, p.asset) },
-  { label: "Asset", render: (p) => p.asset },
+  { label: "TVL", render: (p) => formatAmount(p.tvl, getAssetDisplayName(network, p.asset)) },
+  { label: "Asset", render: (p) => getAssetDisplayName(network, p.asset) },
   { label: "Participants", render: (p) => String(p.participantCount) },
   { label: "Expected yield", render: (p) => p.expectedYield },
   { label: "Prize", render: (p) => p.prize ?? "—" },
@@ -55,6 +58,7 @@ export const PoolComparisonView: FC<PoolComparisonViewProps> = ({
   onToggleSelect,
   onClear,
 }) => {
+  const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
   const selectedPools = useMemo(
     () => pools.filter((p) => selectedIds.includes(p.id)),
     [pools, selectedIds],

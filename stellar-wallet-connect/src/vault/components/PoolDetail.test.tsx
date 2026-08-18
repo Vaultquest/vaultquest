@@ -57,7 +57,7 @@ describe("PoolDetail", () => {
     expect(screen.getByRole("heading", { name: "Weekly USDC" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /first-time wallet checklist/i })).toBeInTheDocument();
     expect(screen.getByText("Open")).toBeInTheDocument();
-    expect(screen.getByText("10,000 USDC")).toBeInTheDocument();
+    expect(screen.getByText("10,000 USD Coin (Testnet)")).toBeInTheDocument();
     expect(screen.getByText("12")).toBeInTheDocument();
   });
 

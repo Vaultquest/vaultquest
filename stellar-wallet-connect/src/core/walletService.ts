@@ -1,3 +1,4 @@
+import { getAssetIssuer, isValidCanonicalAsset, getAssetConfig } from "../lib/assets";
 import { connectedPublicKey, connectedNetwork, isNetworkMismatch } from "./store.js";
 import { kit } from "./kit.js";
 import { getFrontendEnv } from "./env.js";
@@ -277,6 +278,12 @@ async function getWalletHealth(): Promise<{
     // Fetch USDC using network-specific asset registry
     const network = await getConnectedNetwork();
     const usdcIssuer = getAssetIssuer(network, "USDC");
+    
+    // Check if USDC is supported on this network
+    if (!usdcIssuer) {
+  // USDC not supported on this network
+      return { exists: true, balances: { XLM: xlmBalance, USDC: 0 } };
+}
 
     let usdcBalance = 0;
     if (usdcIssuer) {
