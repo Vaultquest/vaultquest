@@ -19,6 +19,7 @@
  */
 
 import type { PrismaClient, Prisma } from "@prisma/client";
+import { CANONICAL_DEPOSIT_ASSET } from "../constants.js";
 
 export type QuestMetricKey =
   | "totalDeposited"
@@ -80,7 +81,16 @@ export const STANDARD_QUESTS: readonly QuestDefinition[] = [
   }
 ] as const;
 
-export type QuestMetrics = Record<QuestMetricKey, number>;
+export type QuestMetrics = Record<QuestMetricKey, number> & {
+  /**
+   * Exact integer minor units of {@link CANONICAL_DEPOSIT_ASSET} backing
+   * `totalDeposited` (issue #94). This is the authoritative value for
+   * fiat-target completion comparisons - `totalDeposited` (a plain number)
+   * is derived from it only for display/API compatibility and must never be
+   * used for the completion check itself.
+   */
+  totalDepositedMinor: bigint;
+};
 
 export interface QuestProgress {
   questId: string;
@@ -94,7 +104,8 @@ export interface QuestProgress {
 
 /** Raw shape returned by the aggregation query (Postgres returns text/bigint). */
 type MetricsRow = {
-  total_deposited: string | number | null;
+  /** Exact integer minor units of CANONICAL_DEPOSIT_ASSET, as decimal text. */
+  total_deposited_minor: string | null;
   deposit_count: bigint | number | null;
   distinct_pools: bigint | number | null;
   distinct_months: bigint | number | null;
@@ -105,6 +116,25 @@ function num(value: unknown): number {
   if (value === null || value === undefined) return 0;
   const n = typeof value === "bigint" ? Number(value) : Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** Parses a Postgres NUMERIC/text integer into a BigInt, defaulting to 0n. */
+function bigIntOf(value: string | null | undefined): bigint {
+  if (!value) return 0n;
+  return /^\d+$/.test(value) ? BigInt(value) : 0n;
+}
+
+/**
+ * Converts an exact integer minor-unit amount to a decimal number, for
+ * display/comparison only after any BigInt-exact completion check has
+ * already been performed. Safe here because callers only use this once the
+ * value has been capped to a small quest target (see projectProgress).
+ */
+function minorUnitsToNumber(minor: bigint, decimals: number): number {
+  const base = 10n ** BigInt(decimals);
+  const whole = minor / base;
+  const frac = minor % base;
+  return Number(`${whole}.${frac.toString().padStart(decimals, "0")}`);
 }
 
 export class QuestService {
@@ -119,13 +149,25 @@ export class QuestService {
    * `vault_id` and `pool_id` are accepted as the pool identifier.
    */
   async computeMetrics(walletAddress: string): Promise<QuestMetrics> {
+    const asset = CANONICAL_DEPOSIT_ASSET;
     const rows = await this.prisma.$queryRaw<MetricsRow[]>`
       SELECT
         COALESCE(SUM(
           CASE WHEN action_type = 'deposit'
-            THEN COALESCE((action_payload->>'amount')::float8, 0)
-            ELSE 0 END
-        ), 0)::float8 AS total_deposited,
+            -- Only sum rows that are unambiguously CANONICAL_DEPOSIT_ASSET
+            -- with a validated integer minor-unit amount. Anything else
+            -- (legacy rows missing asset identity, or a different asset) is
+            -- quarantined out of this fiat-target aggregation rather than
+            -- summed in as if it were dollars - see issue #94.
+            AND action_payload->>'payload_version' = '1'
+            AND action_payload->>'asset_code' = ${asset.code}
+            AND action_payload->>'asset_issuer' = ${asset.issuer}
+            AND action_payload->>'decimals' = ${String(asset.decimals)}
+            AND action_payload->>'amount_minor' ~ '^[0-9]{1,30}$'
+            THEN (action_payload->>'amount_minor')::numeric(38,0)
+            ELSE 0
+          END
+        ), 0)::text AS total_deposited_minor,
         COUNT(*) FILTER (WHERE action_type = 'deposit')::int AS deposit_count,
         COUNT(DISTINCT COALESCE(action_payload->>'vault_id', action_payload->>'pool_id'))
           FILTER (WHERE action_type = 'deposit')::int AS distinct_pools,
@@ -139,8 +181,12 @@ export class QuestService {
     `;
 
     const row = rows[0];
+    const totalDepositedMinor = bigIntOf(row?.total_deposited_minor);
     return {
-      totalDeposited: num(row?.total_deposited),
+      // Display-only approximation of totalDepositedMinor; never use this
+      // field for a completion/comparison decision (see totalDepositedMinor).
+      totalDeposited: minorUnitsToNumber(totalDepositedMinor, asset.decimals),
+      totalDepositedMinor,
       depositCount: num(row?.deposit_count),
       distinctPools: num(row?.distinct_pools),
       distinctMonths: num(row?.distinct_months),
@@ -153,7 +199,16 @@ export class QuestService {
     return this.quests.map((quest) => {
       const value = metrics[quest.metric];
       const progress = Math.min(value, quest.target);
-      const completed = value >= quest.target;
+
+      // The fiat-target "totalDeposited" quest must never decide completion
+      // from a floating-point comparison (issue #94): use the exact
+      // BigInt minor-unit total instead. quest.target is a whole-dollar
+      // integer today, so it converts to minor units exactly.
+      const completed =
+        quest.metric === "totalDeposited"
+          ? metrics.totalDepositedMinor >= BigInt(quest.target) * 10n ** BigInt(CANONICAL_DEPOSIT_ASSET.decimals)
+          : value >= quest.target;
+
       return {
         questId: quest.id,
         title: quest.title,
