@@ -11,7 +11,7 @@ import {
   normalizeStellarNetwork,
 } from "../lib/wallets.js";
 import { HorizonPool } from "./horizonPool.js";
-
+import { getAssetIssuer, isValidCanonicalAsset } from "../lib/assets.js";
 export interface WalletConnectionResult {
   address: string;
   publicKey: string;
@@ -274,14 +274,17 @@ async function getWalletHealth(): Promise<{
     );
     const xlmBalance = native ? Number(native.balance) : 0;
 
-    // Fetch USDC (Testnet only)
-    const usdcIssuer = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"; // Testnet
+    // Fetch USDC using network-specific asset registry
+    const network = await getConnectedNetwork();
+    const usdcIssuer = getAssetIssuer(network, "USDC");
 
-    const usdc = (json.balances || []).find(
-      (b: any) => b.asset_code === "USDC" && b.issuer === usdcIssuer,
-    );
-    const usdcBalance = usdc ? Number(usdc.balance) : 0;
-
+    let usdcBalance = 0;
+    if (usdcIssuer) {
+      const usdc = (json.balances || []).find(
+        (b: any) => b.asset_code === "USDC" && b.issuer === usdcIssuer,
+      );
+      usdcBalance = usdc ? Number(usdc.balance) : 0;
+    }
     return { exists: true, balances: { XLM: xlmBalance, USDC: usdcBalance } };
   } catch (error) {
     console.error("Error checking wallet health:", error);
