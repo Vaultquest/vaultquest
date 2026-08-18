@@ -114,6 +114,7 @@ pub enum Error {
     /// other is rejected so their totals can never silently diverge or be
     /// double-counted against the same (unverified) custody.
     MixedAccountingModeNotAllowed = 40,
+    InvalidFeeBps = 41,
 }
 
 // ── Structs ────────────────────────────────────────────────────────────────
@@ -670,21 +671,29 @@ impl DripPool {
                 );
             }
             ProposalAction::VaultSetManagementFeeBps(bps) => {
+                if bps > 10_000 {
+                    return Err(Error::InvalidFeeBps);
+                }
+                let old_bps: u32 = env.storage().instance().get(&VaultKey::ManagementFeeBps).unwrap_or(0);
                 env.storage()
                     .instance()
                     .set(&VaultKey::ManagementFeeBps, &bps);
                 env.events().publish(
                     (symbol_short!("vault"), symbol_short!("mgmt_bps")),
-                    (bps, proposal.epoch),
+                    (old_bps, bps, proposal.epoch),
                 );
             }
             ProposalAction::VaultSetPerformanceFeeBps(bps) => {
+                if bps > 10_000 {
+                    return Err(Error::InvalidFeeBps);
+                }
+                let old_bps: u32 = env.storage().instance().get(&VaultKey::PerformanceFeeBps).unwrap_or(0);
                 env.storage()
                     .instance()
                     .set(&VaultKey::PerformanceFeeBps, &bps);
                 env.events().publish(
                     (symbol_short!("vault"), symbol_short!("perf_bps")),
-                    (bps, proposal.epoch),
+                    (old_bps, bps, proposal.epoch),
                 );
             }
             ProposalAction::VaultApplyEmergencyHaircut(request_id, haircut_bps) => {
@@ -1348,7 +1357,8 @@ impl DripPool {
             .instance()
             .get(&VaultKey::PerformanceFeeBps)
             .ok_or(Error::NotInitialized)?;
-        Ok((management, performance))
+        // Safeguard for legacy configs: cap to 100%
+        Ok((management.min(10_000), performance.min(10_000)))
     }
 
     /// Runs before any share-supply change so no depositor/withdrawer can dodge an owed fee.
@@ -2051,6 +2061,9 @@ impl DripPool {
     pub fn vault_set_management_fee_bps(env: Env, caller: Address, bps: u32) -> Result<u32, Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
+        if bps > 10_000 {
+            return Err(Error::InvalidFeeBps);
+        }
         Self::propose(env, caller, ProposalAction::VaultSetManagementFeeBps(bps))
     }
 
@@ -2059,6 +2072,9 @@ impl DripPool {
     pub fn vault_set_performance_fee_bps(env: Env, caller: Address, bps: u32) -> Result<u32, Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
+        if bps > 10_000 {
+            return Err(Error::InvalidFeeBps);
+        }
         Self::propose(env, caller, ProposalAction::VaultSetPerformanceFeeBps(bps))
     }
 
