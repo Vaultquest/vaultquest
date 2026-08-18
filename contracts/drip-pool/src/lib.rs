@@ -108,6 +108,12 @@ pub enum Error {
     WithdrawalNotCancellable = 37,
     Paused = 38,
     InvalidHaircut = 39,
+    /// #108: the legacy drip/deposit/withdraw accounting path and the
+    /// share-based vault are two independent, non-transfer-verified balance
+    /// systems on the same pool. Once either has been used, switching to the
+    /// other is rejected so their totals can never silently diverge or be
+    /// double-counted against the same (unverified) custody.
+    MixedAccountingModeNotAllowed = 40,
 }
 
 // ── Structs ────────────────────────────────────────────────────────────────
@@ -234,6 +240,35 @@ impl DripPool {
                 && env.ledger().sequence() <= draw.reveal_deadline
             {
                 return Err(Error::DrawActive);
+            }
+        }
+        Ok(())
+    }
+
+    /// #108: the legacy accounting path (`deposit`/`drip`/`deposit_with_duration`)
+    /// and the share-based vault (`vault_deposit`) both track pool balances
+    /// without independently verified token custody. Neither can tell
+    /// whether the other has already "moved" the same underlying assets, so
+    /// once one system has recorded a real balance the other is locked out
+    /// for this pool - this is what stops totals from silently diverging or
+    /// the same custody being double-counted across both systems.
+    fn check_legacy_accounting_allowed(env: &Env) -> Result<(), Error> {
+        if let Some(snapshot) = env
+            .storage()
+            .instance()
+            .get::<_, shares::VaultSnapshot>(&VaultKey::VaultShares)
+        {
+            if snapshot.total_shares > 0 {
+                return Err(Error::MixedAccountingModeNotAllowed);
+            }
+        }
+        Ok(())
+    }
+
+    fn check_vault_accounting_allowed(env: &Env) -> Result<(), Error> {
+        if let Some(pool) = env.storage().instance().get::<_, Pool>(&DataKey::Pool) {
+            if pool.total_deposited > 0 {
+                return Err(Error::MixedAccountingModeNotAllowed);
             }
         }
         Ok(())
@@ -635,6 +670,7 @@ impl DripPool {
     pub fn deposit(env: Env, who: Address, amount: i128) -> Result<(), Error> {
         who.require_auth();
         Self::check_draw_inactive(&env)?;
+        Self::check_legacy_accounting_allowed(&env)?;
         if amount <= 0 {
             return Err(Error::InvalidAmount);
         }
@@ -683,6 +719,7 @@ impl DripPool {
     ) -> Result<(), Error> {
         who.require_auth();
         Self::check_draw_inactive(&env)?;
+        Self::check_legacy_accounting_allowed(&env)?;
         if amount <= 0 {
             return Err(Error::InvalidAmount);
         }
@@ -754,6 +791,16 @@ impl DripPool {
     }
 
     // ── Withdraw ───────────────────────────────────────────────────────────
+    /// #108: this legacy withdrawal pays out a *calculated* amount without a
+    /// verified custody transfer (the token transfer below is intentionally
+    /// left commented - see the caveat where it's referenced). It can only
+    /// ever pay out what legacy `deposit`/`drip`/`deposit_with_duration`
+    /// recorded, and those are now blocked once the share-based vault has
+    /// been used on this pool (`check_legacy_accounting_allowed`), so this
+    /// can no longer diverge from or double-count against vault accounting.
+    /// It remains a known limitation that this path was never wired to a
+    /// real token client; production deployments must not rely on it moving
+    /// funds until that custody wiring exists.
     pub fn withdraw(env: Env, who: Address) -> Result<i128, Error> {
         who.require_auth();
         Self::check_draw_inactive(&env)?;
@@ -1409,6 +1456,7 @@ impl DripPool {
     ) -> Result<i128, Error> {
         who.require_auth();
         Self::ensure_vault_unpaused(&env)?;
+        Self::check_vault_accounting_allowed(&env)?;
         let mut snapshot = Self::load_vault(&env)?;
         if snapshot.version != expected_version {
             return Err(Error::StaleSnapshot);
