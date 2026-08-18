@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { buildApp } from "../src/app.js";
 import type { FastifyInstance } from "fastify";
+import { injectWithCsrf } from "./helpers/csrf.js";
 
 describe("GET /dashboard/summary (#14)", () => {
   let db: TestDb;
@@ -21,16 +22,11 @@ describe("GET /dashboard/summary (#14)", () => {
   });
 
   async function postAction(wallet: string, type = "deposit"): Promise<string> {
-    const res = await app.inject({
-      method: "POST",
-      url: "/actions",
-      headers: { "idempotency-key": randomUUID(), "content-type": "application/json" },
-      payload: {
-        wallet_address: wallet,
-        action_type: type,
-        action_payload: { vault_id: "1" }
-      }
-    });
+    const res = await injectWithCsrf(app, "POST", "/actions", {
+      wallet_address: wallet,
+      action_type: type,
+      action_payload: { schema_version: 1, vault_id: "1", amount: "100", token: "USDC" }
+    }, { "idempotency-key": randomUUID() });
     expect(res.statusCode).toBe(201);
     return res.json().data.id as string;
   }
@@ -72,16 +68,8 @@ describe("GET /dashboard/summary (#14)", () => {
     await postAction(wallet);
 
     // Move two actions through pending → submitted with tx hashes.
-    await app.inject({
-      method: "PATCH",
-      url: `/actions/${a}/submitted`,
-      payload: { tx_hash: "TX_A_HASH" }
-    });
-    await app.inject({
-      method: "PATCH",
-      url: `/actions/${b}/submitted`,
-      payload: { tx_hash: "TX_B_HASH" }
-    });
+    await injectWithCsrf(app, "PATCH", `/actions/${a}/submitted`, { tx_hash: "TX_A_HASH" });
+    await injectWithCsrf(app, "PATCH", `/actions/${b}/submitted`, { tx_hash: "TX_B_HASH" });
 
     const res = await app.inject({
       method: "GET",

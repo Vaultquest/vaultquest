@@ -35,7 +35,9 @@ export const depositPayloadV1Schema = z.object({
 export const createActionBody = z.object({
   wallet_address: walletSchema,
   action_type: z.enum(ACTION_TYPES),
-  action_payload: z.record(z.unknown())
+  // Validated separately against the versioned, size-bounded per-type schemas
+  // in actionPayloads.ts so failures produce structured issues (#109).
+  action_payload: z.unknown()
 });
 
 export const attachTxBody = z.object({
@@ -57,7 +59,8 @@ export const listQuery = z.object({
 export const reconcileBody = z.object({
   tx_hash: z.string().min(4).max(200),
   soroban_event_id: z.string().min(1).max(200),
-  event_payload: z.record(z.unknown()),
+  // Validated separately against the versioned event schemas (#109).
+  event_payload: z.unknown(),
   status_hint: z.enum(["confirmed", "reverted"])
 });
 

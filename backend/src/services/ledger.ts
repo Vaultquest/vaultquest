@@ -5,6 +5,7 @@ import { AppError } from "../errors.js";
 import type { IntentInput, ActionRecord } from "../types.js";
 import type { ActionStatus } from "../constants.js";
 import type { CacheService } from "./cacheService.js";
+import { toActionPayloadView } from "../schemas/actionPayloads.js";
 
 export type ListActionsParams = {
   walletAddress: string;
@@ -405,27 +406,43 @@ export class LedgerService {
 
     const confirmedActions = actions.filter((a) => a.status === "confirmed");
     for (const action of confirmedActions) {
-      const payload = action.actionPayload as Record<string, any> | null;
-      if (!payload) continue;
+      // Exhaustive per-type payload view: versioned and legacy stored payloads
+      // are both readable, and each action type's financial fields are explicit (#109).
+      const view = toActionPayloadView(action.actionType, action.actionPayload);
+      if (!view) continue;
 
-      const vaultId = String(payload.vault_id || payload.pool_id || "default");
-      const amount = Number(payload.amount || 0);
-      const token = String(payload.token || payload.asset || "USDC");
+      const vaultId = view.vaultId || "default";
+      const amount = Number(view.amount || 0);
+      const token = view.token;
 
       if (!poolBalances[vaultId]) {
         poolBalances[vaultId] = { balance: 0, token };
       }
+      const position = poolBalances[vaultId]!;
 
-      if (action.actionType === "deposit") {
-        poolBalances[vaultId].balance += amount;
-      } else if (action.actionType === "withdraw") {
-        poolBalances[vaultId].balance -= amount;
-      } else if (action.actionType === "claim") {
-        totalClaimed += amount;
+      switch (action.actionType) {
+        case "deposit":
+          position.balance += amount;
+          break;
+        case "withdraw":
+          position.balance -= amount;
+          break;
+        case "claim":
+          totalClaimed += amount;
+          break;
+        case "create_vault":
+        case "select_winner":
+          // No balance movement: the vault is registered above with a zero
+          // balance so it drops out of `active_positions`.
+          break;
+        default: {
+          const exhaustive: never = action.actionType;
+          void exhaustive;
+        }
       }
     }
 
-    const activeVaultIds = Object.keys(poolBalances).filter((vid) => poolBalances[vid].balance > 0);
+    const activeVaultIds = Object.keys(poolBalances).filter((vid) => poolBalances[vid]!.balance > 0);
     const checkpointIds = ["singleton", ...activeVaultIds.map((vid) => `vault-${vid}`)];
 
     const checkpoints = await this.prisma.indexerCheckpoint.findMany({
