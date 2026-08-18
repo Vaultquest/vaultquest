@@ -45,6 +45,21 @@ const schema = z.object({
   /** Master key used for envelope encryption of PII fields (issue #76). */
   PRIVACY_MASTER_KEY: z.string().min(16).optional(),
   /**
+   * Dedicated scrape credential for the raw Prometheus `/metrics` endpoint
+   * (issue #102). Kept separate from API_KEY so metrics access can be
+   * rotated/scoped independently of general external-service API access.
+   * When set, `/metrics` requires `X-Api-Key: <value>`. Leave unset only for
+   * local development, or when the endpoint is exclusively reachable over a
+   * private scrape network with no public ingress.
+   */
+  PROMETHEUS_SCRAPE_KEY: z
+    .string()
+    .min(32, "PROMETHEUS_SCRAPE_KEY must be at least 32 characters")
+    .refine((v) => !placeholderPattern.test(v), {
+      message: "PROMETHEUS_SCRAPE_KEY must not be a placeholder value"
+    })
+    .optional(),
+  /**
    * How long a signed export challenge stays valid, in milliseconds (issue #10).
    * Wide enough to absorb clock skew between a browser and the server, short
    * enough that a captured signature is not useful for long. Default 5 minutes.
@@ -83,6 +98,7 @@ export function getEnv(): Env {
       BACKUP_RETAIN_DAYS: Number(process.env.BACKUP_RETAIN_DAYS ?? 7),
       BACKUP_SCHEDULE: process.env.BACKUP_SCHEDULE ?? "0 2 * * *",
       PRIVACY_MASTER_KEY: process.env.PRIVACY_MASTER_KEY || undefined,
+      PROMETHEUS_SCRAPE_KEY: process.env.PROMETHEUS_SCRAPE_KEY || undefined,
       EXPORT_SIGNATURE_TTL_MS: Number(process.env.EXPORT_SIGNATURE_TTL_MS ?? 5 * 60 * 1000)
     } satisfies Env;
   }
