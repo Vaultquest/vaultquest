@@ -1,16 +1,14 @@
 import { connectedPublicKey, connectedNetwork, isNetworkMismatch } from "./store.js";
 import { kit } from "./kit.js";
-import { getFrontendEnv } from "./env.js";
-import { resolveHorizonUrl } from "./horizonConfig.js";
 import type { ISupportedWallet } from "@creit.tech/stellar-wallets-kit";
 import {
   EXPECTED_NETWORK,
-  STELLAR_NETWORKS,
   type NetworkType,
   type WalletType,
   normalizeStellarNetwork,
 } from "../lib/wallets.js";
 import { HorizonPool } from "./horizonPool.js";
+import { assetAmountFrom, zeroAssetAmount, type AssetAmount } from "./amount.js";
 
 export interface WalletConnectionResult {
   address: string;
@@ -234,22 +232,33 @@ function initializeConnection(): StoredWalletConnection | null {
   return null;
 }
 
+const NATIVE_ASSET_ISSUER = "native";
+const USDC_ISSUER = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"; // Testnet
+
+function zeroWalletBalances(): { XLM: AssetAmount; USDC: AssetAmount } {
+  return {
+    XLM: zeroAssetAmount("XLM", NATIVE_ASSET_ISSUER),
+    USDC: zeroAssetAmount("USDC", USDC_ISSUER),
+  };
+}
+
 /**
  * Check if the connected wallet exists and has funds.
- * Returns { exists: boolean, balance: number }.
+ *
+ * Balances are exact (issue #106): Horizon already serialises them as
+ * decimal strings with up to 7 fractional digits, so they are kept as
+ * validated decimal strings / integer minor units instead of being coerced
+ * through `Number(...)`, which can silently lose precision on large values
+ * or the low-order digits of a 7-decimal amount. Asset code/issuer/decimals
+ * stay attached to every amount rather than being implied by field name.
  */
 async function getWalletHealth(): Promise<{
   exists: boolean;
-  balances: { XLM: number; USDC: number };
+  balances: { XLM: AssetAmount; USDC: AssetAmount };
 }> {
   const publicKey = loadedPublicKey();
-  const env = getFrontendEnv();
-  const horizonUrl = resolveHorizonUrl(
-    env.NEXT_PUBLIC_HORIZON_URL,
-    STELLAR_NETWORKS[EXPECTED_NETWORK].horizonUrl,
-  );
 
-  if (!publicKey) return { exists: false, balances: { XLM: 0, USDC: 0 } };
+  if (!publicKey) return { exists: false, balances: zeroWalletBalances() };
 
   try {
     // Route through the connection pool: distributes the lookup across the
@@ -259,33 +268,48 @@ async function getWalletHealth(): Promise<{
     });
 
     if (resp.status === 404) {
-      return { exists: false, balances: { XLM: 0, USDC: 0 } };
+      return { exists: false, balances: zeroWalletBalances() };
     }
 
     if (!resp.ok) {
-      return { exists: false, balances: { XLM: 0, USDC: 0 } };
+      return { exists: false, balances: zeroWalletBalances() };
     }
 
     const json = await resp.json();
+    const rawBalances: any[] = json.balances || [];
 
-    // Fetch XLM (native)
-    const native = (json.balances || []).find(
-      (b: any) => b.asset_type === "native",
-    );
-    const xlmBalance = native ? Number(native.balance) : 0;
+    // Fetch XLM (native). If Horizon ever returns something that doesn't
+    // parse as a valid 7-decimal Stellar amount, fall back to zero but log
+    // it - that's a data/provider problem, not evidence of an empty wallet.
+    const native = rawBalances.find((b: any) => b.asset_type === "native");
+    let xlm = zeroAssetAmount("XLM", NATIVE_ASSET_ISSUER);
+    if (native) {
+      const parsed = assetAmountFrom("XLM", NATIVE_ASSET_ISSUER, String(native.balance));
+      if (parsed) {
+        xlm = parsed;
+      } else {
+        console.error("Unparseable XLM balance from Horizon:", native.balance);
+      }
+    }
 
     // Fetch USDC (Testnet only)
-    const usdcIssuer = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"; // Testnet
-
-    const usdc = (json.balances || []).find(
-      (b: any) => b.asset_code === "USDC" && b.issuer === usdcIssuer,
+    const usdcRaw = rawBalances.find(
+      (b: any) => b.asset_code === "USDC" && b.issuer === USDC_ISSUER,
     );
-    const usdcBalance = usdc ? Number(usdc.balance) : 0;
+    let usdc = zeroAssetAmount("USDC", USDC_ISSUER);
+    if (usdcRaw) {
+      const parsed = assetAmountFrom("USDC", USDC_ISSUER, String(usdcRaw.balance));
+      if (parsed) {
+        usdc = parsed;
+      } else {
+        console.error("Unparseable USDC balance from Horizon:", usdcRaw.balance);
+      }
+    }
 
-    return { exists: true, balances: { XLM: xlmBalance, USDC: usdcBalance } };
+    return { exists: true, balances: { XLM: xlm, USDC: usdc } };
   } catch (error) {
     console.error("Error checking wallet health:", error);
-    return { exists: false, balances: { XLM: 0, USDC: 0 } };
+    return { exists: false, balances: zeroWalletBalances() };
   }
 }
 
