@@ -1,5 +1,4 @@
-import { getAssetIssuer, isValidCanonicalAsset, getAssetConfig } from "../lib/assets";
-import { connectedPublicKey, connectedNetwork, isNetworkMismatch } from "./store.js";
+import { connectedPublicKey, connectedNetwork, isNetworkMismatch, networkReadiness } from "./store.js";
 import { kit } from "./kit.js";
 import { getFrontendEnv } from "./env.js";
 import { resolveHorizonUrl } from "./horizonConfig.js";
@@ -86,6 +85,41 @@ function toAppWalletType(provider: string): WalletType | undefined {
   return appWalletTypesByKitId[provider];
 }
 
+/**
+ * Monotonically increasing token identifying the "current" connection.
+ * Any in-flight network verification captures the token at the time it was
+ * started; when it resolves, it only applies the result if the token is
+ * still current. This prevents a stale verification (from a connection that
+ * has since been replaced or torn down) from overwriting fresher state -
+ * e.g. a slow verification racing a network switch or a disconnect.
+ */
+let connectionGeneration = 0;
+
+function verifyNetworkInBackground(generation: number): void {
+  networkReadiness.set("verifying");
+  isNetworkMismatch.set(false);
+
+  // Uses queryConnectedNetwork (not getConnectedNetwork) so a provider
+  // failure surfaces as a distinct "error" state instead of being silently
+  // treated as a match against EXPECTED_NETWORK.
+  queryConnectedNetwork()
+    .then((net) => {
+      if (generation !== connectionGeneration) return; // stale, ignore
+      connectedNetwork.set(net);
+      const mismatch = net !== EXPECTED_NETWORK;
+      isNetworkMismatch.set(mismatch);
+      networkReadiness.set(mismatch ? "mismatch" : "verified");
+    })
+    .catch(() => {
+      if (generation !== connectionGeneration) return; // stale, ignore
+      // Verification failed (provider error) - this is distinct from a
+      // confirmed mismatch and must NOT be treated as "ready".
+      connectedNetwork.set(null);
+      isNetworkMismatch.set(true);
+      networkReadiness.set("error");
+    });
+}
+
 function setConnection(publicKey: string, provider: string): void {
   const appProvider = toAppWalletType(provider);
 
@@ -103,14 +137,11 @@ function setConnection(publicKey: string, provider: string): void {
 
   connectedPublicKey.set(publicKey);
 
-  // Set the network in the background and check for mismatch
-  getConnectedNetwork().then((net) => {
-    connectedNetwork.set(net);
-    isNetworkMismatch.set(net !== EXPECTED_NETWORK);
-  }).catch(() => {
-    connectedNetwork.set(EXPECTED_NETWORK);
-    isNetworkMismatch.set(false);
-  });
+  // Invalidate any previous in-flight verification and start a fresh one.
+  // Contract actions must stay gated (networkReadiness !== "verified")
+  // until this resolves.
+  const generation = ++connectionGeneration;
+  verifyNetworkInBackground(generation);
 }
 
 function disconnect(): void {
@@ -122,9 +153,13 @@ function disconnect(): void {
     localStorage.removeItem("walletProvider");
   }
 
+  // Invalidate any in-flight verification so it cannot resurrect stale state.
+  ++connectionGeneration;
+
   connectedPublicKey.set("");
   connectedNetwork.set(null);
   isNetworkMismatch.set(false);
+  networkReadiness.set("idle");
 }
 
 export async function checkAndNotifyFunding(): Promise<void> {
@@ -192,14 +227,25 @@ async function disconnectWallet(provider?: WalletType): Promise<void> {
   }
 }
 
+/**
+ * Queries the wallet provider for its connected network and rethrows on
+ * failure - callers that need to distinguish a confirmed network from a
+ * verification outage (issue #101) must use this instead of
+ * {@link getConnectedNetwork}, which intentionally swallows errors for
+ * call sites that only want a best-effort default.
+ */
+async function queryConnectedNetwork(): Promise<NetworkType> {
+  const networkResult = await kit.getNetwork();
+  return (
+    normalizeStellarNetwork(networkResult?.network) ||
+    normalizeStellarNetwork(networkResult?.networkPassphrase) ||
+    EXPECTED_NETWORK
+  );
+}
+
 async function getConnectedNetwork(): Promise<NetworkType> {
   try {
-    const networkResult = await kit.getNetwork();
-    return (
-      normalizeStellarNetwork(networkResult?.network) ||
-      normalizeStellarNetwork(networkResult?.networkPassphrase) ||
-      EXPECTED_NETWORK
-    );
+    return await queryConnectedNetwork();
   } catch {
     return EXPECTED_NETWORK;
   }
@@ -217,14 +263,10 @@ function initializeConnection(): StoredWalletConnection | null {
     connectionState.provider = appProvider;
     connectedPublicKey.set(storedPublicKey);
 
-    // Verify network and mismatch in the background
-    getConnectedNetwork().then((net) => {
-      connectedNetwork.set(net);
-      isNetworkMismatch.set(net !== EXPECTED_NETWORK);
-    }).catch(() => {
-      connectedNetwork.set(EXPECTED_NETWORK);
-      isNetworkMismatch.set(false);
-    });
+    // Verify network in the background. Actions stay gated
+    // (networkReadiness !== "verified") until this resolves.
+    const generation = ++connectionGeneration;
+    verifyNetworkInBackground(generation);
 
     return {
       publicKey: storedPublicKey,
