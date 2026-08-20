@@ -76,3 +76,18 @@ export const SETTLEMENT_RETRY = {
   baseDelayMs: 250,
   maxDelayMs: 8000
 } as const;
+
+/**
+ * The single asset that fiat-denominated quest targets (e.g. "Save $100")
+ * are valued against (issue #94). Deposit actions must identify their asset
+ * explicitly; only deposits in this exact asset are aggregated into
+ * fiat-target quest progress. Deposits in any other asset are excluded from
+ * that aggregation rather than summed in as if they were equivalent - mixing
+ * assets without an explicit valuation snapshot is exactly the bug this
+ * fixes. Choosing/expanding a price oracle for other assets is a non-goal.
+ */
+export const CANONICAL_DEPOSIT_ASSET = {
+  code: "USDC",
+  issuer: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", // Testnet USDC
+  decimals: 7
+} as const;

@@ -30,6 +30,12 @@ export type AppDeps = {
   internalSecret: string;
   /** API key for external-service endpoints (issue #273). Undefined disables enforcement. */
   apiKey?: string;
+  /**
+   * Dedicated scrape credential for the raw Prometheus `/metrics` endpoint
+   * (issue #102), kept separate from `apiKey` so it can be rotated/scoped
+   * independently. Undefined disables enforcement (local dev only).
+   */
+  prometheusScrapeKey?: string;
   logger?: Logger;
   cacheService?: CacheService;
   privacyMasterKey?: string;
@@ -99,6 +105,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Guard is a no-op when apiKey is undefined (local dev without configuration).
   const apiKeyGuard = requireApiKey(deps.apiKey);
 
+  // Scrape guard for the raw Prometheus endpoint (#102). Deliberately a
+  // separate credential from apiKeyGuard.
+  const prometheusScrapeGuard = requireApiKey(deps.prometheusScrapeKey);
+
   // Export authorization (#10). Deliberately not disabled by absent config:
   // export discloses a wallet's history, so it always demands a principal.
   const exportAuthGuard = requireExportAuth({
@@ -112,7 +122,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.register(savedPoolsRoutes(savedPoolsSvc));
   app.register(internalRoutes(svc, deps.internalSecret));
   app.register(metricsRoutes(metricsSvc, apiKeyGuard));
-  app.register(prometheusRoutes);
+  app.register(prometheusRoutes(prometheusScrapeGuard));
   app.register(
     privacyRoutes({
       exportSvc,

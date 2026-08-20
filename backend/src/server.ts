@@ -3,7 +3,9 @@ import { getEnv } from "./env.js";
 import { getPrisma } from "./db.js";
 import { createLogger } from "./logger.js";
 import { startReconcilerCron, startQuestCron, startIndexerCron, startBackupCron } from "./cron.js";
+import { register } from "prom-client";
 import { CacheService } from "./services/cacheService.js";
+import { PrometheusCacheSink } from "./services/cache/prometheusSink.js";
 import { LedgerService } from "./services/ledger.js";
 import {
   StellarIndexer,
@@ -17,12 +19,13 @@ const logger = createLogger(env.LOG_LEVEL);
 const prisma = getPrisma(env.DATABASE_URL);
 
 // Initialize Cache Service (pointing to REDIS_URL if set, otherwise defaults to local Redis)
-const cacheService = new CacheService(prisma, logger, process.env.REDIS_URL);
+const cacheService = new CacheService(prisma, logger, process.env.REDIS_URL, undefined, new PrometheusCacheSink(register));
 
 const app = buildApp({
   prisma,
   internalSecret: env.INTERNAL_SERVICE_SECRET,
   apiKey: env.API_KEY,
+  prometheusScrapeKey: env.PROMETHEUS_SCRAPE_KEY,
   exportSignatureTtlMs: env.EXPORT_SIGNATURE_TTL_MS,
   logger,
   cacheService

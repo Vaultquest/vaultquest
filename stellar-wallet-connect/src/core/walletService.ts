@@ -9,6 +9,7 @@ import {
 } from "../lib/wallets.js";
 import { HorizonPool } from "./horizonPool.js";
 import { assetAmountFrom, zeroAssetAmount, type AssetAmount } from "./amount.js";
+import { getAssetIssuer, isValidCanonicalAsset } from "../lib/assets.js";
 
 export interface WalletConnectionResult {
   address: string;
@@ -233,12 +234,17 @@ function initializeConnection(): StoredWalletConnection | null {
 }
 
 const NATIVE_ASSET_ISSUER = "native";
-const USDC_ISSUER = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"; // Testnet
 
-function zeroWalletBalances(): { XLM: AssetAmount; USDC: AssetAmount } {
+/**
+ * Zero balances for an unresolved/unavailable account. `usdcIssuer` is
+ * optional because it depends on the network-specific asset registry
+ * (issue #104); when the network hasn't been resolved yet (e.g. an early
+ * exit before Horizon replies) there is no issuer to attach.
+ */
+function zeroWalletBalances(usdcIssuer: string = ""): { XLM: AssetAmount; USDC: AssetAmount } {
   return {
     XLM: zeroAssetAmount("XLM", NATIVE_ASSET_ISSUER),
-    USDC: zeroAssetAmount("USDC", USDC_ISSUER),
+    USDC: zeroAssetAmount("USDC", usdcIssuer),
   };
 }
 
@@ -292,13 +298,23 @@ async function getWalletHealth(): Promise<{
       }
     }
 
-    // Fetch USDC (Testnet only)
+    // Fetch USDC using the network-specific asset registry (issue #104),
+    // parsed as an exact AssetAmount (issue #106) - never through Number().
+    const network = await getConnectedNetwork();
+    const usdcIssuer = getAssetIssuer(network, "USDC");
+
+    // USDC not supported on this network: report an exact zero rather than
+    // guessing/hardcoding an issuer.
+    if (!usdcIssuer) {
+      return { exists: true, balances: { XLM: xlm, USDC: zeroAssetAmount("USDC", "") } };
+    }
+
     const usdcRaw = rawBalances.find(
-      (b: any) => b.asset_code === "USDC" && b.issuer === USDC_ISSUER,
+      (b: any) => b.asset_code === "USDC" && b.issuer === usdcIssuer,
     );
-    let usdc = zeroAssetAmount("USDC", USDC_ISSUER);
+    let usdc = zeroAssetAmount("USDC", usdcIssuer);
     if (usdcRaw) {
-      const parsed = assetAmountFrom("USDC", USDC_ISSUER, String(usdcRaw.balance));
+      const parsed = assetAmountFrom("USDC", usdcIssuer, String(usdcRaw.balance));
       if (parsed) {
         usdc = parsed;
       } else {
