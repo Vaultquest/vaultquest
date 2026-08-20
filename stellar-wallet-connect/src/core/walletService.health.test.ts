@@ -46,15 +46,39 @@ function stubPool(request: (path: string, init?: RequestInit) => Promise<Respons
   return { request } as unknown as HorizonPool;
 }
 
+const USDC_ISSUER = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+
 const NATIVE_BALANCE = {
   balances: [
     { asset_type: "native", balance: "42.5000000" },
     {
       asset_code: "USDC",
-      issuer: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      issuer: USDC_ISSUER,
       balance: "10.0000000",
     },
   ],
+};
+
+/**
+ * Exact AssetAmount shape (issue #106) expected for `NATIVE_BALANCE` - kept
+ * as validated decimal strings / integer minor units rather than plain
+ * numbers, so precision-losing `Number(...)` coercion never re-creeps in.
+ */
+const NATIVE_BALANCE_AMOUNTS = {
+  XLM: {
+    assetCode: "XLM",
+    assetIssuer: "native",
+    decimals: 7,
+    decimal: "42.5000000",
+    minorUnits: "425000000",
+  },
+  USDC: {
+    assetCode: "USDC",
+    assetIssuer: USDC_ISSUER,
+    decimals: 7,
+    decimal: "10.0000000",
+    minorUnits: "100000000",
+  },
 };
 
 describe("getWalletHealth status discrimination (issue #103)", () => {
@@ -78,7 +102,7 @@ describe("getWalletHealth status discrimination (issue #103)", () => {
     const health = await getWalletHealth();
     expect(health.status).toBe("ready");
     expect(health.exists).toBe(true);
-    expect(health.balances).toEqual({ XLM: 42.5, USDC: 10 });
+    expect(health.balances).toEqual(NATIVE_BALANCE_AMOUNTS);
     expect(health.asOfMs).not.toBeNull();
   });
 
@@ -138,7 +162,7 @@ describe("getWalletHealth status discrimination (issue #103)", () => {
     expect(duringOutage.status).toBe("unavailable");
     expect(duringOutage.stale).toBe(true);
     expect(duringOutage.exists).toBe(true);
-    expect(duringOutage.balances).toEqual({ XLM: 42.5, USDC: 10 });
+    expect(duringOutage.balances).toEqual(NATIVE_BALANCE_AMOUNTS);
     expect(duringOutage.asOfMs).toBe(fresh.asOfMs);
   });
 

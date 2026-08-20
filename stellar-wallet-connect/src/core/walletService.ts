@@ -8,7 +8,9 @@ import {
   normalizeStellarNetwork,
 } from "../lib/wallets.js";
 import { HorizonPool } from "./horizonPool.js";
+import { assetAmountFrom, zeroAssetAmount, type AssetAmount } from "./amount.js";
 import { getAssetIssuer, isValidCanonicalAsset } from "../lib/assets.js";
+
 export interface WalletConnectionResult {
   address: string;
   publicKey: string;
@@ -274,6 +276,8 @@ function initializeConnection(): StoredWalletConnection | null {
   return null;
 }
 
+const NATIVE_ASSET_ISSUER = "native";
+
 /**
  * Discriminated wallet-health outcome (issue #103). Only "ready" carries
  * trustworthy balances; every other status means the Horizon lookup did NOT
@@ -281,6 +285,13 @@ function initializeConnection(): StoredWalletConnection | null {
  * as zero funds. "not-found" is reserved for an authoritative 404 - any
  * other non-OK response, thrown exception, or malformed body is an
  * *operational* problem with the provider, not a fact about the account.
+ *
+ * Balances are exact (issue #106): Horizon already serialises them as
+ * decimal strings with up to 7 fractional digits, so they are kept as
+ * validated decimal strings / integer minor units instead of being coerced
+ * through `Number(...)`, which can silently lose precision on large values
+ * or the low-order digits of a 7-decimal amount. Asset code/issuer/decimals
+ * stay attached to every amount rather than being implied by field name.
  */
 export type WalletHealthStatus =
   | "ready"
@@ -293,8 +304,8 @@ export interface WalletHealthResult {
   status: WalletHealthStatus;
   /** True only when `status` is "ready" (or a stale "ready" fallback). */
   exists: boolean;
-  /** Present only when `status` is "ready". */
-  balances: { XLM: number; USDC: number } | null;
+  /** Present only when `status` is "ready" (or a stale "ready" fallback). */
+  balances: { XLM: AssetAmount; USDC: AssetAmount } | null;
   /**
    * Set when this result is last-known-good data served during an outage
    * instead of a fresh lookup. Always paired with `asOfMs` so callers can
@@ -316,7 +327,10 @@ const READY_NONE: WalletHealthResult = {
 };
 
 /** Per-publicKey last-known-good snapshot, used only as an explicit stale fallback during outages. */
-const lastKnownGood = new Map<string, { balances: { XLM: number; USDC: number }; asOfMs: number }>();
+const lastKnownGood = new Map<
+  string,
+  { balances: { XLM: AssetAmount; USDC: AssetAmount }; asOfMs: number }
+>();
 
 function staleFallback(publicKey: string, status: WalletHealthStatus, detail: string): WalletHealthResult {
   const cached = lastKnownGood.get(publicKey);
@@ -370,32 +384,50 @@ async function getWalletHealth(): Promise<WalletHealthResult> {
     } catch (parseError) {
       return staleFallback(publicKey, "invalid-response", "Horizon response was not valid JSON");
     }
+    const rawBalances: any[] = json.balances || [];
 
-    // Fetch XLM (native)
-    const native = (json.balances || []).find(
-      (b: any) => b.asset_type === "native",
-    );
-    const xlmBalance = native ? Number(native.balance) : 0;
+    // Fetch XLM (native). If Horizon ever returns something that doesn't
+    // parse as a valid 7-decimal Stellar amount, fall back to zero but log
+    // it - that's a data/provider problem, not evidence of an empty wallet.
+    const native = rawBalances.find((b: any) => b.asset_type === "native");
+    let xlm = zeroAssetAmount("XLM", NATIVE_ASSET_ISSUER);
+    if (native) {
+      const parsed = assetAmountFrom("XLM", NATIVE_ASSET_ISSUER, String(native.balance));
+      if (parsed) {
+        xlm = parsed;
+      } else {
+        console.error("Unparseable XLM balance from Horizon:", native.balance);
+      }
+    }
 
-    // Fetch USDC using network-specific asset registry
+    // Fetch USDC using the network-specific asset registry (issue #104),
+    // parsed as an exact AssetAmount (issue #106) - never through Number().
     const network = await getConnectedNetwork();
     const usdcIssuer = getAssetIssuer(network, "USDC");
-    
-    // Check if USDC is supported on this network
+
+    // USDC not supported on this network: report an exact zero rather than
+    // guessing/hardcoding an issuer.
     if (!usdcIssuer) {
-      // USDC not supported on this network
-      const balances = { XLM: xlmBalance, USDC: 0 };
+      const balances = { XLM: xlm, USDC: zeroAssetAmount("USDC", "") };
       const asOfMs = Date.now();
       lastKnownGood.set(publicKey, { balances, asOfMs });
       return { status: "ready", exists: true, balances, stale: false, asOfMs };
     }
 
-    const usdc = (json.balances || []).find(
+    const usdcRaw = rawBalances.find(
       (b: any) => b.asset_code === "USDC" && b.issuer === usdcIssuer,
     );
-    const usdcBalance = usdc ? Number(usdc.balance) : 0;
+    let usdc = zeroAssetAmount("USDC", usdcIssuer);
+    if (usdcRaw) {
+      const parsed = assetAmountFrom("USDC", usdcIssuer, String(usdcRaw.balance));
+      if (parsed) {
+        usdc = parsed;
+      } else {
+        console.error("Unparseable USDC balance from Horizon:", usdcRaw.balance);
+      }
+    }
 
-    const balances = { XLM: xlmBalance, USDC: usdcBalance };
+    const balances = { XLM: xlm, USDC: usdc };
     const asOfMs = Date.now();
     lastKnownGood.set(publicKey, { balances, asOfMs });
 
