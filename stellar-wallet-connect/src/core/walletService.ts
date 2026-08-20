@@ -1,4 +1,4 @@
-import { connectedPublicKey, connectedNetwork, isNetworkMismatch } from "./store.js";
+import { connectedPublicKey, connectedNetwork, isNetworkMismatch, networkReadiness } from "./store.js";
 import { kit } from "./kit.js";
 import type { ISupportedWallet } from "@creit.tech/stellar-wallets-kit";
 import {
@@ -84,6 +84,41 @@ function toAppWalletType(provider: string): WalletType | undefined {
   return appWalletTypesByKitId[provider];
 }
 
+/**
+ * Monotonically increasing token identifying the "current" connection.
+ * Any in-flight network verification captures the token at the time it was
+ * started; when it resolves, it only applies the result if the token is
+ * still current. This prevents a stale verification (from a connection that
+ * has since been replaced or torn down) from overwriting fresher state -
+ * e.g. a slow verification racing a network switch or a disconnect.
+ */
+let connectionGeneration = 0;
+
+function verifyNetworkInBackground(generation: number): void {
+  networkReadiness.set("verifying");
+  isNetworkMismatch.set(false);
+
+  // Uses queryConnectedNetwork (not getConnectedNetwork) so a provider
+  // failure surfaces as a distinct "error" state instead of being silently
+  // treated as a match against EXPECTED_NETWORK.
+  queryConnectedNetwork()
+    .then((net) => {
+      if (generation !== connectionGeneration) return; // stale, ignore
+      connectedNetwork.set(net);
+      const mismatch = net !== EXPECTED_NETWORK;
+      isNetworkMismatch.set(mismatch);
+      networkReadiness.set(mismatch ? "mismatch" : "verified");
+    })
+    .catch(() => {
+      if (generation !== connectionGeneration) return; // stale, ignore
+      // Verification failed (provider error) - this is distinct from a
+      // confirmed mismatch and must NOT be treated as "ready".
+      connectedNetwork.set(null);
+      isNetworkMismatch.set(true);
+      networkReadiness.set("error");
+    });
+}
+
 function setConnection(publicKey: string, provider: string): void {
   const appProvider = toAppWalletType(provider);
 
@@ -101,14 +136,11 @@ function setConnection(publicKey: string, provider: string): void {
 
   connectedPublicKey.set(publicKey);
 
-  // Set the network in the background and check for mismatch
-  getConnectedNetwork().then((net) => {
-    connectedNetwork.set(net);
-    isNetworkMismatch.set(net !== EXPECTED_NETWORK);
-  }).catch(() => {
-    connectedNetwork.set(EXPECTED_NETWORK);
-    isNetworkMismatch.set(false);
-  });
+  // Invalidate any previous in-flight verification and start a fresh one.
+  // Contract actions must stay gated (networkReadiness !== "verified")
+  // until this resolves.
+  const generation = ++connectionGeneration;
+  verifyNetworkInBackground(generation);
 }
 
 function disconnect(): void {
@@ -120,9 +152,13 @@ function disconnect(): void {
     localStorage.removeItem("walletProvider");
   }
 
+  // Invalidate any in-flight verification so it cannot resurrect stale state.
+  ++connectionGeneration;
+
   connectedPublicKey.set("");
   connectedNetwork.set(null);
   isNetworkMismatch.set(false);
+  networkReadiness.set("idle");
 }
 
 export async function checkAndNotifyFunding(): Promise<void> {
@@ -190,14 +226,25 @@ async function disconnectWallet(provider?: WalletType): Promise<void> {
   }
 }
 
+/**
+ * Queries the wallet provider for its connected network and rethrows on
+ * failure - callers that need to distinguish a confirmed network from a
+ * verification outage (issue #101) must use this instead of
+ * {@link getConnectedNetwork}, which intentionally swallows errors for
+ * call sites that only want a best-effort default.
+ */
+async function queryConnectedNetwork(): Promise<NetworkType> {
+  const networkResult = await kit.getNetwork();
+  return (
+    normalizeStellarNetwork(networkResult?.network) ||
+    normalizeStellarNetwork(networkResult?.networkPassphrase) ||
+    EXPECTED_NETWORK
+  );
+}
+
 async function getConnectedNetwork(): Promise<NetworkType> {
   try {
-    const networkResult = await kit.getNetwork();
-    return (
-      normalizeStellarNetwork(networkResult?.network) ||
-      normalizeStellarNetwork(networkResult?.networkPassphrase) ||
-      EXPECTED_NETWORK
-    );
+    return await queryConnectedNetwork();
   } catch {
     return EXPECTED_NETWORK;
   }
@@ -215,14 +262,10 @@ function initializeConnection(): StoredWalletConnection | null {
     connectionState.provider = appProvider;
     connectedPublicKey.set(storedPublicKey);
 
-    // Verify network and mismatch in the background
-    getConnectedNetwork().then((net) => {
-      connectedNetwork.set(net);
-      isNetworkMismatch.set(net !== EXPECTED_NETWORK);
-    }).catch(() => {
-      connectedNetwork.set(EXPECTED_NETWORK);
-      isNetworkMismatch.set(false);
-    });
+    // Verify network in the background. Actions stay gated
+    // (networkReadiness !== "verified") until this resolves.
+    const generation = ++connectionGeneration;
+    verifyNetworkInBackground(generation);
 
     return {
       publicKey: storedPublicKey,
@@ -236,20 +279,12 @@ function initializeConnection(): StoredWalletConnection | null {
 const NATIVE_ASSET_ISSUER = "native";
 
 /**
- * Zero balances for an unresolved/unavailable account. `usdcIssuer` is
- * optional because it depends on the network-specific asset registry
- * (issue #104); when the network hasn't been resolved yet (e.g. an early
- * exit before Horizon replies) there is no issuer to attach.
- */
-function zeroWalletBalances(usdcIssuer: string = ""): { XLM: AssetAmount; USDC: AssetAmount } {
-  return {
-    XLM: zeroAssetAmount("XLM", NATIVE_ASSET_ISSUER),
-    USDC: zeroAssetAmount("USDC", usdcIssuer),
-  };
-}
-
-/**
- * Check if the connected wallet exists and has funds.
+ * Discriminated wallet-health outcome (issue #103). Only "ready" carries
+ * trustworthy balances; every other status means the Horizon lookup did NOT
+ * confirm the account is unfunded/nonexistent, and callers MUST NOT treat it
+ * as zero funds. "not-found" is reserved for an authoritative 404 - any
+ * other non-OK response, thrown exception, or malformed body is an
+ * *operational* problem with the provider, not a fact about the account.
  *
  * Balances are exact (issue #106): Horizon already serialises them as
  * decimal strings with up to 7 fractional digits, so they are kept as
@@ -258,13 +293,69 @@ function zeroWalletBalances(usdcIssuer: string = ""): { XLM: AssetAmount; USDC: 
  * or the low-order digits of a 7-decimal amount. Asset code/issuer/decimals
  * stay attached to every amount rather than being implied by field name.
  */
-async function getWalletHealth(): Promise<{
+export type WalletHealthStatus =
+  | "ready"
+  | "not-found"
+  | "unavailable"
+  | "rate-limited"
+  | "invalid-response";
+
+export interface WalletHealthResult {
+  status: WalletHealthStatus;
+  /** True only when `status` is "ready" (or a stale "ready" fallback). */
   exists: boolean;
-  balances: { XLM: AssetAmount; USDC: AssetAmount };
-}> {
+  /** Present only when `status` is "ready" (or a stale "ready" fallback). */
+  balances: { XLM: AssetAmount; USDC: AssetAmount } | null;
+  /**
+   * Set when this result is last-known-good data served during an outage
+   * instead of a fresh lookup. Always paired with `asOfMs` so callers can
+   * judge freshness before acting on it.
+   */
+  stale: boolean;
+  /** Timestamp (ms) the balances were last confirmed fresh from Horizon. */
+  asOfMs: number | null;
+  /** Diagnostic detail for non-"ready" statuses; never used for control flow. */
+  detail?: string;
+}
+
+const READY_NONE: WalletHealthResult = {
+  status: "ready",
+  exists: false,
+  balances: null,
+  stale: false,
+  asOfMs: null,
+};
+
+/** Per-publicKey last-known-good snapshot, used only as an explicit stale fallback during outages. */
+const lastKnownGood = new Map<
+  string,
+  { balances: { XLM: AssetAmount; USDC: AssetAmount }; asOfMs: number }
+>();
+
+function staleFallback(publicKey: string, status: WalletHealthStatus, detail: string): WalletHealthResult {
+  const cached = lastKnownGood.get(publicKey);
+  if (cached) {
+    return {
+      status,
+      exists: true,
+      balances: cached.balances,
+      stale: true,
+      asOfMs: cached.asOfMs,
+      detail,
+    };
+  }
+  return { status, exists: false, balances: null, stale: false, asOfMs: null, detail };
+}
+
+/**
+ * Check whether the connected wallet exists and has funds, distinguishing a
+ * confirmed missing/unfunded account from a Horizon outage (issue #103).
+ * A non-"ready" status is never zero balances - it's "we don't know".
+ */
+async function getWalletHealth(): Promise<WalletHealthResult> {
   const publicKey = loadedPublicKey();
 
-  if (!publicKey) return { exists: false, balances: zeroWalletBalances() };
+  if (!publicKey) return READY_NONE;
 
   try {
     // Route through the connection pool: distributes the lookup across the
@@ -273,15 +364,26 @@ async function getWalletHealth(): Promise<{
       headers: { Accept: "application/json" },
     });
 
+    // Only an authoritative 404 means the account is confirmed missing.
     if (resp.status === 404) {
-      return { exists: false, balances: zeroWalletBalances() };
+      return { status: "not-found", exists: false, balances: null, stale: false, asOfMs: null };
+    }
+
+    if (resp.status === 429) {
+      return staleFallback(publicKey, "rate-limited", "Horizon rate limit (429)");
     }
 
     if (!resp.ok) {
-      return { exists: false, balances: zeroWalletBalances() };
+      // 5xx / other non-OK: an operational error, never "unfunded".
+      return staleFallback(publicKey, "unavailable", `Horizon returned HTTP ${resp.status}`);
     }
 
-    const json = await resp.json();
+    let json: any;
+    try {
+      json = await resp.json();
+    } catch (parseError) {
+      return staleFallback(publicKey, "invalid-response", "Horizon response was not valid JSON");
+    }
     const rawBalances: any[] = json.balances || [];
 
     // Fetch XLM (native). If Horizon ever returns something that doesn't
@@ -306,7 +408,10 @@ async function getWalletHealth(): Promise<{
     // USDC not supported on this network: report an exact zero rather than
     // guessing/hardcoding an issuer.
     if (!usdcIssuer) {
-      return { exists: true, balances: { XLM: xlm, USDC: zeroAssetAmount("USDC", "") } };
+      const balances = { XLM: xlm, USDC: zeroAssetAmount("USDC", "") };
+      const asOfMs = Date.now();
+      lastKnownGood.set(publicKey, { balances, asOfMs });
+      return { status: "ready", exists: true, balances, stale: false, asOfMs };
     }
 
     const usdcRaw = rawBalances.find(
@@ -322,10 +427,16 @@ async function getWalletHealth(): Promise<{
       }
     }
 
-    return { exists: true, balances: { XLM: xlm, USDC: usdc } };
+    const balances = { XLM: xlm, USDC: usdc };
+    const asOfMs = Date.now();
+    lastKnownGood.set(publicKey, { balances, asOfMs });
+
+    return { status: "ready", exists: true, balances, stale: false, asOfMs };
   } catch (error) {
+    // Network-level failure (timeout, DNS, connection reset, etc.) - an
+    // outage, not evidence the account is unfunded/nonexistent.
     console.error("Error checking wallet health:", error);
-    return { exists: false, balances: zeroWalletBalances() };
+    return staleFallback(publicKey, "unavailable", error instanceof Error ? error.message : String(error));
   }
 }
 

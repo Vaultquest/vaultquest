@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { PoolDetail, availableActions } from "./PoolDetail";
 import { ONBOARDING_STORAGE_KEY } from "./OnboardingChecklist";
 import type { PoolSummary, UserPosition } from "../contract/types";
+import { networkReadiness } from "../../core/store.js";
 
 const basePool: PoolSummary = {
   id: "pool-1",
@@ -92,7 +93,11 @@ describe("PoolDetail", () => {
     expect(screen.getByText("GBBD47…FLA5")).toBeInTheDocument();
   });
 
-  it("fires onAction when an action button is clicked", async () => {
+  it("fires onAction when an action button is clicked and the network is verified", async () => {
+    // Actions are gated on explicit network verification (issue #101); mark
+    // the wallet's network as verified so this test exercises the
+    // click-through path rather than the (separately tested) gating.
+    networkReadiness.set("verified");
     const user = userEvent.setup();
     const onAction = vi.fn();
     render(<PoolDetail pool={basePool} position={null} onAction={onAction} />);
@@ -100,6 +105,25 @@ describe("PoolDetail", () => {
       await user.click(screen.getByRole("button", { name: /join pool/i }));
     });
     expect(onAction).toHaveBeenCalledWith("join");
+    act(() => {
+      networkReadiness.set("idle");
+    });
+  });
+
+  it("blocks action buttons and never fires onAction before network verification completes", async () => {
+    // Default readiness state ("idle") must disable actions - this is the
+    // core fix for issue #101 (actions could previously fire before an
+    // async network check resolved).
+    networkReadiness.set("idle");
+    const user = userEvent.setup();
+    const onAction = vi.fn();
+    render(<PoolDetail pool={basePool} position={null} onAction={onAction} />);
+    const button = screen.getByRole("button", { name: /join pool/i });
+    expect(button).toBeDisabled();
+    await act(async () => {
+      await user.click(button);
+    });
+    expect(onAction).not.toHaveBeenCalled();
   });
 
   it("renders an error state with retry", () => {

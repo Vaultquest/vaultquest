@@ -10,11 +10,10 @@ import {
 import type { PoolActionType, PoolStatus, PoolSummary, UserPosition } from "../contract/types";
 import { getAssetDisplayName } from "../../lib/assets";
 import { EXPECTED_NETWORK } from "../../lib/wallets";
-import { useStore } from "@nanostores/react";
 import { connectedNetwork } from "../../core/store.js";
 import { formatAmount, formatDate, truncateAddress } from "../lib/format";
 import { OnboardingChecklist } from "./OnboardingChecklist";
-import { isNetworkMismatch } from "../../core/store.js";
+import { networkReadiness } from "../../core/store.js";
 import { NetworkDiagnostics } from "../../components/NetworkDiagnostics";
 import { TransactionTimeline } from "../../components/TransactionTimeline";
 import type { TxFlowResult } from "../lib/txStateMachine";
@@ -103,10 +102,15 @@ export const PoolDetail: FC<PoolDetailProps> = ({
   showOnboarding = true,
   txFlow,
 }) => {
-    // Get the current network and asset display name
+  const readiness = useStore(networkReadiness);
+  // Block contract actions until network verification has explicitly
+  // succeeded. "verifying" (in-flight), "idle" (not yet started), "error"
+  // (verification outage), and "mismatch" (wrong network) must all disable
+  // actions - only "verified" allows them through.
+  const mismatch = readiness !== "verified";
+  // Get the current network and asset display name
   const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
   const assetDisplayName = pool ? getAssetDisplayName(network, pool.asset) : "";
-  const mismatch = useStore(isNetworkMismatch);
 
   if (error) {
     return <ErrorState title="Couldn't load pool" message={error} onRetry={onRetry} />;
@@ -214,7 +218,15 @@ export const PoolDetail: FC<PoolDetailProps> = ({
                   ? "bg-gray-600 opacity-50 cursor-not-allowed focus-visible:ring-gray-400"
                   : "bg-red-600 hover:bg-red-700 focus-visible:ring-red-400"
               }`}
-              title={mismatch ? "Actions blocked due to network mismatch" : ACTION_LABEL[action]}
+              title={
+                mismatch
+                  ? readiness === "verifying" || readiness === "idle"
+                    ? "Actions blocked until network verification completes"
+                    : readiness === "error"
+                      ? "Actions blocked: unable to verify wallet network"
+                      : "Actions blocked due to network mismatch"
+                  : ACTION_LABEL[action]
+              }
             >
               {ACTION_LABEL[action]}
             </button>
