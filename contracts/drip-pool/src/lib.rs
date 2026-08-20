@@ -108,6 +108,12 @@ pub enum Error {
     WithdrawalNotCancellable = 37,
     Paused = 38,
     InvalidHaircut = 39,
+    /// #108: the legacy drip/deposit/withdraw accounting path and the
+    /// share-based vault are two independent, non-transfer-verified balance
+    /// systems on the same pool. Once either has been used, switching to the
+    /// other is rejected so their totals can never silently diverge or be
+    /// double-counted against the same (unverified) custody.
+    MixedAccountingModeNotAllowed = 40,
 }
 
 // ── Structs ────────────────────────────────────────────────────────────────
@@ -198,6 +204,13 @@ pub enum ProposalAction {
     AddAdmin(Address),
     RemoveAdmin(Address),
     ChangeThreshold(u32),
+    // ── Vault economic mutations — require quorum (#107) ──────────────────
+    VaultReportGain(i128),                       // amount
+    VaultReportLoss(i128),                       // amount
+    VaultSetFeeRecipient(Address),               // new recipient
+    VaultSetManagementFeeBps(u32),               // bps
+    VaultSetPerformanceFeeBps(u32),              // bps
+    VaultApplyEmergencyHaircut(u32, u32),        // (request_id, haircut_bps)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -234,6 +247,35 @@ impl DripPool {
                 && env.ledger().sequence() <= draw.reveal_deadline
             {
                 return Err(Error::DrawActive);
+            }
+        }
+        Ok(())
+    }
+
+    /// #108: the legacy accounting path (`deposit`/`drip`/`deposit_with_duration`)
+    /// and the share-based vault (`vault_deposit`) both track pool balances
+    /// without independently verified token custody. Neither can tell
+    /// whether the other has already "moved" the same underlying assets, so
+    /// once one system has recorded a real balance the other is locked out
+    /// for this pool - this is what stops totals from silently diverging or
+    /// the same custody being double-counted across both systems.
+    fn check_legacy_accounting_allowed(env: &Env) -> Result<(), Error> {
+        if let Some(snapshot) = env
+            .storage()
+            .instance()
+            .get::<_, shares::VaultSnapshot>(&VaultKey::VaultShares)
+        {
+            if snapshot.total_shares > 0 {
+                return Err(Error::MixedAccountingModeNotAllowed);
+            }
+        }
+        Ok(())
+    }
+
+    fn check_vault_accounting_allowed(env: &Env) -> Result<(), Error> {
+        if let Some(pool) = env.storage().instance().get::<_, Pool>(&DataKey::Pool) {
+            if pool.total_deposited > 0 {
+                return Err(Error::MixedAccountingModeNotAllowed);
             }
         }
         Ok(())
@@ -599,6 +641,73 @@ impl DripPool {
                 pool.total_deposited = pool.total_deposited.saturating_sub(_amount);
                 env.storage().instance().set(&DataKey::Pool, &pool);
             }
+            // ── Vault economic mutations — quorum-gated (#107) ────────────
+            ProposalAction::VaultReportGain(amount) => {
+                let mut snapshot = Self::load_vault(env)?;
+                shares::report_gain(&mut snapshot, amount)?;
+                Self::save_vault(env, &snapshot);
+                env.events().publish(
+                    (symbol_short!("vault"), symbol_short!("gain")),
+                    (amount, proposal.epoch),
+                );
+            }
+            ProposalAction::VaultReportLoss(amount) => {
+                let mut snapshot = Self::load_vault(env)?;
+                shares::report_loss(&mut snapshot, amount)?;
+                Self::save_vault(env, &snapshot);
+                env.events().publish(
+                    (symbol_short!("vault"), symbol_short!("loss")),
+                    (amount, proposal.epoch),
+                );
+            }
+            ProposalAction::VaultSetFeeRecipient(recipient) => {
+                env.storage()
+                    .instance()
+                    .set(&VaultKey::FeeRecipient, &recipient);
+                env.events().publish(
+                    (symbol_short!("vault"), symbol_short!("fee_rcpt")),
+                    (recipient, proposal.epoch),
+                );
+            }
+            ProposalAction::VaultSetManagementFeeBps(bps) => {
+                env.storage()
+                    .instance()
+                    .set(&VaultKey::ManagementFeeBps, &bps);
+                env.events().publish(
+                    (symbol_short!("vault"), symbol_short!("mgmt_bps")),
+                    (bps, proposal.epoch),
+                );
+            }
+            ProposalAction::VaultSetPerformanceFeeBps(bps) => {
+                env.storage()
+                    .instance()
+                    .set(&VaultKey::PerformanceFeeBps, &bps);
+                env.events().publish(
+                    (symbol_short!("vault"), symbol_short!("perf_bps")),
+                    (bps, proposal.epoch),
+                );
+            }
+            ProposalAction::VaultApplyEmergencyHaircut(request_id, haircut_bps) => {
+                let mut request: shares::WithdrawalRequest = env
+                    .storage()
+                    .persistent()
+                    .get(&VaultKey::WithdrawalRequest(request_id))
+                    .ok_or(Error::WithdrawalNotFound)?;
+                let mut snapshot = Self::load_vault(env)?;
+                let reduction =
+                    shares::apply_emergency_haircut(&mut snapshot, &mut request, haircut_bps)?;
+                env.storage()
+                    .persistent()
+                    .set(&VaultKey::WithdrawalRequest(request_id), &request);
+                if Self::is_terminal_withdrawal(&request) {
+                    Self::refresh_withdrawal_head(env);
+                }
+                Self::save_vault(env, &snapshot);
+                env.events().publish(
+                    (symbol_short!("vault"), symbol_short!("q_haircut")),
+                    (request_id, haircut_bps, reduction, proposal.epoch),
+                );
+            }
         }
         Ok(())
     }
@@ -635,6 +744,7 @@ impl DripPool {
     pub fn deposit(env: Env, who: Address, amount: i128) -> Result<(), Error> {
         who.require_auth();
         Self::check_draw_inactive(&env)?;
+        Self::check_legacy_accounting_allowed(&env)?;
         if amount <= 0 {
             return Err(Error::InvalidAmount);
         }
@@ -683,6 +793,7 @@ impl DripPool {
     ) -> Result<(), Error> {
         who.require_auth();
         Self::check_draw_inactive(&env)?;
+        Self::check_legacy_accounting_allowed(&env)?;
         if amount <= 0 {
             return Err(Error::InvalidAmount);
         }
@@ -754,6 +865,16 @@ impl DripPool {
     }
 
     // ── Withdraw ───────────────────────────────────────────────────────────
+    /// #108: this legacy withdrawal pays out a *calculated* amount without a
+    /// verified custody transfer (the token transfer below is intentionally
+    /// left commented - see the caveat where it's referenced). It can only
+    /// ever pay out what legacy `deposit`/`drip`/`deposit_with_duration`
+    /// recorded, and those are now blocked once the share-based vault has
+    /// been used on this pool (`check_legacy_accounting_allowed`), so this
+    /// can no longer diverge from or double-count against vault accounting.
+    /// It remains a known limitation that this path was never wired to a
+    /// real token client; production deployments must not rely on it moving
+    /// funds until that custody wiring exists.
     pub fn withdraw(env: Env, who: Address) -> Result<i128, Error> {
         who.require_auth();
         Self::check_draw_inactive(&env)?;
@@ -1409,6 +1530,7 @@ impl DripPool {
     ) -> Result<i128, Error> {
         who.require_auth();
         Self::ensure_vault_unpaused(&env)?;
+        Self::check_vault_accounting_allowed(&env)?;
         let mut snapshot = Self::load_vault(&env)?;
         if snapshot.version != expected_version {
             return Err(Error::StaleSnapshot);
@@ -1766,33 +1888,21 @@ impl DripPool {
         Ok(restored)
     }
 
+    /// Deprecated single-signer entrypoint — now gated: creates a proposal that
+    /// requires quorum before taking effect. Returns the proposal id. (#107)
     pub fn vault_apply_emergency_haircut(
         env: Env,
         caller: Address,
         request_id: u32,
         haircut_bps: u32,
-    ) -> Result<i128, Error> {
+    ) -> Result<u32, Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
-        let mut request: shares::WithdrawalRequest = env
-            .storage()
-            .persistent()
-            .get(&VaultKey::WithdrawalRequest(request_id))
-            .ok_or(Error::WithdrawalNotFound)?;
-        let mut snapshot = Self::load_vault(&env)?;
-        let reduction = shares::apply_emergency_haircut(&mut snapshot, &mut request, haircut_bps)?;
-        env.storage()
-            .persistent()
-            .set(&VaultKey::WithdrawalRequest(request_id), &request);
-        if Self::is_terminal_withdrawal(&request) {
-            Self::refresh_withdrawal_head(&env);
-        }
-        Self::save_vault(&env, &snapshot);
-        env.events().publish(
-            (symbol_short!("vault"), symbol_short!("q_haircut")),
-            (request_id, haircut_bps, reduction),
-        );
-        Ok(reduction)
+        Self::propose(
+            env,
+            caller,
+            ProposalAction::VaultApplyEmergencyHaircut(request_id, haircut_bps),
+        )
     }
 
     pub fn vault_set_paused(env: Env, caller: Address, paused: bool) -> Result<(), Error> {
@@ -1835,26 +1945,20 @@ impl DripPool {
         Ok(fee)
     }
 
-    pub fn vault_report_gain(env: Env, caller: Address, amount: i128) -> Result<(), Error> {
+    /// Deprecated single-signer entrypoint — now gated: creates a proposal that
+    /// requires quorum before taking effect. Returns the proposal id. (#107)
+    pub fn vault_report_gain(env: Env, caller: Address, amount: i128) -> Result<u32, Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
-        let mut snapshot = Self::load_vault(&env)?;
-        shares::report_gain(&mut snapshot, amount)?;
-        Self::save_vault(&env, &snapshot);
-        env.events()
-            .publish((symbol_short!("vault"), symbol_short!("gain")), amount);
-        Ok(())
+        Self::propose(env, caller, ProposalAction::VaultReportGain(amount))
     }
 
-    pub fn vault_report_loss(env: Env, caller: Address, amount: i128) -> Result<(), Error> {
+    /// Deprecated single-signer entrypoint — now gated: creates a proposal that
+    /// requires quorum before taking effect. Returns the proposal id. (#107)
+    pub fn vault_report_loss(env: Env, caller: Address, amount: i128) -> Result<u32, Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
-        let mut snapshot = Self::load_vault(&env)?;
-        shares::report_loss(&mut snapshot, amount)?;
-        Self::save_vault(&env, &snapshot);
-        env.events()
-            .publish((symbol_short!("vault"), symbol_short!("loss")), amount);
-        Ok(())
+        Self::propose(env, caller, ProposalAction::VaultReportLoss(amount))
     }
 
     pub fn vault_note_donation(env: Env, caller: Address, amount: i128) -> Result<(), Error> {
@@ -1917,17 +2021,16 @@ impl DripPool {
         Ok(())
     }
 
+    /// Deprecated single-signer entrypoint — now gated: creates a proposal that
+    /// requires quorum before taking effect. Returns the proposal id. (#107)
     pub fn vault_set_fee_recipient(
         env: Env,
         caller: Address,
         recipient: Address,
-    ) -> Result<(), Error> {
+    ) -> Result<u32, Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
-        env.storage()
-            .instance()
-            .set(&VaultKey::FeeRecipient, &recipient);
-        Ok(())
+        Self::propose(env, caller, ProposalAction::VaultSetFeeRecipient(recipient))
     }
 
     pub fn vault_set_dust_beneficiary(
@@ -1943,22 +2046,20 @@ impl DripPool {
         Ok(())
     }
 
-    pub fn vault_set_management_fee_bps(env: Env, caller: Address, bps: u32) -> Result<(), Error> {
+    /// Deprecated single-signer entrypoint — now gated: creates a proposal that
+    /// requires quorum before taking effect. Returns the proposal id. (#107)
+    pub fn vault_set_management_fee_bps(env: Env, caller: Address, bps: u32) -> Result<u32, Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
-        env.storage()
-            .instance()
-            .set(&VaultKey::ManagementFeeBps, &bps);
-        Ok(())
+        Self::propose(env, caller, ProposalAction::VaultSetManagementFeeBps(bps))
     }
 
-    pub fn vault_set_performance_fee_bps(env: Env, caller: Address, bps: u32) -> Result<(), Error> {
+    /// Deprecated single-signer entrypoint — now gated: creates a proposal that
+    /// requires quorum before taking effect. Returns the proposal id. (#107)
+    pub fn vault_set_performance_fee_bps(env: Env, caller: Address, bps: u32) -> Result<u32, Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
-        env.storage()
-            .instance()
-            .set(&VaultKey::PerformanceFeeBps, &bps);
-        Ok(())
+        Self::propose(env, caller, ProposalAction::VaultSetPerformanceFeeBps(bps))
     }
 
     // ── Views ──

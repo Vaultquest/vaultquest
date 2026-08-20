@@ -1645,3 +1645,69 @@ fn test_commit_reveal_rejection_sampling_unbiased() {
     assert!(bob_wins > 0);
     assert!(bob_wins > alice_wins);
 }
+
+// ── #108: legacy accounting / share-vault mixed-mode invariant ─────────────
+// The legacy drip/deposit/withdraw path and the share-based vault both track
+// pool balances without independently verified token custody. Once either
+// has recorded a real balance for a pool, switching to the other must be
+// rejected so their totals can never silently diverge or double-count the
+// same (unverified) custody.
+
+#[test]
+fn legacy_deposit_rejected_once_vault_has_shares() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.vault_init(&admin);
+
+    let alice = Address::generate(&env);
+    client.vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
+
+    // The vault now holds real (share-accounted) balance for this pool;
+    // the legacy path must not be usable alongside it.
+    client.join(&alice);
+    assert_eq!(
+        client.try_deposit(&alice, &100),
+        Err(Ok(Error::MixedAccountingModeNotAllowed))
+    );
+    assert_eq!(
+        client.try_drip(&alice, &100),
+        Err(Ok(Error::MixedAccountingModeNotAllowed))
+    );
+    assert_eq!(
+        client.try_deposit_with_duration(&alice, &100, &30),
+        Err(Ok(Error::MixedAccountingModeNotAllowed))
+    );
+}
+
+#[test]
+fn vault_deposit_rejected_once_legacy_has_deposits() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    client.vault_init(&admin);
+
+    let alice = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &100);
+
+    // Legacy accounting now holds real balance for this pool; the vault
+    // path must not be usable alongside it.
+    let bob = Address::generate(&env);
+    assert_eq!(
+        client.try_vault_deposit(&bob, &1_000, &client.vault_snapshot().version),
+        Err(Ok(Error::MixedAccountingModeNotAllowed))
+    );
+}
+
+#[test]
+fn legacy_deposit_still_works_when_vault_unused() {
+    // Sanity check: pools that never touch the share vault are unaffected
+    // (this is the vast majority of existing legacy-only pools/tests).
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &100);
+    let pool = client.pool();
+    assert_eq!(pool.total_deposited, 100);
+}

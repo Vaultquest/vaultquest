@@ -1,5 +1,6 @@
 import { Redis } from "ioredis";
 import type { PrismaClient } from "@prisma/client";
+import { NULL_METRICS, type CacheMetricsSink } from "./cache/metrics.js";
 
 /**
  * Caching layer for frequently requested on-chain and indexer data.
@@ -51,6 +52,50 @@ interface Logger {
 type CacheEntry<T> = { value: T; accessedAt: Date };
 
 /**
+ * On-wire format for values stored by `getOrSet`. Redis keys are kept alive
+ * for the full freshness horizon (`ttl + max(stale window)`) so an expired
+ * entry can still be served stale; the envelope's `e` field is what decides
+ * freshness, not the Redis TTL itself.
+ */
+interface StoredEnvelope<T> {
+  /** Version marker so legacy plain-value entries are still readable. */
+  $: 1;
+  v: T;
+  /** Epoch ms the value was written. */
+  c: number;
+  /** Epoch ms at which the value is considered expired. */
+  e: number;
+}
+
+/**
+ * Tunables for `getOrSet`'s stale and backoff behavior. All windows are
+ * explicit so stale data is never served outside a caller-declared limit.
+ */
+export interface GetOrSetOptions {
+  /**
+   * Seconds past the TTL an expired value may still be served while a
+   * background refresh runs. Defaults to the TTL itself.
+   */
+  staleWhileRevalidateSeconds?: number;
+  /**
+   * Seconds past the TTL an expired value may be served when the source fetch
+   * fails. Defaults to `staleWhileRevalidateSeconds`.
+   */
+  staleIfErrorSeconds?: number;
+  /**
+   * Maximum random jitter (seconds) added to the TTL on write, to
+   * desynchronize hot-key expiries. Defaults to 10% of `ttlSeconds` (min 1s);
+   * pass 0 to disable.
+   */
+  jitterSeconds?: number;
+  /**
+   * How long a failed source fetch is remembered so callers do not hammer the
+   * source again inside the window (bounded retry backoff). Defaults to 5s.
+   */
+  failureTtlSeconds?: number;
+}
+
+/**
  * Caching service combining a Redis-backed cache with an in-memory LRU
  * fallback for hot data.
  */
@@ -64,17 +109,31 @@ export class CacheService {
   private readonly assetMap = new Map<string, CacheEntry<AssetMetadata>>();
   private readonly configMap = new Map<string, CacheEntry<ProtocolConfigRecord>>();
   private readonly maxEntries: number;
+  private readonly metrics: CacheMetricsSink;
+
+  /** Per-key in-flight source fetch, so concurrent misses coalesce onto one call. */
+  private readonly inFlight = new Map<string, Promise<unknown>>();
+  /** Remembered source failures, bounding how fast a broken source is re-polled. */
+  private readonly lastFailures = new Map<string, { at: number; error: unknown }>();
 
   /**
    * @param prisma - Prisma client for database fallback access
    * @param logger - Logger used for non-fatal Redis warnings
    * @param redisUrl - Redis connection string; caching degrades gracefully when omitted
    * @param maxEntries - Maximum number of entries per in-memory cache map before eviction
+   * @param metrics - Optional sink for hit/coalesced/stale/failure metrics
    */
-  constructor(prisma: PrismaClient, logger: Logger, redisUrl?: string | null, maxEntries = 500) {
+  constructor(
+    prisma: PrismaClient,
+    logger: Logger,
+    redisUrl?: string | null,
+    maxEntries = 500,
+    metrics: CacheMetricsSink = NULL_METRICS
+  ) {
     this.prisma = prisma;
     this.logger = logger;
     this.maxEntries = maxEntries;
+    this.metrics = metrics;
 
     if (redisUrl) {
       this.redis = new Redis(redisUrl, { lazyConnect: false, maxRetriesPerRequest: 1 });
@@ -329,25 +388,232 @@ export class CacheService {
 
   /**
    * Returns the cached value for `key`, or invokes `fetch` on a miss and
-   * caches the result for `ttlSeconds`. Degrades gracefully (always calls
-   * `fetch`) when Redis is offline or errors.
+   * caches the result for `ttlSeconds`.
+   *
+   * Protection against cache-miss stampedes (issue #111):
+   *
+   * - **Single-flight (per-process)**: concurrent misses for the same key
+   *   coalesce onto one in-flight source fetch, so a hot-key expiry or Redis
+   *   outage fans out at most one fetch per key per process.
+   * - **Stale-while-revalidate**: an entry expired within
+   *   `staleWhileRevalidateSeconds` is served immediately while a background
+   *   refresh runs.
+   * - **Stale-if-error**: when the source fetch fails, an entry expired within
+   *   `staleIfErrorSeconds` is served instead of erroring.
+   * - **TTL jitter**: `jitterSeconds` is added to the TTL on write so keys
+   *   written together do not all expire together.
+   * - **Bounded failure backoff**: a failed fetch is remembered for
+   *   `failureTtlSeconds`; callers inside that window are rejected with the
+   *   remembered error instead of re-polling a broken source.
+   *
+   * Distributed (cross-process) fill coordination is out of scope; the
+   * coalescing here is per-process.
+   *
+   * @param key - Cache key
+   * @param ttlSeconds - Freshness TTL in seconds
+   * @param fetch - Source fetch invoked on a miss
+   * @param options - Stale/backoff/jitter tuning; defaults are documented on
+   *   `GetOrSetOptions`
    */
-  async getOrSet<T>(key: string, ttlSeconds: number, fetch: () => Promise<T>): Promise<T> {
+  async getOrSet<T>(
+    key: string,
+    ttlSeconds: number,
+    fetch: () => Promise<T>,
+    options: GetOrSetOptions = {}
+  ): Promise<T> {
+    const opts = this.normalizeOptions(ttlSeconds, options);
+    const now = Date.now();
+
+    // 1. Try a cached read (fresh or expired) from Redis.
+    let cached: StoredEnvelope<T> | null = null;
     if (this.redis && this.isOnline) {
       try {
-        const cached = await this.redis.get(key);
-        if (cached !== null) {
-          return JSON.parse(cached) as T;
+        const raw = await this.redis.get(key);
+        if (raw !== null) {
+          const parsed = this.parseCached<T>(raw);
+          if (parsed) {
+            if (parsed.envelope) {
+              if (now < parsed.envelope.e) {
+                this.metrics.onHit(key);
+                return parsed.envelope.v;
+              }
+              cached = parsed.envelope;
+            } else {
+              // Legacy plain-value entry: no envelope metadata, so it is
+              // bounded by Redis's own TTL and always counts as fresh here.
+              this.metrics.onHit(key);
+              return parsed.value;
+            }
+          }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.warn({ err, key }, "Redis get failed — falling through to source");
       }
     }
-    const value = await fetch();
+
+    // 2. Stale-while-revalidate: serve the expired value now, refresh in the
+    //    background. Never runs a second fetch while one is already in flight.
+    if (cached && now < cached.e + opts.staleWhileRevalidateSeconds * 1000) {
+      this.metrics.onStale(key);
+      this.triggerBackgroundRefresh(key, ttlSeconds, fetch, opts);
+      return cached.v;
+    }
+
+    // 3. Coalesce onto an in-flight fetch for the same key.
+    const inflight = this.inFlight.get(key);
+    if (inflight) {
+      this.metrics.onCoalesced(key);
+      return (await inflight) as T;
+    }
+
+    // 4. Bounded failure backoff: do not re-poll a source that just failed.
+    //    If the expired entry is still inside the stale-if-error window it can
+    //    be served without any fetch at all.
+    const lastFailure = this.lastFailures.get(key);
+    if (lastFailure && now < lastFailure.at + opts.failureTtlSeconds * 1000) {
+      if (cached && now < cached.e + opts.staleIfErrorSeconds * 1000) {
+        this.metrics.onStale(key);
+        return cached.v;
+      }
+      this.metrics.onSourceFailure(key, lastFailure.error);
+      throw lastFailure.error;
+    }
+
+    // 5. Real miss: own the source fetch and share it with any waiters.
+    this.metrics.onMiss(key);
+    const promise = this.fetchAndCache(key, ttlSeconds, fetch, opts, cached);
+    this.inFlight.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this.inFlight.get(key) === promise) {
+        this.inFlight.delete(key);
+      }
+    }
+  }
+
+  private normalizeOptions(ttlSeconds: number, options: GetOrSetOptions): Required<GetOrSetOptions> {
+    const staleWhileRevalidateSeconds = options.staleWhileRevalidateSeconds ?? ttlSeconds;
+    return {
+      staleWhileRevalidateSeconds,
+      staleIfErrorSeconds: options.staleIfErrorSeconds ?? staleWhileRevalidateSeconds,
+      jitterSeconds: options.jitterSeconds ?? Math.max(1, Math.round(ttlSeconds * 0.1)),
+      failureTtlSeconds: options.failureTtlSeconds ?? 5
+    };
+  }
+
+  private parseCached<T>(raw: string): { value: T; envelope: StoredEnvelope<T> | null } | null {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        (parsed as Record<string, unknown>)["$"] === 1 &&
+        "v" in (parsed as Record<string, unknown>) &&
+        typeof (parsed as Record<string, unknown>)["e"] === "number"
+      ) {
+        return { value: (parsed as StoredEnvelope<T>).v, envelope: parsed as StoredEnvelope<T> };
+      }
+      return { value: parsed as T, envelope: null };
+    } catch {
+      // Unparseable payload: treat as a miss and refetch from the source.
+      return null;
+    }
+  }
+
+  private isInBackoff(key: string, opts: Required<GetOrSetOptions>): boolean {
+    const failure = this.lastFailures.get(key);
+    if (!failure) return false;
+    if (Date.now() < failure.at + opts.failureTtlSeconds * 1000) return true;
+    this.lastFailures.delete(key);
+    return false;
+  }
+
+  private recordFailure(key: string, error: unknown): void {
+    if (!this.lastFailures.has(key) && this.lastFailures.size >= this.maxEntries) {
+      // Bound memory: evict the oldest remembered failure.
+      let oldestKey: string | undefined;
+      let oldest = Infinity;
+      for (const [k, f] of this.lastFailures) {
+        if (f.at < oldest) {
+          oldest = f.at;
+          oldestKey = k;
+        }
+      }
+      if (oldestKey !== undefined) this.lastFailures.delete(oldestKey);
+    }
+    this.lastFailures.set(key, { at: Date.now(), error });
+  }
+
+  /**
+   * Kicks off a background revalidation for a stale-served key. Skips when a
+   * refresh is already in flight or the source is inside the failure backoff
+   * window, so a broken source is not hammered by revalidation either.
+   */
+  private triggerBackgroundRefresh<T>(
+    key: string,
+    ttlSeconds: number,
+    fetch: () => Promise<T>,
+    opts: Required<GetOrSetOptions>
+  ): void {
+    if (this.inFlight.has(key) || this.isInBackoff(key, opts)) return;
+    this.metrics.onMiss(key);
+    const promise = this.fetchAndCache(key, ttlSeconds, fetch, opts);
+    this.inFlight.set(key, promise);
+    promise
+      .catch((err: unknown) => {
+        this.logger.warn({ err, key }, "Background revalidation failed; stale value remains served");
+      })
+      .finally(() => {
+        if (this.inFlight.get(key) === promise) {
+          this.inFlight.delete(key);
+        }
+      });
+  }
+
+  /**
+   * Runs the source fetch, then writes the result to Redis with a jittered
+   * TTL. On failure, records the failure for backoff purposes and either
+   * serves the expired entry (stale-if-error) or rethrows.
+   */
+  private async fetchAndCache<T>(
+    key: string,
+    ttlSeconds: number,
+    fetch: () => Promise<T>,
+    opts: Required<GetOrSetOptions>,
+    staleFallback: StoredEnvelope<T> | null = null
+  ): Promise<T> {
+    let value: T;
+    try {
+      value = await fetch();
+    } catch (err: unknown) {
+      this.recordFailure(key, err);
+      this.metrics.onSourceFailure(key, err);
+      if (staleFallback && Date.now() < staleFallback.e + opts.staleIfErrorSeconds * 1000) {
+        this.metrics.onStale(key);
+        return staleFallback.v;
+      }
+      throw err;
+    }
+
+    this.lastFailures.delete(key);
     if (this.redis && this.isOnline) {
       try {
-        await this.redis.set(key, JSON.stringify(value), "EX", ttlSeconds);
-      } catch (err: any) {
+        const now = Date.now();
+        const jitteredTtlSeconds = ttlSeconds + Math.random() * opts.jitterSeconds;
+        const expiresAtMs = now + Math.floor(jitteredTtlSeconds * 1000);
+        const staleHorizonSeconds = Math.max(
+          opts.staleWhileRevalidateSeconds,
+          opts.staleIfErrorSeconds
+        );
+        const envelope: StoredEnvelope<T> = { $: 1, v: value, c: now, e: expiresAtMs };
+        await this.redis.set(
+          key,
+          JSON.stringify(envelope),
+          "EX",
+          Math.ceil(jitteredTtlSeconds + staleHorizonSeconds)
+        );
+      } catch (err: unknown) {
         this.logger.warn({ err, key }, "Redis set failed — response served uncached");
       }
     }
@@ -355,14 +621,17 @@ export class CacheService {
   }
 
   /**
-   * Evicts a single key from the Redis-backed cache. No-op when Redis is
-   * offline; never throws.
+   * Evicts a single key from the Redis-backed cache and cancels any pending
+   * single-flight or backoff state for it. No-op when Redis is offline; never
+   * throws.
    */
   async invalidate(key: string): Promise<void> {
+    this.inFlight.delete(key);
+    this.lastFailures.delete(key);
     if (this.redis && this.isOnline) {
       try {
         await this.redis.del(key);
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.warn({ err, key }, "Redis invalidate failed");
       }
     }

@@ -1,3 +1,4 @@
+import { getAssetIssuer, isValidCanonicalAsset, getAssetConfig } from "../lib/assets";
 import { connectedPublicKey, connectedNetwork, isNetworkMismatch } from "./store.js";
 import { kit } from "./kit.js";
 import type { ISupportedWallet } from "@creit.tech/stellar-wallets-kit";
@@ -8,7 +9,7 @@ import {
   normalizeStellarNetwork,
 } from "../lib/wallets.js";
 import { HorizonPool } from "./horizonPool.js";
-
+import { getAssetIssuer, isValidCanonicalAsset } from "../lib/assets.js";
 export interface WalletConnectionResult {
   address: string;
   publicKey: string;
@@ -334,8 +335,18 @@ async function getWalletHealth(): Promise<WalletHealthResult> {
     );
     const xlmBalance = native ? Number(native.balance) : 0;
 
-    // Fetch USDC (Testnet only)
-    const usdcIssuer = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"; // Testnet
+    // Fetch USDC using network-specific asset registry
+    const network = await getConnectedNetwork();
+    const usdcIssuer = getAssetIssuer(network, "USDC");
+    
+    // Check if USDC is supported on this network
+    if (!usdcIssuer) {
+      // USDC not supported on this network
+      const balances = { XLM: xlmBalance, USDC: 0 };
+      const asOfMs = Date.now();
+      lastKnownGood.set(publicKey, { balances, asOfMs });
+      return { status: "ready", exists: true, balances, stale: false, asOfMs };
+    }
 
     const usdc = (json.balances || []).find(
       (b: any) => b.asset_code === "USDC" && b.issuer === usdcIssuer,

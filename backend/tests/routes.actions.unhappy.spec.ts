@@ -101,7 +101,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
       const res = await injectWithUniqueIp(app, "POST", "/actions", {
         wallet_address: "GABC",
         action_type: "deposit",
-        action_payload: {}
+        action_payload: { schema_version: 1, vault_id: "v1", amount: "100", token: "USDC" }
       });
       expect(res.statusCode).toBe(400);
       const body = res.json();
@@ -115,7 +115,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
       const res = await injectWithUniqueIp(app, "POST", "/actions", {
         wallet_address: "GABC",
         action_type: "deposit",
-        action_payload: {}
+        action_payload: { schema_version: 1, vault_id: "v1", amount: "100", token: "USDC" }
       }, { "idempotency-key": "not-a-uuid" });
       expect(res.statusCode).toBe(400);
       const body = res.json();
@@ -128,7 +128,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
       const res = await injectWithUniqueIp(app, "POST", "/actions", {
         action_type: "deposit",
-        action_payload: {}
+        action_payload: { schema_version: 1, vault_id: "v1", amount: "100", token: "USDC" }
       }, { "idempotency-key": randomUUID() });
       expect(res.statusCode).toBe(400);
       const body = res.json();
@@ -143,7 +143,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
       const res = await injectWithUniqueIp(app, "POST", "/actions", {
         wallet_address: "GABC",
         action_type: "invalid_action_type",
-        action_payload: {}
+        action_payload: { schema_version: 1, vault_id: "v1", amount: "100", token: "USDC" }
       }, { "idempotency-key": randomUUID() });
       expect(res.statusCode).toBe(400);
       const body = res.json();
@@ -462,7 +462,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
           payload: {
             wallet_address: "GABC",
             action_type: "deposit",
-            action_payload: {}
+            action_payload: { schema_version: 1, vault_id: "v1", amount: "100", token: "USDC" }
           }
         });
         lastStatus = res.statusCode;

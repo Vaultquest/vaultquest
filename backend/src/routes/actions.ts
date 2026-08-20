@@ -13,6 +13,7 @@ import {
 } from "../schemas/actions.js";
 import { AppError } from "../errors.js";
 import { ok, page } from "../responses.js";
+import { parseActionPayload, toActionPayloadView } from "../schemas/actionPayloads.js";
 
 function serialize(row: Awaited<ReturnType<LedgerService["getAction"]>>) {
   if (!row) return null;
@@ -58,12 +59,29 @@ export const actionsRoutes = (
       }
       const body = createActionBody.parse(req.body);
 
+      // Versioned, size-bounded per-type payload validation (#109). Legacy
+      // (unversioned) payloads are migrated; those that cannot be migrated are
+      // quarantined here with a structured error.
+      const parsedPayload = parseActionPayload(body.action_type, body.action_payload);
+      if (!parsedPayload.ok) {
+        return reply.status(400).send({
+          error: {
+            code: "INVALID_PAYLOAD",
+            message: "invalid action_payload",
+            issues: parsedPayload.issues,
+            ...(parsedPayload.quarantined
+              ? { details: { quarantined: true, reason: "legacy payload could not be migrated to a versioned schema" } }
+              : {})
+          }
+        });
+      }
+
       const existing = await svc.findByIdempotencyKey(keyParsed.data);
       const result = await svc.createAction({
         idempotencyKey: keyParsed.data,
         walletAddress: body.wallet_address,
         actionType: body.action_type,
-        actionPayload: body.action_payload
+        actionPayload: parsedPayload.payload
       });
       reply.status(existing ? 200 : 201);
       return ok(serialize(result));
@@ -172,14 +190,14 @@ export const actionsRoutes = (
         ];
 
         const csvRows = rows.map((r) => {
-          const payload = (r.actionPayload as Record<string, unknown> | null) ?? {};
+          const view = toActionPayloadView(r.actionType, r.actionPayload);
           return [
             r.id,
             r.createdAt.toISOString(),
             r.actionType,
-            String(payload["vault_id"] ?? ""),
-            String(payload["amount"] ?? ""),
-            String(payload["token"] ?? ""),
+            view ? String(view.vaultId) : "",
+            view ? String(view.amount) : "",
+            view ? String(view.token) : "",
             r.status,
             r.txHash ?? "",
             r.errorCode ?? "",

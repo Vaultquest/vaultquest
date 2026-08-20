@@ -124,6 +124,63 @@ describe("API key auth — guard disabled (no apiKey configured)", () => {
   });
 });
 
+// ─── Prometheus scrape guard (issue #102) ────────────────────────────────────
+// The raw /metrics endpoint uses its own dedicated credential
+// (prometheusScrapeKey / PROMETHEUS_SCRAPE_KEY), independent of apiKey.
+
+const VALID_SCRAPE_KEY = "b".repeat(32);
+
+describe("Prometheus scrape guard (issue #102)", () => {
+  it("rejects anonymous /metrics with no key → 401 when a scrape key is configured", async () => {
+    const app = buildApp({
+      prisma: getMockPrisma(),
+      internalSecret: "secret",
+      prometheusScrapeKey: VALID_SCRAPE_KEY
+    });
+    const res = await app.inject({ method: "GET", url: "/metrics" });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("allows /metrics with the correct scrape key → 200", async () => {
+    const app = buildApp({
+      prisma: getMockPrisma(),
+      internalSecret: "secret",
+      prometheusScrapeKey: VALID_SCRAPE_KEY
+    });
+    const res = await app.inject({
+      method: "GET",
+      url: "/metrics",
+      headers: { "x-api-key": VALID_SCRAPE_KEY }
+    });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("rejects /metrics using the general apiKey instead of the scrape key", async () => {
+    const app = buildApp({
+      prisma: getMockPrisma(),
+      internalSecret: "secret",
+      apiKey: VALID_API_KEY,
+      prometheusScrapeKey: VALID_SCRAPE_KEY
+    });
+    const res = await app.inject({
+      method: "GET",
+      url: "/metrics",
+      headers: { "x-api-key": VALID_API_KEY }
+    });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("allows /metrics without a key only when no scrape key is configured (local dev)", async () => {
+    const app = buildApp({ prisma: getMockPrisma(), internalSecret: "secret" /* no prometheusScrapeKey */ });
+    const res = await app.inject({ method: "GET", url: "/metrics" });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+});
+
 // ─── Non-API routes are unaffected ───────────────────────────────────────────
 
 describe("API key auth — non-API routes unaffected", () => {

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { CacheService } from './cacheService.js';
+import { RecordingCacheMetrics, type CacheMetricsSink } from './cache/metrics.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,13 +56,32 @@ function makeMockRedis(online: boolean = true) {
 
 function buildService(
   redis: ReturnType<typeof makeMockRedis> | null,
-  isOnline = true
+  isOnline = true,
+  metrics: CacheMetricsSink = new RecordingCacheMetrics()
 ): CacheService {
   const svc = new CacheService(makeMockPrisma(), makeMockLogger(), 'redis://fake:0');
   // Override the private fields that the constructor tries to create.
   (svc as any).redis = redis;
   (svc as any).isOnline = isOnline;
+  (svc as any).metrics = metrics;
   return svc;
+}
+
+/**
+ * Seeds Redis with an already-expired envelope so staleness tests do not have
+ * to wait out a TTL.
+ */
+function seedExpiredEnvelope(
+  redis: ReturnType<typeof makeMockRedis>,
+  key: string,
+  value: unknown,
+  ttlSeconds: number,
+  expiredAgoSeconds: number
+): void {
+  const now = Date.now();
+  const e = now - expiredAgoSeconds * 1000;
+  const c = e - ttlSeconds * 1000;
+  redis._store.set(key, JSON.stringify({ $: 1, v: value, c, e }));
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +110,7 @@ describe('CacheService.getOrSet', () => {
     expect(redis.set).toHaveBeenCalledTimes(1);
   });
 
-  it('calls fetch on cache miss and stores the result', async () => {
+  it('calls fetch on cache miss and stores the result as an envelope', async () => {
     const redis = makeMockRedis();
     const svc = buildService(redis);
 
@@ -99,12 +119,16 @@ describe('CacheService.getOrSet', () => {
 
     expect(result).toEqual([1, 2, 3]);
     expect(fetch).toHaveBeenCalledOnce();
-    expect(redis.set).toHaveBeenCalledWith(
-      'some:key',
-      JSON.stringify([1, 2, 3]),
-      'EX',
-      120
-    );
+    const stored = JSON.parse(redis._store.get('some:key') as string) as {
+      $: number;
+      v: number[];
+      c: number;
+      e: number;
+    };
+    expect(stored.$).toBe(1);
+    expect(stored.v).toEqual([1, 2, 3]);
+    // Redis TTL covers the freshness TTL plus the default stale horizon.
+    expect(redis.set).toHaveBeenCalledWith('some:key', expect.any(String), 'EX', expect.any(Number));
   });
 
   it('still returns the fetch result when Redis is offline (graceful degradation)', async () => {
@@ -147,6 +171,282 @@ describe('CacheService.getOrSet', () => {
       expect.objectContaining({ key: 'set:fail:key' }),
       expect.stringContaining('Redis set failed')
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: single-flight coalescing (#111)
+// ---------------------------------------------------------------------------
+
+describe('CacheService.getOrSet single-flight', () => {
+  it('serves concurrent misses with a single source fetch', async () => {
+    const redis = makeMockRedis();
+    const metrics = new RecordingCacheMetrics();
+    const svc = buildService(redis, true, metrics);
+
+    let resolveFetch: (value: { balance: number }) => void = () => {};
+    const fetch = vi
+      .fn()
+      .mockImplementation(
+        () => new Promise<{ balance: number }>((resolve) => {
+          resolveFetch = resolve;
+        })
+      );
+
+    const p1 = svc.getOrSet('hot:key', 60, fetch);
+    const p2 = svc.getOrSet('hot:key', 60, fetch);
+    const p3 = svc.getOrSet('hot:key', 60, fetch);
+
+    // Give every request a chance to reach the single-flight gate.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    resolveFetch({ balance: 42 });
+
+    const results = await Promise.all([p1, p2, p3]);
+    expect(results).toEqual([{ balance: 42 }, { balance: 42 }, { balance: 42 }]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(metrics.misses).toEqual(['hot:key']);
+    expect(metrics.coalesced.sort()).toEqual(['hot:key', 'hot:key']);
+  });
+
+  it('coalesces concurrent requests onto one fetch when Redis is offline', async () => {
+    const metrics = new RecordingCacheMetrics();
+    const svc = buildService(null, false, metrics);
+    const fetch = vi.fn().mockResolvedValue('fallback');
+
+    const results = await Promise.all([
+      svc.getOrSet('k', 30, fetch),
+      svc.getOrSet('k', 30, fetch),
+      svc.getOrSet('k', 30, fetch),
+    ]);
+
+    expect(results).toEqual(['fallback', 'fallback', 'fallback']);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(metrics.misses).toEqual(['k']);
+    expect(metrics.coalesced).toHaveLength(2);
+  });
+
+  it('records fresh hits against the hit metric', async () => {
+    const redis = makeMockRedis();
+    const metrics = new RecordingCacheMetrics();
+    const svc = buildService(redis, true, metrics);
+
+    const fetch = vi.fn().mockResolvedValue('v');
+    await svc.getOrSet('hit:key', 60, fetch);
+    await svc.getOrSet('hit:key', 60, fetch);
+
+    expect(metrics.misses).toEqual(['hit:key']);
+    expect(metrics.hits).toEqual(['hit:key']);
+    expect(metrics.coalesced).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: bounded failure backoff (#111)
+// ---------------------------------------------------------------------------
+
+describe('CacheService.getOrSet failure backoff', () => {
+  it('does not re-poll a failed source inside the backoff window', async () => {
+    vi.useFakeTimers();
+    try {
+      const redis = makeMockRedis();
+      const metrics = new RecordingCacheMetrics();
+      const svc = buildService(redis, true, metrics);
+      const boom = new Error('upstream down');
+      const fetch = vi.fn().mockRejectedValue(boom);
+
+      await expect(
+        svc.getOrSet('flaky:key', 60, fetch, { failureTtlSeconds: 30 })
+      ).rejects.toThrow('upstream down');
+      expect(fetch).toHaveBeenCalledTimes(1);
+
+      // Inside the window: remembered error, no source call at all.
+      await expect(
+        svc.getOrSet('flaky:key', 60, fetch, { failureTtlSeconds: 30 })
+      ).rejects.toThrow('upstream down');
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(metrics.failures).toHaveLength(2);
+
+      // Past the window the source is polled again (and fails again).
+      vi.advanceTimersByTime(31_000);
+      await expect(
+        svc.getOrSet('flaky:key', 60, fetch, { failureTtlSeconds: 30 })
+      ).rejects.toThrow('upstream down');
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('serves stale instead of erroring when the source is inside the backoff window', async () => {
+    vi.useFakeTimers();
+    try {
+      const redis = makeMockRedis();
+      const metrics = new RecordingCacheMetrics();
+      const svc = buildService(redis, true, metrics);
+      seedExpiredEnvelope(redis, 'bounce:key', 'stale', 60, 40);
+
+      const boom = new Error('down');
+      const fetch = vi.fn().mockRejectedValue(boom);
+      const opts = {
+        staleWhileRevalidateSeconds: 30,
+        staleIfErrorSeconds: 60,
+        jitterSeconds: 0,
+        failureTtlSeconds: 30,
+      };
+
+      // First call: outside the SWR window, so it fetches and fails, then
+      // serves the expired value via stale-if-error.
+      const first = await svc.getOrSet('bounce:key', 60, fetch, opts);
+      expect(first).toBe('stale');
+      expect(fetch).toHaveBeenCalledTimes(1);
+
+      // Second call: inside the backoff window — stale is served with no fetch.
+      const second = await svc.getOrSet('bounce:key', 60, fetch, opts);
+      expect(second).toBe('stale');
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(metrics.failures).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: TTL jitter (#111)
+// ---------------------------------------------------------------------------
+
+describe('CacheService.getOrSet TTL jitter', () => {
+  it('extends the stored expiry by the configured jitter', async () => {
+    const redis = makeMockRedis();
+    const svc = buildService(redis);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+
+    try {
+      await svc.getOrSet('jitter:key', 100, async () => 'v', {
+        jitterSeconds: 10,
+        staleWhileRevalidateSeconds: 0,
+        staleIfErrorSeconds: 0,
+      });
+
+      const stored = JSON.parse(redis._store.get('jitter:key') as string) as {
+        $: number;
+        v: string;
+        c: number;
+        e: number;
+      };
+      expect(stored.$).toBe(1);
+      expect(stored.v).toBe('v');
+      // 100s TTL + 0.5 * 10s jitter.
+      expect(stored.e - stored.c).toBe(105_000);
+      // Redis TTL is the jittered TTL plus the stale horizon (0 here).
+      expect(redis.set).toHaveBeenCalledWith('jitter:key', expect.any(String), 'EX', 105);
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: stale boundaries (#111)
+// ---------------------------------------------------------------------------
+
+describe('CacheService.getOrSet staleness boundaries', () => {
+  it('serves stale within the stale-while-revalidate window and refreshes in the background', async () => {
+    vi.useFakeTimers();
+    try {
+      const redis = makeMockRedis();
+      const metrics = new RecordingCacheMetrics();
+      const svc = buildService(redis, true, metrics);
+      seedExpiredEnvelope(redis, 'stale:key', { v: 'stale' }, 60, 10);
+
+      const fetch = vi.fn().mockResolvedValue({ v: 'fresh' });
+      const opts = { staleWhileRevalidateSeconds: 30, staleIfErrorSeconds: 30, jitterSeconds: 0 };
+
+      const result = await svc.getOrSet('stale:key', 60, fetch, opts);
+      expect(result).toEqual({ v: 'stale' });
+      expect(metrics.stale).toEqual(['stale:key']);
+      expect(fetch).toHaveBeenCalledTimes(1); // background refresh kicked off
+
+      // Let the background refresh finish writing the fresh value.
+      await vi.advanceTimersByTimeAsync(0);
+      const stored = JSON.parse(redis._store.get('stale:key') as string) as { v: unknown };
+      expect(stored.v).toEqual({ v: 'fresh' });
+
+      // The next call is a fresh hit again — no second fetch.
+      const second = await svc.getOrSet('stale:key', 60, fetch, opts);
+      expect(second).toEqual({ v: 'fresh' });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('treats an entry past the stale window as a miss and refetches', async () => {
+    vi.useFakeTimers();
+    try {
+      const redis = makeMockRedis();
+      const metrics = new RecordingCacheMetrics();
+      const svc = buildService(redis, true, metrics);
+      seedExpiredEnvelope(redis, 'old:key', 'ancient', 60, 100);
+
+      const fetch = vi.fn().mockResolvedValue('fresh');
+      const result = await svc.getOrSet('old:key', 60, fetch, {
+        staleWhileRevalidateSeconds: 30,
+        jitterSeconds: 0,
+      });
+
+      expect(result).toBe('fresh');
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(metrics.stale).toEqual([]);
+      expect(metrics.misses).toEqual(['old:key']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('serves stale-if-error when the source fails inside the stale-if-error window', async () => {
+    vi.useFakeTimers();
+    try {
+      const redis = makeMockRedis();
+      const metrics = new RecordingCacheMetrics();
+      const svc = buildService(redis, true, metrics);
+      // Expired 40s ago: outside the SWR window (30s), inside SFR (60s).
+      seedExpiredEnvelope(redis, 'sfr:key', 'stale-but-tolerable', 60, 40);
+
+      const fetch = vi.fn().mockRejectedValue(new Error('source on fire'));
+      const opts = { staleWhileRevalidateSeconds: 30, staleIfErrorSeconds: 60, jitterSeconds: 0 };
+
+      const result = await svc.getOrSet('sfr:key', 60, fetch, opts);
+      expect(result).toBe('stale-but-tolerable');
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(metrics.failures).toHaveLength(1);
+      expect(metrics.stale).toEqual(['sfr:key']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('propagates the error when the source fails beyond the stale-if-error window', async () => {
+    vi.useFakeTimers();
+    try {
+      const redis = makeMockRedis();
+      const metrics = new RecordingCacheMetrics();
+      const svc = buildService(redis, true, metrics);
+      seedExpiredEnvelope(redis, 'dead:key', 'too-old', 60, 100);
+
+      const fetch = vi.fn().mockRejectedValue(new Error('source gone'));
+      const opts = { staleWhileRevalidateSeconds: 30, staleIfErrorSeconds: 60, jitterSeconds: 0 };
+
+      await expect(svc.getOrSet('dead:key', 60, fetch, opts)).rejects.toThrow('source gone');
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(metrics.failures).toHaveLength(1);
+      expect(metrics.stale).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
