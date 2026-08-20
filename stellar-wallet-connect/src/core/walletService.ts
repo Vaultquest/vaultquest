@@ -1,11 +1,8 @@
 import { connectedPublicKey, connectedNetwork, isNetworkMismatch, networkReadiness } from "./store.js";
 import { kit } from "./kit.js";
-import { getFrontendEnv } from "./env.js";
-import { resolveHorizonUrl } from "./horizonConfig.js";
 import type { ISupportedWallet } from "@creit.tech/stellar-wallets-kit";
 import {
   EXPECTED_NETWORK,
-  STELLAR_NETWORKS,
   type NetworkType,
   type WalletType,
   normalizeStellarNetwork,
@@ -278,21 +275,73 @@ function initializeConnection(): StoredWalletConnection | null {
 }
 
 /**
- * Check if the connected wallet exists and has funds.
- * Returns { exists: boolean, balance: number }.
+ * Discriminated wallet-health outcome (issue #103). Only "ready" carries
+ * trustworthy balances; every other status means the Horizon lookup did NOT
+ * confirm the account is unfunded/nonexistent, and callers MUST NOT treat it
+ * as zero funds. "not-found" is reserved for an authoritative 404 - any
+ * other non-OK response, thrown exception, or malformed body is an
+ * *operational* problem with the provider, not a fact about the account.
  */
-async function getWalletHealth(): Promise<{
-  exists: boolean;
-  balances: { XLM: number; USDC: number };
-}> {
-  const publicKey = loadedPublicKey();
-  const env = getFrontendEnv();
-  const horizonUrl = resolveHorizonUrl(
-    env.NEXT_PUBLIC_HORIZON_URL,
-    STELLAR_NETWORKS[EXPECTED_NETWORK].horizonUrl,
-  );
+export type WalletHealthStatus =
+  | "ready"
+  | "not-found"
+  | "unavailable"
+  | "rate-limited"
+  | "invalid-response";
 
-  if (!publicKey) return { exists: false, balances: { XLM: 0, USDC: 0 } };
+export interface WalletHealthResult {
+  status: WalletHealthStatus;
+  /** True only when `status` is "ready" (or a stale "ready" fallback). */
+  exists: boolean;
+  /** Present only when `status` is "ready". */
+  balances: { XLM: number; USDC: number } | null;
+  /**
+   * Set when this result is last-known-good data served during an outage
+   * instead of a fresh lookup. Always paired with `asOfMs` so callers can
+   * judge freshness before acting on it.
+   */
+  stale: boolean;
+  /** Timestamp (ms) the balances were last confirmed fresh from Horizon. */
+  asOfMs: number | null;
+  /** Diagnostic detail for non-"ready" statuses; never used for control flow. */
+  detail?: string;
+}
+
+const READY_NONE: WalletHealthResult = {
+  status: "ready",
+  exists: false,
+  balances: null,
+  stale: false,
+  asOfMs: null,
+};
+
+/** Per-publicKey last-known-good snapshot, used only as an explicit stale fallback during outages. */
+const lastKnownGood = new Map<string, { balances: { XLM: number; USDC: number }; asOfMs: number }>();
+
+function staleFallback(publicKey: string, status: WalletHealthStatus, detail: string): WalletHealthResult {
+  const cached = lastKnownGood.get(publicKey);
+  if (cached) {
+    return {
+      status,
+      exists: true,
+      balances: cached.balances,
+      stale: true,
+      asOfMs: cached.asOfMs,
+      detail,
+    };
+  }
+  return { status, exists: false, balances: null, stale: false, asOfMs: null, detail };
+}
+
+/**
+ * Check whether the connected wallet exists and has funds, distinguishing a
+ * confirmed missing/unfunded account from a Horizon outage (issue #103).
+ * A non-"ready" status is never zero balances - it's "we don't know".
+ */
+async function getWalletHealth(): Promise<WalletHealthResult> {
+  const publicKey = loadedPublicKey();
+
+  if (!publicKey) return READY_NONE;
 
   try {
     // Route through the connection pool: distributes the lookup across the
@@ -301,15 +350,26 @@ async function getWalletHealth(): Promise<{
       headers: { Accept: "application/json" },
     });
 
+    // Only an authoritative 404 means the account is confirmed missing.
     if (resp.status === 404) {
-      return { exists: false, balances: { XLM: 0, USDC: 0 } };
+      return { status: "not-found", exists: false, balances: null, stale: false, asOfMs: null };
+    }
+
+    if (resp.status === 429) {
+      return staleFallback(publicKey, "rate-limited", "Horizon rate limit (429)");
     }
 
     if (!resp.ok) {
-      return { exists: false, balances: { XLM: 0, USDC: 0 } };
+      // 5xx / other non-OK: an operational error, never "unfunded".
+      return staleFallback(publicKey, "unavailable", `Horizon returned HTTP ${resp.status}`);
     }
 
-    const json = await resp.json();
+    let json: any;
+    try {
+      json = await resp.json();
+    } catch (parseError) {
+      return staleFallback(publicKey, "invalid-response", "Horizon response was not valid JSON");
+    }
 
     // Fetch XLM (native)
     const native = (json.balances || []).find(
@@ -323,21 +383,28 @@ async function getWalletHealth(): Promise<{
     
     // Check if USDC is supported on this network
     if (!usdcIssuer) {
-  // USDC not supported on this network
-      return { exists: true, balances: { XLM: xlmBalance, USDC: 0 } };
-}
-
-    let usdcBalance = 0;
-    if (usdcIssuer) {
-      const usdc = (json.balances || []).find(
-        (b: any) => b.asset_code === "USDC" && b.issuer === usdcIssuer,
-      );
-      usdcBalance = usdc ? Number(usdc.balance) : 0;
+      // USDC not supported on this network
+      const balances = { XLM: xlmBalance, USDC: 0 };
+      const asOfMs = Date.now();
+      lastKnownGood.set(publicKey, { balances, asOfMs });
+      return { status: "ready", exists: true, balances, stale: false, asOfMs };
     }
-    return { exists: true, balances: { XLM: xlmBalance, USDC: usdcBalance } };
+
+    const usdc = (json.balances || []).find(
+      (b: any) => b.asset_code === "USDC" && b.issuer === usdcIssuer,
+    );
+    const usdcBalance = usdc ? Number(usdc.balance) : 0;
+
+    const balances = { XLM: xlmBalance, USDC: usdcBalance };
+    const asOfMs = Date.now();
+    lastKnownGood.set(publicKey, { balances, asOfMs });
+
+    return { status: "ready", exists: true, balances, stale: false, asOfMs };
   } catch (error) {
+    // Network-level failure (timeout, DNS, connection reset, etc.) - an
+    // outage, not evidence the account is unfunded/nonexistent.
     console.error("Error checking wallet health:", error);
-    return { exists: false, balances: { XLM: 0, USDC: 0 } };
+    return staleFallback(publicKey, "unavailable", error instanceof Error ? error.message : String(error));
   }
 }
 
