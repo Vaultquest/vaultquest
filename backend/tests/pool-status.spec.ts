@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { buildApp } from "../src/app.js";
 import type { FastifyInstance } from "fastify";
+import { injectWithCsrf } from "./helpers/csrf.js";
 
 describe("Pool status API endpoints", () => {
   let db: TestDb;
@@ -25,24 +26,15 @@ describe("Pool status API endpoints", () => {
   const validStellarAddress = "GABCDEF1234567890123456789012345678901234567890123456789";
 
   async function createPoolAction(wallet: string, vaultId: string, status = "pending") {
-    const res = await app.inject({
-      method: "POST",
-      url: "/actions",
-      headers: { "idempotency-key": randomUUID(), "content-type": "application/json" },
-      payload: {
-        wallet_address: wallet,
-        action_type: "deposit",
-        action_payload: { vault_id: vaultId, amount: "100", token: "USDC" }
-      }
-    });
+    const res = await injectWithCsrf(app, "POST", "/actions", {
+      wallet_address: wallet,
+      action_type: "deposit",
+      action_payload: { schema_version: 1, vault_id: vaultId, amount: "100", token: "USDC" }
+    }, { "idempotency-key": randomUUID() });
     const id = res.json().data.id;
 
     if (status === "confirmed") {
-      await app.inject({
-        method: "PATCH",
-        url: `/actions/${id}/submitted`,
-        payload: { tx_hash: randomUUID() }
-      });
+      await injectWithCsrf(app, "PATCH", `/actions/${id}/submitted`, { tx_hash: randomUUID() });
     }
 
     return id;
@@ -71,11 +63,10 @@ describe("Pool status API endpoints", () => {
   });
 
   it("rejects pool action with invalid idempotency key", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/actions",
-      headers: { "content-type": "application/json" },
-      payload: { wallet_address: "GINVALID", action_type: "deposit", action_payload: { vault_id: "1" } }
+    const res = await injectWithCsrf(app, "POST", "/actions", {
+      wallet_address: "GINVALID",
+      action_type: "deposit",
+      action_payload: { schema_version: 1, vault_id: "1", amount: "100", token: "USDC" }
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe("INVALID_PAYLOAD");
@@ -95,12 +86,7 @@ describe("Pool status API endpoints", () => {
     const a = await createPoolAction(wallet, "pool-1", "pending");
     const b = await createPoolAction(wallet, "pool-2", "pending");
 
-    await app.inject({
-      method: "PATCH",
-      url: `/actions/${a}/submitted`,
-      headers: { "content-type": "application/json" },
-      payload: { tx_hash: "TX_POOL_A" }
-    });
+    await injectWithCsrf(app, "PATCH", `/actions/${a}/submitted`, { tx_hash: "TX_POOL_A" });
 
     const res = await app.inject({
       method: "GET",

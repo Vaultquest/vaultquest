@@ -8,6 +8,22 @@
  * (create / join / drip / claim / withdraw) be tested without a live network.
  */
 
+import type { NetworkType } from "../../lib/wallets.js";
+import type { AssetConfig } from "../../lib/assets.js";
+
+/**
+ * Network-aware asset identifier.
+ * Use this instead of plain `asset: string` to ensure assets are validated
+ * against the current network.
+ */
+export interface NetworkAsset {
+  /** Asset code (e.g., "USDC", "XLM") */
+  code: string;
+  /** The network this asset belongs to */
+  network: NetworkType;
+  /** Optional: full asset configuration (includes issuer, decimals, name) */
+  config?: AssetConfig;
+}
 export type PoolStatus = "open" | "locked" | "drawing" | "settled";
 
 export interface PoolSummary {

@@ -8,6 +8,9 @@ import {
   WalletDisconnectedState,
 } from "../../components/FallbackStates";
 import type { PoolActionType, PoolStatus, PoolSummary, UserPosition } from "../contract/types";
+import { getAssetDisplayName } from "../../lib/assets";
+import { EXPECTED_NETWORK } from "../../lib/wallets";
+import { connectedNetwork } from "../../core/store.js";
 import { formatAmount, formatDate, truncateAddress } from "../lib/format";
 import { OnboardingChecklist } from "./OnboardingChecklist";
 import { networkReadiness } from "../../core/store.js";
@@ -105,6 +108,9 @@ export const PoolDetail: FC<PoolDetailProps> = ({
   // (verification outage), and "mismatch" (wrong network) must all disable
   // actions - only "verified" allows them through.
   const mismatch = readiness !== "verified";
+  // Get the current network and asset display name
+  const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
+  const assetDisplayName = pool ? getAssetDisplayName(network, pool.asset) : "";
 
   if (error) {
     return <ErrorState title="Couldn't load pool" message={error} onRetry={onRetry} />;
@@ -150,7 +156,7 @@ export const PoolDetail: FC<PoolDetailProps> = ({
 
       {/* Overview */}
       <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat icon={<Coins className="h-3.5 w-3.5" aria-hidden="true" />} label="TVL" value={formatAmount(pool.tvl, pool.asset)} />
+        <Stat icon={<Coins className="h-3.5 w-3.5" aria-hidden="true" />} label="TVL" value={formatAmount(pool.tvl, assetDisplayName)} />
         <Stat icon={<Users className="h-3.5 w-3.5" aria-hidden="true" />} label="Participants" value={String(pool.participantCount)} />
         <Stat icon={<Trophy className="h-3.5 w-3.5" aria-hidden="true" />} label="Expected yield" value={pool.expectedYield} />
         <Stat icon={<Trophy className="h-3.5 w-3.5" aria-hidden="true" />} label="Prize" value={pool.prize ?? "—"} />
@@ -182,7 +188,7 @@ export const PoolDetail: FC<PoolDetailProps> = ({
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
             <div>
               <dt className="text-gray-400">Deposited</dt>
-              <dd className="text-base font-semibold text-white">{formatAmount(position.deposited, pool.asset)}</dd>
+              <dd className="text-base font-semibold text-white">{formatAmount(position.deposited, assetDisplayName)}</dd>
             </div>
             <div>
               <dt className="text-gray-400">Shares</dt>

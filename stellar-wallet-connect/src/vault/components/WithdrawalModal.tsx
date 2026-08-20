@@ -1,4 +1,8 @@
 import type { FC } from "react";
+import { getAssetDisplayName } from "../../lib/assets";
+import { EXPECTED_NETWORK } from "../../lib/wallets";
+import { useStore } from "@nanostores/react";
+import { connectedNetwork } from "../../core/store.js";
 import { useState, useCallback } from "react";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import Modal from "../../components/Modal";
@@ -15,6 +19,9 @@ export interface WithdrawalModalProps {
 }
 
 export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWithdraw, onClose }) => {
+   // Get the current network and asset display name
+  const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
+  const assetDisplayName = pool ? getAssetDisplayName(network, pool.asset) : "";
   const [step, setStep] = useState<Step>("input");
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -80,11 +87,11 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
                   placeholder="0.00"
                 />
                 <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400">
-                  {pool.asset}
+                  {assetDisplayName}
                 </span>
               </div>
               <p className="mt-1 text-xs text-gray-500">
-                Deposited: {formatAmount(position.deposited, pool.asset)}
+                Deposited: {formatAmount(position.deposited, assetDisplayName)}
               </p>
             </div>
 
@@ -100,7 +107,7 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
               onClick={handleMax}
               className="w-full rounded-lg border border-red-600/40 px-3 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-900/20 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1A0505]"
             >
-              Withdraw all ({formatAmount(position.deposited, pool.asset)})
+              Withdraw all ({formatAmount(position.deposited, assetDisplayName)})
             </button>
 
             {error && <p className="text-sm text-red-400">{error}</p>}
@@ -121,7 +128,7 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
             <div className="rounded-xl border border-red-900/30 bg-[#1A0505]/60 p-4 space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Amount</span>
-                <span className="text-white font-semibold">{formatAmount(amount, pool.asset)}</span>
+                <span className="text-white font-semibold">{formatAmount(amount, assetDisplayName)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Pool</span>
@@ -130,7 +137,7 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Remaining deposit</span>
                 <span className="text-white">
-                  {formatAmount(String(Math.max(0, depositedNum - amountNum)), pool.asset)}
+                  {formatAmount(String(Math.max(0, depositedNum - amountNum)), assetDisplayName)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
@@ -204,7 +211,7 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
               Withdrawal successful!
             </p>
             <p className="text-sm text-gray-400 text-center max-w-xs">
-              Your withdrawal of {formatAmount(amount, pool.asset)} from the pool has been successfully confirmed.
+              Your withdrawal of {formatAmount(amount, assetDisplayName)} from the pool has been successfully confirmed.
             </p>
             <div className="w-full divide-y divide-red-900/20 rounded-xl border border-red-900/30 bg-[#1A0505]/40 px-4 py-2 text-xs">
               <div className="flex justify-between py-1.5">
@@ -214,7 +221,7 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
               <div className="flex justify-between py-1.5">
                 <span className="text-gray-400">Remaining deposit</span>
                 <span className="text-white font-semibold">
-                  {formatAmount(String(Math.max(0, depositedNum - amountNum)), pool.asset)}
+                  {formatAmount(String(Math.max(0, depositedNum - amountNum)), assetDisplayName)}
                 </span>
               </div>
               <div className="flex justify-between py-1.5">

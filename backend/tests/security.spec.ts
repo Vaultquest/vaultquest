@@ -50,7 +50,7 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
         payload: {
           wallet_address: "GBX7Q4DMXD66VFR7YJ3HYBFFW7Q5PNE7A5PXH5XN265LSL73GOHX4Y6A",
           action_type: "deposit",
-          action_payload: {}
+          action_payload: { schema_version: 1, vault_id: "v1", amount: "100", token: "USDC" }
         }
       });
 
@@ -100,7 +100,7 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
         payload: {
           wallet_address: "GBX7Q4DMXD66VFR7YJ3HYBFFW7Q5PNE7A5PXH5XN265LSL73GOHX4Y6A",
           action_type: "deposit",
-          action_payload: {}
+          action_payload: { schema_version: 1, vault_id: "v1", amount: "100", token: "USDC" }
         }
       });
 

@@ -106,13 +106,13 @@ async function main() {
     {
       txHash: "0x9999999999999999999999999999999999999999999999999999999999999999",
       sorobanEventId: "0000000000000000001-0000000001",
-      eventPayload: { type: "deposit", amount: "500", from: walletA },
+      eventPayload: { schema_version: 1, event_type: "deposit", vault_id: "vault-usdc-yield-high", amount: "500", from: walletA },
       statusHint: "confirmed"
     },
     {
       txHash: "0x8888888888888888888888888888888888888888888888888888888888888888",
       sorobanEventId: "0000000000000000002-0000000001",
-      eventPayload: { type: "withdraw", amount: "100", from: walletB },
+      eventPayload: { schema_version: 1, event_type: "withdraw", vault_id: "vault-yxlm-max-earn", amount: "100", from: walletB },
       statusHint: "submitted"
     }
   ];
@@ -129,7 +129,7 @@ async function main() {
       actionType: ActionType.create_vault,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-usdc-yield-high", asset: "USDC" },
+      actionPayload: { schema_version: 1, vault_id: "vault-usdc-yield-high", token: "USDC" },
       txHash: "0x1111111111111111111111111111111111111111111111111111111111111111",
       submittedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000)
@@ -139,7 +139,7 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-usdc-yield-high", amount: 1000, token: "USDC" },
+      actionPayload: { schema_version: 1, vault_id: "vault-usdc-yield-high", amount: "1000", token: "USDC" },
       txHash: "0x2222222222222222222222222222222222222222222222222222222222222222",
       submittedAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000)
@@ -149,7 +149,7 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-xlm-lucky-draw", amount: 5000, token: "XLM" },
+      actionPayload: { schema_version: 1, vault_id: "vault-xlm-lucky-draw", amount: "5000", token: "XLM" },
       txHash: "0x3333333333333333333333333333333333333333333333333333333333333333",
       submittedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
@@ -159,7 +159,7 @@ async function main() {
       actionType: ActionType.withdraw,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-usdc-yield-high", amount: 200, token: "USDC" },
+      actionPayload: { schema_version: 1, vault_id: "vault-usdc-yield-high", amount: "200", token: "USDC" },
       txHash: "0x4444444444444444444444444444444444444444444444444444444444444444",
       submittedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
@@ -169,7 +169,7 @@ async function main() {
       actionType: ActionType.claim,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-usdc-yield-high", amount: 50, token: "USDC" },
+      actionPayload: { schema_version: 1, vault_id: "vault-usdc-yield-high", amount: "50", token: "USDC" },
       txHash: "0x5555555555555555555555555555555555555555555555555555555555555555",
       submittedAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
@@ -179,7 +179,7 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.failed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-usdc-yield-high", amount: 10000, token: "USDC" },
+      actionPayload: { schema_version: 1, vault_id: "vault-usdc-yield-high", amount: "10000", token: "USDC" },
       txHash: "0x6666666666666666666666666666666666666666666666666666666666666666",
       errorCode: "TX_FAILED",
       errorDetail: "Insufficient liquidity pool allowance",
@@ -190,7 +190,7 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.reverted,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-xlm-lucky-draw", amount: 2000, token: "XLM" },
+      actionPayload: { schema_version: 1, vault_id: "vault-xlm-lucky-draw", amount: "2000", token: "XLM" },
       txHash: "0x7777777777777777777777777777777777777777777777777777777777777777",
       errorCode: "REVERTED_ON_CHAIN",
       submittedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
@@ -201,14 +201,14 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.pending,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-usdc-yield-high", amount: 150, token: "USDC" }
+      actionPayload: { schema_version: 1, vault_id: "vault-usdc-yield-high", amount: "150", token: "USDC" }
     },
     {
       walletAddress: walletA,
       actionType: ActionType.withdraw,
       status: ActionStatus.submitted,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-usdc-yield-high", amount: 50, token: "USDC" },
+      actionPayload: { schema_version: 1, vault_id: "vault-usdc-yield-high", amount: "50", token: "USDC" },
       txHash: "0x8888888888888888888888888888888888888888888888888888888888888888",
       submittedAt: new Date(Date.now() - 10 * 60 * 1000)
     },
@@ -217,7 +217,7 @@ async function main() {
       actionType: ActionType.select_winner,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-xlm-lucky-draw", winner: walletA },
+      actionPayload: { schema_version: 1, vault_id: "vault-xlm-lucky-draw", winner: walletA },
       txHash: "0x9999999999999999999999999999999999999999999999999999999999999999",
       submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
@@ -229,7 +229,7 @@ async function main() {
       actionType: ActionType.create_vault,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-yxlm-max-earn", asset: "yXLM" },
+      actionPayload: { schema_version: 1, vault_id: "vault-yxlm-max-earn", token: "yXLM" },
       txHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       submittedAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)
@@ -239,7 +239,7 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-yxlm-max-earn", amount: 10000, token: "yXLM" },
+      actionPayload: { schema_version: 1, vault_id: "vault-yxlm-max-earn", amount: "10000", token: "yXLM" },
       txHash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       submittedAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
@@ -249,7 +249,7 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-usdc-yield-high", amount: 500, token: "USDC" },
+      actionPayload: { schema_version: 1, vault_id: "vault-usdc-yield-high", amount: "500", token: "USDC" },
       txHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       submittedAt: new Date(Date.now() - 13 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 13 * 24 * 60 * 60 * 1000)
@@ -259,7 +259,7 @@ async function main() {
       actionType: ActionType.withdraw,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-yxlm-max-earn", amount: 1500, token: "yXLM" },
+      actionPayload: { schema_version: 1, vault_id: "vault-yxlm-max-earn", amount: "1500", token: "yXLM" },
       txHash: "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
       submittedAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000)
@@ -269,7 +269,7 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.orphaned,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-yxlm-max-earn", amount: 200, token: "yXLM" },
+      actionPayload: { schema_version: 1, vault_id: "vault-yxlm-max-earn", amount: "200", token: "yXLM" },
       txHash: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       errorCode: "ORPHAN_TTL_EXPIRED",
       submittedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000)
@@ -279,7 +279,7 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.pending,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-yxlm-max-earn", amount: 300, token: "yXLM" }
+      actionPayload: { schema_version: 1, vault_id: "vault-yxlm-max-earn", amount: "300", token: "yXLM" }
     },
 
     // Wallet C
@@ -288,7 +288,7 @@ async function main() {
       actionType: ActionType.create_vault,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-aqua-governance-boost", asset: "AQUA" },
+      actionPayload: { schema_version: 1, vault_id: "vault-aqua-governance-boost", token: "AQUA" },
       txHash: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
       submittedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000)
@@ -298,7 +298,7 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-aqua-governance-boost", amount: 50000, token: "AQUA" },
+      actionPayload: { schema_version: 1, vault_id: "vault-aqua-governance-boost", amount: "50000", token: "AQUA" },
       txHash: "0x1212121212121212121212121212121212121212121212121212121212121212",
       submittedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000)
@@ -308,7 +308,7 @@ async function main() {
       actionType: ActionType.withdraw,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-aqua-governance-boost", amount: 10000, token: "AQUA" },
+      actionPayload: { schema_version: 1, vault_id: "vault-aqua-governance-boost", amount: "10000", token: "AQUA" },
       txHash: "0x1313131313131313131313131313131313131313131313131313131313131313",
       submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
@@ -318,14 +318,14 @@ async function main() {
       actionType: ActionType.deposit,
       status: ActionStatus.pending,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-aqua-governance-boost", amount: 25000, token: "AQUA" }
+      actionPayload: { schema_version: 1, vault_id: "vault-aqua-governance-boost", amount: "25000", token: "AQUA" }
     },
     {
       walletAddress: walletC,
       actionType: ActionType.deposit,
       status: ActionStatus.confirmed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-btc-safe-reserve", amount: 0.1, token: "BTC" },
+      actionPayload: { schema_version: 1, vault_id: "vault-btc-safe-reserve", amount: "0.1", token: "BTC" },
       txHash: "0x2323232323232323232323232323232323232323232323232323232323232323",
       submittedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
       confirmedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
@@ -335,7 +335,7 @@ async function main() {
       actionType: ActionType.withdraw,
       status: ActionStatus.failed,
       idempotencyKey: randomUUID(),
-      actionPayload: { vault_id: "vault-btc-safe-reserve", amount: 0.05, token: "BTC" },
+      actionPayload: { schema_version: 1, vault_id: "vault-btc-safe-reserve", amount: "0.05", token: "BTC" },
       txHash: "0x2424242424242424242424242424242424242424242424242424242424242424",
       errorCode: "INSUFFICIENT_FUNDS",
       submittedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000)

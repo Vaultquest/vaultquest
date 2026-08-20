@@ -3,7 +3,11 @@ import type { PrismaClient } from "@prisma/client";
 import type { Logger } from "pino";
 import { sweepOrphans } from "./services/reconciler.js";
 import { QuestService } from "./services/questService.js";
-import { BackupService } from "./services/backupService.js";
+import {
+  BackupService,
+  type RemoteStorageAdapter,
+  type DbRestoreRunner
+} from "./services/backupService.js";
 import type { StellarIndexer } from "./services/stellarIndexer.js";
 import { pingDatabase } from "./db.js";
 
@@ -81,17 +85,20 @@ export function startIndexerCron(opts: {
 }
 
 /**
- * Runs automated PostgreSQL backups on a schedule (issue #275).
+ * Runs automated PostgreSQL backups on a schedule (issues #275 & #112).
  *
- * Each tick calls `BackupService.run()` which shells out to `pg_dump` and
- * prunes files older than `retainDays`. The cron is only started when
- * `BACKUP_DIR` is set in the environment.
+ * Each tick calls `BackupService.run()` which shells out to `pg_dump`,
+ * computes SHA-256 checksums, generates manifests, replicates off-site,
+ * and prunes files older than `retainDays`.
  */
 export function startBackupCron(opts: {
   backupDir: string;
   databaseUrl: string;
   retainDays?: number;
+  remoteRetainDays?: number;
+  remoteImmutableDays?: number;
   pgDumpPath?: string;
+  remoteStorage?: RemoteStorageAdapter;
   logger: Logger;
   schedule?: string;
 }): cron.ScheduledTask {
@@ -100,7 +107,10 @@ export function startBackupCron(opts: {
     backupDir: opts.backupDir,
     databaseUrl: opts.databaseUrl,
     retainDays: opts.retainDays,
+    remoteRetainDays: opts.remoteRetainDays,
+    remoteImmutableDays: opts.remoteImmutableDays,
     pgDumpPath: opts.pgDumpPath,
+    remoteStorage: opts.remoteStorage,
     logger: opts.logger
   });
 
@@ -110,6 +120,45 @@ export function startBackupCron(opts: {
       opts.logger.info({ result }, "backup: completed");
     } catch (err) {
       opts.logger.error({ err }, "backup: failed");
+    }
+  });
+  return task;
+}
+
+/**
+ * Runs automated PostgreSQL restore verification drills on a schedule (issue #112).
+ */
+export function startRestoreDrillCron(opts: {
+  backupDir: string;
+  databaseUrl: string;
+  maxRtoMs?: number;
+  maxRpoMinutes?: number;
+  pgRestorePath?: string;
+  restoreRunner?: DbRestoreRunner;
+  logger: Logger;
+  schedule?: string;
+}): cron.ScheduledTask {
+  const schedule = opts.schedule ?? "0 4 * * 0"; // default: weekly at 04:00 on Sunday
+  const svc = new BackupService({
+    backupDir: opts.backupDir,
+    databaseUrl: opts.databaseUrl,
+    maxRtoMs: opts.maxRtoMs,
+    maxRpoMinutes: opts.maxRpoMinutes,
+    pgRestorePath: opts.pgRestorePath,
+    restoreRunner: opts.restoreRunner,
+    logger: opts.logger
+  });
+
+  const task = cron.schedule(schedule, async () => {
+    try {
+      const result = await svc.runRestoreDrill();
+      if (!result.success) {
+        opts.logger.error({ result }, "restore verification drill failed");
+      } else {
+        opts.logger.info({ result }, "restore verification drill completed successfully");
+      }
+    } catch (err) {
+      opts.logger.error({ err }, "restore verification drill errored out");
     }
   });
   return task;
