@@ -1711,3 +1711,60 @@ fn legacy_deposit_still_works_when_vault_unused() {
     let pool = client.pool();
     assert_eq!(pool.total_deposited, 100);
 }
+
+// ── fee bounds validation ──────────────────────────────────────────────────
+
+#[test]
+fn fee_setters_reject_out_of_bounds_values_before_storage_mutation() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    // 0 is valid
+    assert!(client.try_vault_set_management_fee_bps(&admin, &0).is_ok());
+    assert!(client.try_vault_set_performance_fee_bps(&admin, &0).is_ok());
+
+    // 10,000 (max) is valid
+    assert!(client.try_vault_set_management_fee_bps(&admin, &10_000).is_ok());
+    assert!(client.try_vault_set_performance_fee_bps(&admin, &10_000).is_ok());
+
+    // 10,001 (max + 1) is invalid
+    assert_eq!(
+        client.try_vault_set_management_fee_bps(&admin, &10_001),
+        Err(Ok(Error::InvalidFeeBps))
+    );
+    assert_eq!(
+        client.try_vault_set_performance_fee_bps(&admin, &10_001),
+        Err(Ok(Error::InvalidFeeBps))
+    );
+
+    // u32::MAX is invalid
+    assert_eq!(
+        client.try_vault_set_management_fee_bps(&admin, &u32::MAX),
+        Err(Ok(Error::InvalidFeeBps))
+    );
+    assert_eq!(
+        client.try_vault_set_performance_fee_bps(&admin, &u32::MAX),
+        Err(Ok(Error::InvalidFeeBps))
+    );
+}
+
+#[test]
+fn legacy_invalid_configuration_is_safely_capped_during_accrual() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let alice = Address::generate(&env);
+    
+    client.vault_init(&admin);
+    
+    // Manually force invalid config via raw storage to simulate pre-migration state
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&VaultKey::ManagementFeeBps, &15_000u32);
+        env.storage().instance().set(&VaultKey::PerformanceFeeBps, &u32::MAX);
+    });
+
+    client.vault_deposit(&alice, &100_000);
+    
+    // Accrual does not overflow or panic because of min(10_000) cap
+    client.vault_accrue_management_fee(&admin);
+    client.vault_accrue_performance_fee(&admin);
+}
