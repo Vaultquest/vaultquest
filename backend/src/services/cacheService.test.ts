@@ -39,6 +39,7 @@ function makeMockRedis(online: boolean = true) {
       store.set(key, value);
       return 'OK';
     }),
+    ping: vi.fn(async () => 'PONG'),
     del: vi.fn(async (key: string) => {
       const existed = store.has(key);
       store.delete(key);
@@ -485,5 +486,50 @@ describe('CacheService.invalidate', () => {
       expect.objectContaining({ key: 'bad:key' }),
       expect.stringContaining('Redis invalidate failed')
     );
+  });
+});
+
+describe('CacheService.ping', () => {
+  it('reports not configured when no Redis URL was provided (no live Redis needed)', async () => {
+    const svc = new CacheService(makeMockPrisma(), makeMockLogger());
+    const result = await svc.ping();
+    expect(result).toEqual({ configured: false, healthy: true, latencyMs: 0 });
+  });
+
+  it('reports healthy with round-trip latency when PING succeeds', async () => {
+    const redis = makeMockRedis();
+    const svc = buildService(redis);
+
+    const result = await svc.ping();
+
+    expect(redis.ping).toHaveBeenCalled();
+    expect(result.configured).toBe(true);
+    expect(result.healthy).toBe(true);
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('reports unhealthy with the error message when PING rejects, without throwing', async () => {
+    const redis = makeMockRedis();
+    redis.ping.mockRejectedValueOnce(new Error('connection reset'));
+    const svc = buildService(redis);
+
+    const result = await svc.ping();
+
+    expect(result.configured).toBe(true);
+    expect(result.healthy).toBe(false);
+    expect(result.error).toBe('connection reset');
+  });
+
+  it('attempts a live PING rather than trusting a stale isOnline=false flag', async () => {
+    // isOnline can lag the real connection state (it is only updated by
+    // connect/error events); ping() must not short-circuit on it.
+    const redis = makeMockRedis();
+    const svc = buildService(redis, false);
+
+    const result = await svc.ping();
+
+    expect(redis.ping).toHaveBeenCalled();
+    expect(result.healthy).toBe(true);
   });
 });
