@@ -28,7 +28,8 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
       const mockPrisma = getMockPrisma();
       const app = buildApp({ prisma: mockPrisma, internalSecret });
 
-      const res = await app.inject({ headers: { "x-internal-secret": "test-internal-secret-123456" }, method: "GET",
+      const res = await app.inject({
+        method: "GET",
         url: "/health"
       });
 
@@ -43,8 +44,9 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
       const mockPrisma = getMockPrisma();
       const app = buildApp({ prisma: mockPrisma, internalSecret });
 
-      const res = await app.inject({ headers: { "x-internal-secret": "test-internal-secret-123456" }, method: "POST",
-        url: "/actions",
+      const res = await app.inject({
+        method: "POST",
+        url: "/actions", headers: { "x-internal-secret": internalSecret },
         payload: {
           wallet_address: "GBX7Q4DMXD66VFR7YJ3HYBFFW7Q5PNE7A5PXH5XN265LSL73GOHX4Y6A",
           action_type: "deposit",
@@ -76,7 +78,8 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
       const app = buildApp({ prisma: mockPrisma, internalSecret });
 
       // First, get the CSRF token
-      const getRes = await app.inject({ headers: { "x-internal-secret": "test-internal-secret-123456" }, method: "GET",
+      const getRes = await app.inject({
+        method: "GET",
         url: "/health"
       });
       const csrfToken = getRes.headers["x-csrf-token"] as string;
@@ -86,13 +89,14 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
 
       // Make POST request with matching token in cookie and header
       const key = randomUUID();
-      const postRes = await app.inject({ headers: { "x-internal-secret": "test-internal-secret-123456" }, method: "POST",
+      const postRes = await app.inject({
+        method: "POST",
         url: "/actions",
         headers: {
-          "idempotency-key": key,
+          "idempotency-key": key, "x-internal-secret": internalSecret,
           "x-csrf-token": csrfToken,
           cookie: setCookie
-        , "x-internal-secret": "test-internal-secret-123456" },
+        },
         payload: {
           wallet_address: "GBX7Q4DMXD66VFR7YJ3HYBFFW7Q5PNE7A5PXH5XN265LSL73GOHX4Y6A",
           action_type: "deposit",
@@ -111,7 +115,8 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
 
       const app = buildApp({ prisma: mockPrisma, internalSecret });
 
-      const res = await app.inject({ headers: { "x-internal-secret": "test-internal-secret-123456" }, method: "POST",
+      const res = await app.inject({
+        method: "POST",
         url: "/internal/checkpoint",
         headers: {
           "x-internal-secret": internalSecret
@@ -137,7 +142,8 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
       // In-memory test is extremely fast, so we can verify rate limiting kicks in.
       let lastStatus = 200;
       for (let i = 0; i < 105; i++) {
-        const res = await app.inject({ headers: { "x-internal-secret": "test-internal-secret-123456" }, method: "GET",
+        const res = await app.inject({
+          method: "GET",
           url: "/health"
         });
         lastStatus = res.statusCode;

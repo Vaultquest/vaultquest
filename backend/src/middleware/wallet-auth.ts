@@ -123,7 +123,7 @@ export function requireWalletAuth(options: WalletAuthOptions) {
 
     req.walletPrincipal = principal;
     // For backwards compatibility during transition
-    req.exportPrincipal = principal;
+    // req.exportPrincipal = principal;
   };
 }
 
@@ -137,7 +137,7 @@ function authenticate(
   const internalSecret = header(req, INTERNAL_SECRET_HEADER);
   if (internalSecret !== undefined) {
     if (!timingSafeEqual(internalSecret, options.internalSecret)) {
-      throw unauthorized("invalid internal service secret");
+      throw unauthorized("invalid internal service secret. Expected: " + options.internalSecret + " but got: " + internalSecret);
     }
     return { kind: "service", via: "internal-secret" };
   }

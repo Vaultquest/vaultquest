@@ -8,7 +8,7 @@ describe("correlation middleware", () => {
     const app = Fastify();
     await app.register(correlation);
     app.get("/echo", async (req: FastifyRequest) => ({ id: req.correlationId }));
-    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET", url: "/echo" });
+    const res = await app.inject({ method: "GET", url: "/echo" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["correlation-id"]).toBeDefined();
     expect(res.json().id).toBe(res.headers["correlation-id"]);
@@ -19,9 +19,10 @@ describe("correlation middleware", () => {
     const app = Fastify();
     await app.register(correlation);
     app.get("/echo", async (req: FastifyRequest) => ({ id: req.correlationId }));
-    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
+    const res = await app.inject({
+      method: "GET",
       url: "/echo",
-      headers: { "correlation-id": "abc-123" , "x-internal-secret": "test-secret" }
+      headers: { "correlation-id": "abc-123" }
     });
     expect(res.headers["correlation-id"]).toBe("abc-123");
     await app.close();
@@ -40,7 +41,7 @@ describe("service-auth middleware", () => {
       }
       reply.status(500).send({ error: "x" });
     });
-    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST", url: "/internal" });
+    const res = await app.inject({ method: "POST", url: "/internal" });
     expect(res.statusCode).toBe(401);
     await app.close();
   });
@@ -49,7 +50,8 @@ describe("service-auth middleware", () => {
     const app = Fastify();
     const guard = requireServiceAuth("top-secret");
     app.post("/internal", { preHandler: guard }, async () => ({ ok: true }));
-    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
+    const res = await app.inject({
+      method: "POST",
       url: "/internal",
       headers: { "x-internal-secret": "top-secret" }
     });

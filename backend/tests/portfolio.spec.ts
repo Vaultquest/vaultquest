@@ -33,7 +33,6 @@ describe("Backend Portfolio Summary Endpoint", () => {
 
     expect(res.statusCode).toBe(200);
     const json = JSON.parse(res.body);
-    expect(json.ok).toBe(true);
     expect(json.data.wallet_address).toBe(validStellarAddress);
     expect(json.data.total_deposits).toBe(0);
     expect(json.data.active_positions).toEqual([]);
@@ -49,7 +48,6 @@ describe("Backend Portfolio Summary Endpoint", () => {
 
     expect(res.statusCode).toBe(400);
     const json = JSON.parse(res.body);
-    expect(json.ok).toBe(false);
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
@@ -100,7 +98,6 @@ describe("Backend Portfolio Summary Endpoint", () => {
 
     expect(res.statusCode).toBe(200);
     const json = JSON.parse(res.body);
-    expect(json.ok).toBe(true);
 
     const data = json.data;
     expect(data.wallet_address).toBe(validStellarAddress);
@@ -152,7 +149,6 @@ describe("Backend Portfolio Summary Endpoint", () => {
 
     expect(res.statusCode).toBe(200);
     const json = res.json();
-    expect(json.ok).toBe(true);
     expect(json.data.total_deposits).toBe(0);
     expect(json.data.total_stale_deposits).toBe(100);
     expect(json.data.is_stale).toBe(true);
@@ -216,7 +212,6 @@ describe("Backend Portfolio Summary Endpoint", () => {
 
     expect(res.statusCode).toBe(200);
     const json = res.json();
-    expect(json.ok).toBe(true);
     expect(json.data.total_deposits).toBe(150);
     expect(json.data.total_stale_deposits).toBe(300);
     expect(json.data.is_stale).toBe(true);

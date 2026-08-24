@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { buildApp } from "../src/app.js";
+import { injectWithCsrf } from "./helpers/csrf.js";
 import type { FastifyInstance } from "fastify";
 import { PrivacyEncryptionService } from "../src/services/privacy/privacyEncryptionService.js";
 import { PrivacyAuditService } from "../src/services/privacy/privacyAuditService.js";
@@ -125,7 +127,7 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
         },
       });
 
-      const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
+      const res = await app.inject({ headers: { "x-internal-secret": internalSecret }, method: "GET",
         url: `/api/privacy/export?walletAddress=${testWalletUserA}`,
       });
 
@@ -160,7 +162,7 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
         },
       });
 
-      const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
+      const res = await app.inject({ headers: { "x-internal-secret": internalSecret }, method: "GET",
         url: `/api/privacy/export?walletAddress=${testWalletUserA}`,
       });
 
@@ -194,11 +196,7 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
         },
       });
 
-      const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
-        url: "/api/privacy/delete",
-        headers: { "content-type": "application/json" , "x-internal-secret": "test-secret" },
-        payload: { walletAddress: testWalletUserA },
-      });
+      const res = await injectWithCsrf(app, "POST", "/api/privacy/delete", { walletAddress: testWalletUserA }, { "content-type": "application/json" , "x-internal-secret": internalSecret });
 
       expect(res.statusCode).toBe(200);
       const result = res.json();
@@ -237,18 +235,10 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
     });
 
     it("is idempotent when deletion is triggered repeatedly", async () => {
-      const firstRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
-        url: "/api/privacy/delete",
-        headers: { "content-type": "application/json" , "x-internal-secret": "test-secret" },
-        payload: { walletAddress: testWalletUserA },
-      });
+      const firstRes = await injectWithCsrf(app, "POST", "/api/privacy/delete", { walletAddress: testWalletUserA }, { "content-type": "application/json" , "x-internal-secret": internalSecret });
       expect(firstRes.statusCode).toBe(200);
 
-      const secondRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
-        url: "/api/privacy/delete",
-        headers: { "content-type": "application/json" , "x-internal-secret": "test-secret" },
-        payload: { walletAddress: testWalletUserA },
-      });
+      const secondRes = await injectWithCsrf(app, "POST", "/api/privacy/delete", { walletAddress: testWalletUserA }, { "content-type": "application/json" , "x-internal-secret": internalSecret });
       expect(secondRes.statusCode).toBe(200);
       expect(secondRes.json().status).toBe("completed");
     });
@@ -257,18 +247,14 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
   describe("5. Legal Holds Enforcement", () => {
     it("blocks deletion when active legal hold exists and records held status", async () => {
       // Create legal hold on User A
-      await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
-        url: "/api/privacy/legal-holds",
-        headers: {
-          "content-type": "application/json",
-          "x-internal-secret": internalSecret,
-        },
-        payload: {
+      await injectWithCsrf(app, "POST", "/api/privacy/legal-holds", {
           walletAddress: testWalletUserA,
           reason: "Regulatory Audit #104",
           active: true,
-        },
-      });
+        }, {
+          "content-type": "application/json",
+          "x-internal-secret": internalSecret,
+        });
 
       // Seed quest for User A
       await db.prisma.userQuest.create({
@@ -280,11 +266,7 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
       });
 
       // Attempt deletion
-      const delRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
-        url: "/api/privacy/delete",
-        headers: { "content-type": "application/json" , "x-internal-secret": "test-secret" },
-        payload: { walletAddress: testWalletUserA },
-      });
+      const delRes = await injectWithCsrf(app, "POST", "/api/privacy/delete", { walletAddress: testWalletUserA }, { "content-type": "application/json" , "x-internal-secret": internalSecret });
 
       expect(delRes.statusCode).toBe(200);
       const result = delRes.json();
@@ -301,35 +283,23 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
 
     it("resumes deletion once legal hold is released", async () => {
       // Set active hold
-      await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
-        url: "/api/privacy/legal-holds",
-        headers: {
+      await injectWithCsrf(app, "POST", "/api/privacy/legal-holds", { walletAddress: testWalletUserA, reason: "Test Hold", active: true }, {
           "content-type": "application/json",
           "x-internal-secret": internalSecret,
-        },
-        payload: { walletAddress: testWalletUserA, reason: "Test Hold", active: true },
-      });
+        });
 
       await db.prisma.userQuest.create({
         data: { walletAddress: testWalletUserA, questId: "q-resume", target: 5 },
       });
 
       // Release hold
-      await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
-        url: "/api/privacy/legal-holds",
-        headers: {
+      await injectWithCsrf(app, "POST", "/api/privacy/legal-holds", { walletAddress: testWalletUserA, active: false }, {
           "content-type": "application/json",
           "x-internal-secret": internalSecret,
-        },
-        payload: { walletAddress: testWalletUserA, active: false },
-      });
+        });
 
       // Delete user data
-      const delRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
-        url: "/api/privacy/delete",
-        headers: { "content-type": "application/json" , "x-internal-secret": "test-secret" },
-        payload: { walletAddress: testWalletUserA },
-      });
+      const delRes = await injectWithCsrf(app, "POST", "/api/privacy/delete", { walletAddress: testWalletUserA }, { "content-type": "application/json" , "x-internal-secret": internalSecret });
 
       expect(delRes.json().status).toBe("completed");
       const quest = await db.prisma.userQuest.findFirst({

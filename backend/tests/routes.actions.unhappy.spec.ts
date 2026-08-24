@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { randomUUID } from "node:crypto";
@@ -52,7 +53,8 @@ function getMockPrisma() {
 let ipCounter = 1;
 
 // Helper to inject requests with a unique IP address to prevent rate-limit cross-test pollution
-async function injectWithUniqueIp(app: any, method: string, url: string, payload?: any, headers?: any) {
+async function injectWithUniqueIp(app: any, method: string, url: string, payload?: any, headers: any = {}) {
+  
   const ip = `192.168.100.${ipCounter++}`;
 
   // For state-changing methods (POST, PATCH, DELETE) that are not internal, we need CSRF headers
@@ -61,7 +63,8 @@ async function injectWithUniqueIp(app: any, method: string, url: string, payload
 
   if (isStateChanging && !isInternal) {
     // 1. Fetch CSRF token using GET with the same IP
-    const getRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
+    const getRes = await app.inject({
+      method: "GET",
       url: "/health",
       remoteAddress: ip
     });
@@ -77,7 +80,7 @@ async function injectWithUniqueIp(app: any, method: string, url: string, payload
         "x-csrf-token": csrfToken,
         cookie: setCookie,
         ...headers
-      , "x-internal-secret": "test-secret" },
+      },
       payload
     });
   }
@@ -100,8 +103,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
       const res = await injectWithUniqueIp(app, "POST", "/actions", {
         wallet_address: "GABC",
         action_type: "deposit",
-        action_payload: { schema_version: 1, vault_id: "v1", amount: "100", token: "USDC" }
-      });
+        action_payload: { schema_version: 1, vault_id: "v1", amount: "100", token: "USDC" } }, { "x-internal-secret": INTERNAL_SECRET });
       expect(res.statusCode).toBe(400);
       const body = res.json();
       expect(body.error.code).toBe("INVALID_PAYLOAD");
@@ -198,7 +200,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
   describe("API Key Authentication failures on /api/* routes", () => {
     it("rejects GET /api/actions/:walletAddress with missing key header", async () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET, apiKey: VALID_API_KEY });
-      const res = await injectWithUniqueIp(app, "GET", "/api/actions/GABC");
+      const res = await injectWithUniqueIp(app, "GET", "/api/actions/GABC", undefined, { "x-internal-secret": INTERNAL_SECRET });
       expect(res.statusCode).toBe(401);
       const body = res.json();
       expect(body.error.code).toBe("UNAUTHORIZED");
@@ -318,7 +320,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
   describe("List/history query parameters validation", () => {
     it("rejects GET /actions missing wallet parameter", async () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
-      const res = await injectWithUniqueIp(app, "GET", "/actions");
+      const res = await injectWithUniqueIp(app, "GET", "/actions", undefined, { "x-internal-secret": INTERNAL_SECRET });
       expect(res.statusCode).toBe(400);
       const body = res.json();
       expect(body.error.code).toBe("INVALID_PAYLOAD");
@@ -328,7 +330,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
 
     it("rejects GET /actions with invalid status", async () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
-      const res = await injectWithUniqueIp(app, "GET", "/actions?wallet=GABC&status=invalid_status");
+      const res = await injectWithUniqueIp(app, "GET", "/actions?wallet=GABC&status=invalid_status", undefined, { "x-internal-secret": INTERNAL_SECRET });
       expect(res.statusCode).toBe(400);
       const body = res.json();
       expect(body.error.code).toBe("INVALID_PAYLOAD");
@@ -338,7 +340,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
 
     it("rejects GET /actions with invalid cursor (not UUID)", async () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
-      const res = await injectWithUniqueIp(app, "GET", "/actions?wallet=GABC&cursor=invalid_uuid");
+      const res = await injectWithUniqueIp(app, "GET", "/actions?wallet=GABC&cursor=invalid_uuid", undefined, { "x-internal-secret": INTERNAL_SECRET });
       expect(res.statusCode).toBe(400);
       const body = res.json();
       expect(body.error.code).toBe("INVALID_PAYLOAD");
@@ -348,7 +350,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
 
     it("rejects GET /actions with invalid limit (limit 0)", async () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
-      const res = await injectWithUniqueIp(app, "GET", "/actions?wallet=GABC&limit=0");
+      const res = await injectWithUniqueIp(app, "GET", "/actions?wallet=GABC&limit=0", undefined, { "x-internal-secret": INTERNAL_SECRET });
       expect(res.statusCode).toBe(400);
       const body = res.json();
       expect(body.error.code).toBe("INVALID_PAYLOAD");
@@ -380,7 +382,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
   describe("Dashboard, portfolio and export query validation", () => {
     it("rejects GET /portfolio/summary with invalid Stellar address regex pattern", async () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
-      const res = await injectWithUniqueIp(app, "GET", "/portfolio/summary?wallet=not-a-valid-stellar-key");
+      const res = await injectWithUniqueIp(app, "GET", "/portfolio/summary?wallet=not-a-valid-stellar-key", undefined, { "x-internal-secret": INTERNAL_SECRET });
       expect(res.statusCode).toBe(400);
       const body = res.json();
       expect(body.error.code).toBe("INVALID_PAYLOAD");
@@ -390,7 +392,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
 
     it("rejects GET /dashboard/summary with negative stale_after_ms", async () => {
       const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
-      const res = await injectWithUniqueIp(app, "GET", "/dashboard/summary?wallet=GABC&stale_after_ms=-100");
+      const res = await injectWithUniqueIp(app, "GET", "/dashboard/summary?wallet=GABC&stale_after_ms=-100", undefined, { "x-internal-secret": INTERNAL_SECRET });
       expect(res.statusCode).toBe(400);
       const body = res.json();
       expect(body.error.code).toBe("INVALID_PAYLOAD");
@@ -440,7 +442,8 @@ describe("Unhappy-path tests for action and internal routes", () => {
       // Rate limit for sensitive routes is 10. Let's send 12 requests.
       // Since they are from the same IP, they will hit the rate limit.
       // We also need matching CSRF tokens and cookies for the POST requests.
-      const getRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
+      const getRes = await app.inject({
+        method: "GET",
         url: "/health",
         remoteAddress: testIp
       });
@@ -448,14 +451,15 @@ describe("Unhappy-path tests for action and internal routes", () => {
       const setCookie = getRes.headers["set-cookie"] as string;
 
       for (let i = 0; i < 12; i++) {
-        const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
+        const res = await app.inject({
+          method: "POST",
           url: "/actions",
           remoteAddress: testIp,
           headers: {
             "idempotency-key": randomUUID(),
             "x-csrf-token": csrfToken,
             cookie: setCookie
-          , "x-internal-secret": "test-secret" },
+          },
           payload: {
             wallet_address: "GABC",
             action_type: "deposit",

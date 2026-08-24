@@ -162,7 +162,8 @@ describe("Indexer Health & Sync-Lag Tests", () => {
       } as any;
 
       const app = buildApp({ prisma: mockPrisma, internalSecret });
-      const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
+      const res = await app.inject({
+        method: "GET",
         url: "/health/indexer"
       });
 
@@ -177,7 +178,8 @@ describe("Indexer Health & Sync-Lag Tests", () => {
       const mockPrisma = {} as any;
       const app = buildApp({ prisma: mockPrisma, internalSecret });
 
-      const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
+      const res = await app.inject({
+        method: "POST",
         url: "/internal/checkpoint",
         payload: {
           latest_ledger: 50000,
@@ -212,7 +214,8 @@ describe("Indexer Health & Sync-Lag Tests", () => {
       } as any;
 
       const app = buildApp({ prisma: mockPrisma, internalSecret });
-      const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
+      const res = await app.inject({
+        method: "POST",
         url: "/internal/checkpoint",
         headers: {
           "x-internal-secret": internalSecret,

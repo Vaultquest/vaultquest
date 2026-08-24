@@ -21,7 +21,7 @@ export async function startTestDb(): Promise<TestDb> {
 
   const databaseUrl = container.getConnectionUri();
 
-  execFileSync(process.execPath, [prismaCliPath, "migrate", "deploy"], {
+  execFileSync(process.execPath, [prismaCliPath, "db", "push", "--accept-data-loss"], {
     cwd: backendDir,
     env: { ...process.env, DATABASE_URL: databaseUrl },
     stdio: "inherit"
