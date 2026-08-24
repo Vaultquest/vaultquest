@@ -206,12 +206,12 @@ pub enum ProposalAction {
     RemoveAdmin(Address),
     ChangeThreshold(u32),
     // ── Vault economic mutations — require quorum (#107) ──────────────────
-    VaultReportGain(i128),                       // amount
-    VaultReportLoss(i128),                       // amount
-    VaultSetFeeRecipient(Address),               // new recipient
-    VaultSetManagementFeeBps(u32),               // bps
-    VaultSetPerformanceFeeBps(u32),              // bps
-    VaultApplyEmergencyHaircut(u32, u32),        // (request_id, haircut_bps)
+    VaultReportGain(i128),                // amount
+    VaultReportLoss(i128),                // amount
+    VaultSetFeeRecipient(Address),        // new recipient
+    VaultSetManagementFeeBps(u32),        // bps
+    VaultSetPerformanceFeeBps(u32),       // bps
+    VaultApplyEmergencyHaircut(u32, u32), // (request_id, haircut_bps)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -674,7 +674,11 @@ impl DripPool {
                 if bps > 10_000 {
                     return Err(Error::InvalidFeeBps);
                 }
-                let old_bps: u32 = env.storage().instance().get(&VaultKey::ManagementFeeBps).unwrap_or(0);
+                let old_bps: u32 = env
+                    .storage()
+                    .instance()
+                    .get(&VaultKey::ManagementFeeBps)
+                    .unwrap_or(0);
                 env.storage()
                     .instance()
                     .set(&VaultKey::ManagementFeeBps, &bps);
@@ -687,7 +691,11 @@ impl DripPool {
                 if bps > 10_000 {
                     return Err(Error::InvalidFeeBps);
                 }
-                let old_bps: u32 = env.storage().instance().get(&VaultKey::PerformanceFeeBps).unwrap_or(0);
+                let old_bps: u32 = env
+                    .storage()
+                    .instance()
+                    .get(&VaultKey::PerformanceFeeBps)
+                    .unwrap_or(0);
                 env.storage()
                     .instance()
                     .set(&VaultKey::PerformanceFeeBps, &bps);
@@ -2069,7 +2077,11 @@ impl DripPool {
 
     /// Deprecated single-signer entrypoint — now gated: creates a proposal that
     /// requires quorum before taking effect. Returns the proposal id. (#107)
-    pub fn vault_set_performance_fee_bps(env: Env, caller: Address, bps: u32) -> Result<u32, Error> {
+    pub fn vault_set_performance_fee_bps(
+        env: Env,
+        caller: Address,
+        bps: u32,
+    ) -> Result<u32, Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
         if bps > 10_000 {

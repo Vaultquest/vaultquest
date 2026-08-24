@@ -208,7 +208,7 @@ describe("StellarIndexer", () => {
       source: {
         async fetchEvents({ cursor, limit }) {
           seenCursor = cursor;
-          expect(limit).toBe(50);
+          expect(limit).toBe(200);
           return cursor === "2"
             ? [makeEvent({ id: "3", ledger: 103, txHash: "tx_resume" })]
             : [];

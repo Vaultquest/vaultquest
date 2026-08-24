@@ -15,7 +15,7 @@ describe("useTxFlow", () => {
 
     let runPromise!: Promise<void>;
     act(() => {
-      runPromise = result.current.run(client, "deposit", INPUT, { indexingDelayMs: 0 });
+      runPromise = result.current.run(client, "join", INPUT, { indexingDelayMs: 0 });
     });
 
     // Transitions run synchronously up to the await on submitAction, so the
@@ -30,7 +30,7 @@ describe("useTxFlow", () => {
 
     expect(result.current.state.stage).toBe("success");
     if (result.current.state.stage === "success") {
-      expect(result.current.state.txHash).toMatch(/^mocktx_deposit_/);
+      expect(result.current.state.txHash).toMatch(/^mocktx_join_/);
     }
     expect(result.current.busy).toBe(false);
   });
@@ -49,17 +49,17 @@ describe("useTxFlow", () => {
   });
 
   it("maps signature_rejected to a failed state at awaiting-signature", async () => {
-    const client = createMockVaultClient({ failActions: { deposit: "signature_rejected" } });
+    const client = createMockVaultClient({ failActions: { join: "signature_rejected" } });
     const { result } = renderHook(() => useTxFlow());
 
     await act(async () => {
-      await result.current.run(client, "deposit", INPUT, { indexingDelayMs: 0 });
+      await result.current.run(client, "join", INPUT, { indexingDelayMs: 0 });
     });
 
     expect(result.current.state).toEqual({
       stage: "failed",
       failedAt: "awaiting-signature",
-      message: "deposit failed: signature_rejected",
+      message: "join failed: signature_rejected",
     });
     expect(result.current.busy).toBe(false);
   });
@@ -79,11 +79,11 @@ describe("useTxFlow", () => {
   });
 
   it("maps rpc_failure to a failed state at submitting", async () => {
-    const client = createMockVaultClient({ failActions: { deposit: "rpc_failure" } });
+    const client = createMockVaultClient({ failActions: { join: "rpc_failure" } });
     const { result } = renderHook(() => useTxFlow());
 
     await act(async () => {
-      await result.current.run(client, "deposit", INPUT, { indexingDelayMs: 0 });
+      await result.current.run(client, "join", INPUT, { indexingDelayMs: 0 });
     });
 
     expect(result.current.state.stage).toBe("failed");
@@ -107,11 +107,11 @@ describe("useTxFlow", () => {
   });
 
   it("maps an unrecognized error kind to a failed state at confirming", async () => {
-    const client = createMockVaultClient({ failActions: { deposit: "stale_data" } });
+    const client = createMockVaultClient({ failActions: { join: "stale_data" } });
     const { result } = renderHook(() => useTxFlow());
 
     await act(async () => {
-      await result.current.run(client, "deposit", INPUT, { indexingDelayMs: 0 });
+      await result.current.run(client, "join", INPUT, { indexingDelayMs: 0 });
     });
 
     expect(result.current.state.stage).toBe("failed");
@@ -121,11 +121,11 @@ describe("useTxFlow", () => {
   });
 
   it("reset() returns the machine to idle after a terminal state", async () => {
-    const client = createMockVaultClient({ failActions: { deposit: "rpc_failure" } });
+    const client = createMockVaultClient({ failActions: { join: "rpc_failure" } });
     const { result } = renderHook(() => useTxFlow());
 
     await act(async () => {
-      await result.current.run(client, "deposit", INPUT, { indexingDelayMs: 0 });
+      await result.current.run(client, "join", INPUT, { indexingDelayMs: 0 });
     });
     expect(result.current.state.stage).toBe("failed");
 
@@ -147,21 +147,21 @@ describe("useTxFlow", () => {
 
     let firstRun!: Promise<void>;
     act(() => {
-      firstRun = result.current.run(client, "deposit", INPUT, { indexingDelayMs: 0 });
+      firstRun = result.current.run(client, "join", INPUT, { indexingDelayMs: 0 });
     });
     await waitFor(() => expect(result.current.busy).toBe(true));
 
     // A second run while the first is in flight must not call submitAction again.
     let secondRun!: Promise<void>;
     act(() => {
-      secondRun = result.current.run(client, "deposit", INPUT, { indexingDelayMs: 0 });
+      secondRun = result.current.run(client, "join", INPUT, { indexingDelayMs: 0 });
     });
     await Promise.resolve();
 
     expect(submitSpy).toHaveBeenCalledTimes(1);
 
     act(() => {
-      resolveSubmit({ txHash: "mocktx_deposit_1", status: "submitted" });
+      resolveSubmit({ txHash: "mocktx_join_1", status: "submitted" });
     });
     await act(async () => {
       await Promise.all([firstRun, secondRun]);
@@ -172,11 +172,11 @@ describe("useTxFlow", () => {
   });
 
   it("succeeds on retry after a recoverable failure without leaving stale failed state", async () => {
-    const client = createMockVaultClient({ failActions: { deposit: "rpc_failure" } });
+    const client = createMockVaultClient({ failActions: { join: "rpc_failure" } });
     const { result } = renderHook(() => useTxFlow());
 
     await act(async () => {
-      await result.current.run(client, "deposit", INPUT, { indexingDelayMs: 0 });
+      await result.current.run(client, "join", INPUT, { indexingDelayMs: 0 });
     });
     expect(result.current.state.stage).toBe("failed");
 
@@ -186,7 +186,7 @@ describe("useTxFlow", () => {
 
     const recoveredClient = createMockVaultClient();
     await act(async () => {
-      await result.current.run(recoveredClient, "deposit", INPUT, { indexingDelayMs: 0 });
+      await result.current.run(recoveredClient, "join", INPUT, { indexingDelayMs: 0 });
     });
 
     expect(result.current.state.stage).toBe("success");

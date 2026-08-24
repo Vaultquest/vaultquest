@@ -66,6 +66,7 @@ async function injectWithUniqueIp(app: any, method: string, url: string, payload
     const getRes = await app.inject({
       method: "GET",
       url: "/health",
+      headers: { "x-internal-secret": INTERNAL_SECRET },
       remoteAddress: ip
     });
     const csrfToken = getRes.headers["x-csrf-token"] as string;
@@ -79,6 +80,7 @@ async function injectWithUniqueIp(app: any, method: string, url: string, payload
       headers: {
         "x-csrf-token": csrfToken,
         cookie: setCookie,
+        "x-internal-secret": INTERNAL_SECRET,
         ...headers
       },
       payload
@@ -445,6 +447,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
       const getRes = await app.inject({
         method: "GET",
         url: "/health",
+      headers: { "x-internal-secret": INTERNAL_SECRET },
         remoteAddress: testIp
       });
       const csrfToken = getRes.headers["x-csrf-token"] as string;
