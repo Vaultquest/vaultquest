@@ -159,20 +159,20 @@ export class VaultApiClient {
     return toTransactionStatus(body.data);
   }
 
-  async listSavedPools(walletAddress: string): Promise<SavedPoolEntry[]> {
+  async listSavedPools(walletAddress: string, authHeaders?: Record<string, string>): Promise<SavedPoolEntry[]> {
     const params = new URLSearchParams({ wallet: walletAddress });
     const body = await parseJsonResponse<ApiEnvelope<SavedPoolApiRecord[]>>(
-      await fetch(this.url("/saved-pools", params)),
+      await fetch(this.url("/saved-pools", params), { headers: authHeaders ?? {} }),
       "Saved pools request failed",
     );
     return body.data.map(toSavedPoolEntry);
   }
 
-  async savePool(walletAddress: string, pool: PoolSummary): Promise<SavedPoolEntry> {
+  async savePool(walletAddress: string, pool: PoolSummary, authHeaders?: Record<string, string>): Promise<SavedPoolEntry> {
     const body = await parseJsonResponse<ApiEnvelope<{ saved: SavedPoolApiRecord }>>(
       await fetch(this.url("/saved-pools"), {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...(authHeaders ?? {}) },
         body: JSON.stringify({ wallet_address: walletAddress, pool: poolToPayload(pool) }),
       }),
       "Saving pool failed",
@@ -180,10 +180,10 @@ export class VaultApiClient {
     return toSavedPoolEntry(body.data.saved);
   }
 
-  async unsavePool(walletAddress: string, poolId: string): Promise<number> {
+  async unsavePool(walletAddress: string, poolId: string, authHeaders?: Record<string, string>): Promise<number> {
     const params = new URLSearchParams({ wallet: walletAddress });
     const body = await parseJsonResponse<ApiEnvelope<{ deleted: number }>>(
-      await fetch(this.url(`/saved-pools/${encodeURIComponent(poolId)}`, params), { method: "DELETE" }),
+      await fetch(this.url(`/saved-pools/${encodeURIComponent(poolId)}`, params), { method: "DELETE", headers: authHeaders ?? {} }),
       "Removing saved pool failed",
     );
     return body.data.deleted;

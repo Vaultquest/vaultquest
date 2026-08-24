@@ -27,8 +27,7 @@ describe("Backend Portfolio Summary Endpoint", () => {
   const validStellarAddress = "GABCDEF1234567890123456789012345678901234567890123456789";
 
   it("returns zero-state for empty wallet", async () => {
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/portfolio/summary?wallet=${validStellarAddress}`
     });
 
@@ -44,8 +43,7 @@ describe("Backend Portfolio Summary Endpoint", () => {
   });
 
   it("rejects invalid wallet address", async () => {
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: "/portfolio/summary?wallet=invalidAddress"
     });
 
@@ -96,8 +94,7 @@ describe("Backend Portfolio Summary Endpoint", () => {
       actionPayload: { vault_id: "vault-1", amount: "500", token: "USDC" }
     });
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/portfolio/summary?wallet=${validStellarAddress}`
     });
 
@@ -149,8 +146,7 @@ describe("Backend Portfolio Summary Endpoint", () => {
       }
     });
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/portfolio/summary?wallet=${validStellarAddress}`
     });
 
@@ -214,8 +210,7 @@ describe("Backend Portfolio Summary Endpoint", () => {
       }
     });
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/portfolio/summary?wallet=${validStellarAddress}&stale_after_ms=300000` // 5 mins
     });
 

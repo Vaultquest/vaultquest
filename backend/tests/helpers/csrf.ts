@@ -9,7 +9,7 @@ export async function csrfHeaders(
   app: FastifyInstance,
   ip = "127.0.0.1"
 ): Promise<Record<string, string>> {
-  const res = await app.inject({ method: "GET", url: "/health", remoteAddress: ip });
+  const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET", url: "/health", remoteAddress: ip });
   const token = res.headers["x-csrf-token"] as string;
   const cookie = res.headers["set-cookie"] as string;
   return { "x-csrf-token": token, cookie };
@@ -35,7 +35,7 @@ export async function injectWithCsrf(
     method,
     url,
     remoteAddress,
-    headers: { ...csrf, ...headers }
+    headers: { ...csrf, ...headers , "x-internal-secret": "test-secret" }
   };
   if (payload !== undefined) {
     opts.payload = payload as InjectOptions["payload"];

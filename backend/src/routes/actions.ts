@@ -41,10 +41,11 @@ function serialize(row: Awaited<ReturnType<LedgerService["getAction"]>>) {
 export const actionsRoutes = (
   svc: LedgerService,
   apiKeyGuard: preHandlerHookHandler,
-  exportAuthGuard: preHandlerHookHandler
+  walletAuthGuard: preHandlerHookHandler,
+  serviceAuthGuard: preHandlerHookHandler
 ): FastifyPluginAsync =>
   async (app) => {
-    app.post("/actions", async (req, reply) => {
+    app.post("/actions", { preHandler: walletAuthGuard }, async (req, reply) => {
       const keyHeader = req.headers["idempotency-key"];
       const keyRaw = Array.isArray(keyHeader) ? keyHeader[0] : keyHeader;
       const keyParsed = idempotencyKeySchema.safeParse(keyRaw);
@@ -87,25 +88,25 @@ export const actionsRoutes = (
       return ok(serialize(result));
     });
 
-    app.patch<{ Params: { id: string } }>("/actions/:id/submitted", async (req) => {
+    app.patch<{ Params: { id: string } }>("/actions/:id/submitted", { preHandler: serviceAuthGuard }, async (req) => {
       const body = attachTxBody.parse(req.body);
       const result = await svc.attachTxHash(req.params.id, body.tx_hash);
       return ok(serialize(result));
     });
 
-    app.post<{ Params: { id: string } }>("/actions/:id/cancel", async (req) => {
+    app.post<{ Params: { id: string } }>("/actions/:id/cancel", { preHandler: walletAuthGuard }, async (req) => {
       const body = cancelBody.parse(req.body);
       const result = await svc.cancelAction(req.params.id, body.error_code, body.error_detail);
       return ok(serialize(result));
     });
 
-    app.get<{ Params: { id: string } }>("/actions/:id", async (req) => {
+    app.get<{ Params: { id: string } }>("/actions/:id", { preHandler: walletAuthGuard }, async (req) => {
       const row = await svc.getAction(req.params.id);
       if (!row) throw AppError.notFound(`action ${req.params.id} not found`);
       return ok(serialize(row));
     });
 
-    app.get("/actions", async (req) => {
+    app.get("/actions", { preHandler: walletAuthGuard }, async (req) => {
       const q = listQuery.parse(req.query);
       const result = await svc.listActions({
         walletAddress: q.wallet,
@@ -116,7 +117,7 @@ export const actionsRoutes = (
       return page(result.items.map(serialize), { nextCursor: result.nextCursor, limit: q.limit });
     });
 
-    app.delete("/actions", async (req) => {
+    app.delete("/actions", { preHandler: walletAuthGuard }, async (req) => {
       const wallet = (req.query as Record<string, string | undefined>).wallet;
       if (!wallet || wallet.length === 0) {
         return ok({ scrubbed: 0 });
@@ -132,7 +133,7 @@ export const actionsRoutes = (
      * activity / confirmation timestamps. Lets the dashboard render without
      * issuing several /actions queries and ad-hoc client-side joins.
      */
-    app.get("/dashboard/summary", async (req) => {
+    app.get("/dashboard/summary", { preHandler: walletAuthGuard }, async (req) => {
       const q = dashboardQuery.parse(req.query);
       const summary = await svc.getDashboardSummary(q.wallet, {
         staleAfterMs: q.stale_after_ms
@@ -153,7 +154,7 @@ export const actionsRoutes = (
      *
      * Wallet portfolio summary endpoint returns deposits, positions, and recent activity.
      */
-    app.get("/portfolio/summary", async (req) => {
+    app.get("/portfolio/summary", { preHandler: walletAuthGuard }, async (req) => {
       const q = portfolioQuery.parse(req.query);
       const summary = await svc.getPortfolioSummary(q.wallet, {
         staleAfterMs: q.stale_after_ms
@@ -174,7 +175,7 @@ export const actionsRoutes = (
      *
      * CSV sets Content-Disposition so browsers trigger a file download.
      */
-    app.get("/actions/export", { preHandler: exportAuthGuard }, async (req, reply) => {
+    app.get("/actions/export", { preHandler: walletAuthGuard }, async (req, reply) => {
       const q = exportQuery.parse(req.query);
       const rows = await svc.exportActivity({
         walletAddress: q.wallet,

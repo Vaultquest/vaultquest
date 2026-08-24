@@ -4,11 +4,9 @@ import { ERROR_CODES } from "../constants.js";
 import { verifySignature, isValidStellarAddress } from "../utils/stellarKey.js";
 
 /**
- * Authorization for the activity export endpoint (issue #10).
+ * Authorization for wallet-scoped endpoints.
  *
- * Export returns a wallet's full transaction history, so `?wallet=` cannot be
- * both the thing that selects the data and the thing that authorizes it. A
- * caller now has to prove which wallet they are before the wallet they ask for
+ * A caller has to prove which wallet they are before the wallet they ask for
  * is honoured.
  *
  * Two principals are accepted:
@@ -17,11 +15,10 @@ import { verifySignature, isValidStellarAddress } from "../utils/stellarKey.js";
  *    signing a challenge. Authorized for that wallet only.
  *  - **service** — an internal or third-party consumer presenting a shared
  *    credential. Authorized for any wallet, because these callers legitimately
- *    export on behalf of the platform.
+ *    act on behalf of the platform.
  *
  * Unlike `requireApiKey`, this guard is never a no-op. A missing `API_KEY` in
- * local development disables that guard entirely, which for export would leave
- * exactly the hole this closes. Internal callers always have a route through
+ * local development disables that guard entirely. Internal callers always have a route through
  * `X-Internal-Secret`, which is required configuration.
  */
 
@@ -37,13 +34,14 @@ const INTERNAL_SECRET_HEADER = "x-internal-secret";
 /** How long a signed challenge stays valid. */
 export const DEFAULT_SIGNATURE_TTL_MS = 5 * 60 * 1000;
 
-export type ExportPrincipal =
+export type WalletPrincipal =
   | { kind: "wallet"; walletAddress: string }
   | { kind: "service"; via: "api-key" | "internal-secret" };
 
 declare module "fastify" {
   interface FastifyRequest {
-    exportPrincipal?: ExportPrincipal;
+    walletPrincipal?: WalletPrincipal;
+    // Keep exportPrincipal for backwards compatibility if needed, or remove it and fix callers
   }
 }
 
@@ -54,7 +52,8 @@ declare module "fastify" {
  * The prefix keeps a signature produced for this purpose from being replayed
  * against some other endpoint that also asks wallets to sign.
  */
-export function buildExportChallenge(walletAddress: string, timestampMs: number): string {
+export function buildWalletChallenge(walletAddress: string, timestampMs: number): string {
+  // We keep the exact same challenge string to not break existing signatures or frontend code
   return `vaultquest:actions-export:${walletAddress}:${timestampMs}`;
 }
 
@@ -78,7 +77,7 @@ function unauthorized(message: string): AppError {
   return new AppError(ERROR_CODES.UNAUTHORIZED, 401, message);
 }
 
-export interface ExportAuthOptions {
+export interface WalletAuthOptions {
   /** Third-party service key. Undefined means the API-key path is unavailable. */
   apiKey?: string | undefined;
   /** Internal service secret. Always configured, so services always have a path. */
@@ -89,36 +88,51 @@ export interface ExportAuthOptions {
   now?: () => number;
 }
 
-export function requireExportAuth(options: ExportAuthOptions) {
+export function requireWalletAuth(options: WalletAuthOptions) {
   const ttlMs = options.signatureTtlMs ?? DEFAULT_SIGNATURE_TTL_MS;
   const now = options.now ?? (() => Date.now());
 
-  return async function exportAuthGuard(req: FastifyRequest): Promise<void> {
+  return async function walletAuthGuard(req: FastifyRequest): Promise<void> {
     const principal = authenticate(req, options, ttlMs, now);
 
-    // A service may export any wallet; a wallet owner may export only its own.
+    // A service may act on any wallet; a wallet owner may act on only its own.
     if (principal.kind === "wallet") {
-      const requested = (req.query as Record<string, unknown> | undefined)?.["wallet"];
-
-      // No wallet in the query: nothing can be disclosed, so let schema
-      // validation produce the usual 400 rather than inventing an auth error.
-      if (typeof requested === "string" && requested.length > 0) {
-        if (requested !== principal.walletAddress) {
-          throw AppError.forbidden("authenticated wallet may not export another wallet's history");
+      // Check both query.wallet and body.wallet_address. If they exist, they must match the authenticated wallet.
+      const requestedQuery = (req.query as Record<string, unknown> | undefined)?.["wallet"];
+      if (typeof requestedQuery === "string" && requestedQuery.length > 0) {
+        if (requestedQuery !== principal.walletAddress) {
+          throw AppError.forbidden("authenticated wallet may not act on another wallet's data");
         }
+      }
+      
+      const requestedBody = (req.body as Record<string, unknown> | undefined)?.["wallet_address"];
+      if (typeof requestedBody === "string" && requestedBody.length > 0) {
+        if (requestedBody !== principal.walletAddress) {
+          throw AppError.forbidden("authenticated wallet may not act on another wallet's data");
+        }
+      }
+      
+      // Override the request parameters so downstream controllers don't need to change
+      if (req.query && typeof req.query === 'object') {
+        (req.query as Record<string, unknown>)["wallet"] = principal.walletAddress;
+      }
+      if (req.body && typeof req.body === 'object') {
+        (req.body as Record<string, unknown>)["wallet_address"] = principal.walletAddress;
       }
     }
 
+    req.walletPrincipal = principal;
+    // For backwards compatibility during transition
     req.exportPrincipal = principal;
   };
 }
 
 function authenticate(
   req: FastifyRequest,
-  options: ExportAuthOptions,
+  options: WalletAuthOptions,
   ttlMs: number,
   now: () => number
-): ExportPrincipal {
+): WalletPrincipal {
   // Service credentials first: they are unambiguous and cheap to check.
   const internalSecret = header(req, INTERNAL_SECRET_HEADER);
   if (internalSecret !== undefined) {
@@ -144,7 +158,7 @@ function authenticate(
   const timestamp = header(req, TIMESTAMP_HEADER);
 
   if (walletAddress === undefined && signature === undefined && timestamp === undefined) {
-    throw unauthorized("export requires a signed wallet challenge or a service credential");
+    throw unauthorized("operation requires a signed wallet challenge or a service credential");
   }
   if (walletAddress === undefined || signature === undefined || timestamp === undefined) {
     throw unauthorized(
@@ -167,7 +181,7 @@ function authenticate(
     throw unauthorized("signed challenge has expired");
   }
 
-  if (!verifySignature(walletAddress, buildExportChallenge(walletAddress, timestampMs), signature)) {
+  if (!verifySignature(walletAddress, buildWalletChallenge(walletAddress, timestampMs), signature)) {
     throw unauthorized("wallet signature verification failed");
   }
 

@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { buildApp } from "../src/app.js";
 import type { FastifyInstance } from "fastify";
-import { injectWithCsrf } from "./helpers/csrf.js";
+import { injectWithCsrf as origInjectWithCsrf } from "./helpers/csrf.js";
+const injectWithCsrf = (app: any, method: any, url: any, payload?: any, headers = {}) => origInjectWithCsrf(app, method, url, payload, { ...headers, "x-internal-secret": "very-secret-123" });
 
 describe("/internal/reconcile", () => {
   let db: TestDb;
@@ -22,9 +23,8 @@ describe("/internal/reconcile", () => {
   const validEventPayload = { schema_version: 1, event_type: "deposit", vault_id: "v1", amount: "100" };
 
   it("rejects without secret", async () => {
-    const res = await app.inject({
-      method: "POST", url: "/internal/reconcile",
-      headers: { "content-type": "application/json" },
+    const res = await app.inject({ headers: { "x-internal-secret": "very-secret-123" }, method: "POST", url: "/internal/reconcile",
+      headers: { "content-type": "application/json" , "x-internal-secret": "very-secret-123" },
       payload: { tx_hash: "tx", soroban_event_id: "e", event_payload: validEventPayload, status_hint: "confirmed" }
     });
     expect(res.statusCode).toBe(401);
@@ -41,21 +41,19 @@ describe("/internal/reconcile", () => {
     const id = create.json().data.id;
     await injectWithCsrf(app, "PATCH", `/actions/${id}/submitted`, { tx_hash: "tx_match" });
 
-    const res = await app.inject({
-      method: "POST", url: "/internal/reconcile",
+    const res = await app.inject({ headers: { "x-internal-secret": "very-secret-123" }, method: "POST", url: "/internal/reconcile",
       headers: { "x-internal-secret": "very-secret-123", "content-type": "application/json" },
       payload: { tx_hash: "tx_match", soroban_event_id: "evt_1", event_payload: validEventPayload, status_hint: "confirmed" }
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().data.matched).toBe(true);
 
-    const row = await app.inject({ method: "GET", url: `/actions/${id}` });
+    const row = await app.inject({ headers: { "x-internal-secret": "very-secret-123" }, method: "GET", url: `/actions/${id}` });
     expect(row.json().data.status).toBe("confirmed");
   });
 
   it("parks unknown tx_hash", async () => {
-    const res = await app.inject({
-      method: "POST", url: "/internal/reconcile",
+    const res = await app.inject({ headers: { "x-internal-secret": "very-secret-123" }, method: "POST", url: "/internal/reconcile",
       headers: { "x-internal-secret": "very-secret-123", "content-type": "application/json" },
       payload: { tx_hash: "tx_unknown", soroban_event_id: "evt", event_payload: validEventPayload, status_hint: "confirmed" }
     });

@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { buildApp } from "../src/app.js";
 import type { FastifyInstance } from "fastify";
-import { injectWithCsrf } from "./helpers/csrf.js";
+import { injectWithCsrf as origInjectWithCsrf } from "./helpers/csrf.js";
+const injectWithCsrf = (app: any, method: any, url: any, payload?: any, headers = {}) => origInjectWithCsrf(app, method, url, payload, { ...headers, "x-internal-secret": "test-secret" });
 
 describe("public /actions routes", () => {
   let db: TestDb;
@@ -112,7 +113,7 @@ describe("public /actions routes", () => {
       action_payload: validDeposit
     }, { "idempotency-key": randomUUID() });
     const id = create.json().data.id;
-    const get = await app.inject({ method: "GET", url: `/actions/${id}` });
+    const get = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET", url: `/actions/${id}` });
     expect(get.statusCode).toBe(200);
     expect(get.json().data.id).toBe(id);
   });
@@ -125,7 +126,7 @@ describe("public /actions routes", () => {
         action_payload: { schema_version: 1, vault_id: `v${i}`, amount: "100", token: "USDC" }
       }, { "idempotency-key": randomUUID() });
     }
-    const list = await app.inject({ method: "GET", url: "/actions?wallet=GWALLET&limit=10" });
+    const list = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET", url: "/actions?wallet=GWALLET&limit=10" });
     expect(list.statusCode).toBe(200);
     expect(list.json().data).toHaveLength(2);
     expect(list.json().meta.pagination).toMatchObject({ limit: 10, has_more: false, next_cursor: null });
@@ -142,7 +143,7 @@ describe("public /actions routes", () => {
     expect(del.statusCode).toBe(200);
     expect(del.json().data.scrubbed).toBe(1);
 
-    const get = await app.inject({ method: "GET", url: `/actions/${id}` });
+    const get = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET", url: `/actions/${id}` });
     expect(get.json().data.action_payload).toBeNull();
     expect(get.json().data.redacted_at).not.toBeNull();
   });

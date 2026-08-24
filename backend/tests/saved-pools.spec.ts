@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { buildApp } from "../src/app.js";
+import { injectWithCsrf as origInjectWithCsrf } from "./helpers/csrf.js";
+const injectWithCsrf = (app: any, method: any, url: any, payload?: any, headers = {}) => origInjectWithCsrf(app, method, url, payload, { ...headers, "x-internal-secret": "test-secret" });
 import type { FastifyInstance } from "fastify";
 
 describe("Saved pools API", () => {
@@ -37,15 +39,10 @@ describe("Saved pools API", () => {
   };
 
   it("saves a pool and returns 201", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/saved-pools",
-      headers: { "content-type": "application/json" },
-      payload: {
+    const res = await injectWithCsrf(app, "POST", "/saved-pools", {
         wallet_address: walletAddress,
         pool: samplePool,
-      },
-    });
+      }, { "content-type": "application/json" });
 
     expect(res.statusCode).toBe(201);
     const body = res.json();
@@ -56,19 +53,9 @@ describe("Saved pools API", () => {
   });
 
   it("returns 200 on re-saving an already saved pool (upsert)", async () => {
-    await app.inject({
-      method: "POST",
-      url: "/saved-pools",
-      headers: { "content-type": "application/json" },
-      payload: { wallet_address: walletAddress, pool: samplePool },
-    });
+    await injectWithCsrf(app, "POST", "/saved-pools", { wallet_address: walletAddress, pool: samplePool }, { "content-type": "application/json" });
 
-    const res = await app.inject({
-      method: "POST",
-      url: "/saved-pools",
-      headers: { "content-type": "application/json" },
-      payload: { wallet_address: walletAddress, pool: samplePool },
-    });
+    const res = await injectWithCsrf(app, "POST", "/saved-pools", { wallet_address: walletAddress, pool: samplePool }, { "content-type": "application/json" });
 
     expect(res.statusCode).toBe(200);
   });
@@ -76,23 +63,10 @@ describe("Saved pools API", () => {
   it("lists saved pools for a wallet", async () => {
     const pool2 = { ...samplePool, pool_id: "pool-2", pool_name: "Pool Two" };
 
-    await app.inject({
-      method: "POST",
-      url: "/saved-pools",
-      headers: { "content-type": "application/json" },
-      payload: { wallet_address: walletAddress, pool: samplePool },
-    });
-    await app.inject({
-      method: "POST",
-      url: "/saved-pools",
-      headers: { "content-type": "application/json" },
-      payload: { wallet_address: walletAddress, pool: pool2 },
-    });
+    await injectWithCsrf(app, "POST", "/saved-pools", { wallet_address: walletAddress, pool: samplePool }, { "content-type": "application/json" });
+    await injectWithCsrf(app, "POST", "/saved-pools", { wallet_address: walletAddress, pool: pool2 }, { "content-type": "application/json" });
 
-    const res = await app.inject({
-      method: "GET",
-      url: `/saved-pools?wallet=${walletAddress}`,
-    });
+    const res = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletAddress}`, headers: { "x-internal-secret": "test-secret" } });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().data).toHaveLength(2);
@@ -102,60 +76,36 @@ describe("Saved pools API", () => {
   });
 
   it("unsaves a pool", async () => {
-    await app.inject({
-      method: "POST",
-      url: "/saved-pools",
-      headers: { "content-type": "application/json" },
-      payload: { wallet_address: walletAddress, pool: samplePool },
-    });
+    await injectWithCsrf(app, "POST", "/saved-pools", { wallet_address: walletAddress, pool: samplePool }, { "content-type": "application/json" });
 
-    const del = await app.inject({
-      method: "DELETE",
-      url: `/saved-pools/pool-1?wallet=${walletAddress}`,
-    });
+    const del = await injectWithCsrf(app, "DELETE", `/saved-pools/pool-1?wallet=${walletAddress}`,);
 
     expect(del.statusCode).toBe(200);
     expect(del.json().data.deleted).toBe(1);
 
-    const list = await app.inject({
-      method: "GET",
-      url: `/saved-pools?wallet=${walletAddress}`,
-    });
+    const list = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletAddress}`, headers: { "x-internal-secret": "test-secret" } });
     expect(list.json().data).toHaveLength(0);
   });
 
   it("returns empty list for wallet with no saved pools", async () => {
-    const res = await app.inject({
-      method: "GET",
-      url: `/saved-pools?wallet=${walletAddress}`,
-    });
+    const res = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletAddress}`, headers: { "x-internal-secret": "test-secret" } });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().data).toEqual([]);
   });
 
   it("rejects save with missing wallet address", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/saved-pools",
-      headers: { "content-type": "application/json" },
-      payload: { pool: samplePool },
-    });
+    const res = await injectWithCsrf(app, "POST", "/saved-pools", { pool: samplePool }, { "content-type": "application/json" });
 
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe("INVALID_PAYLOAD");
   });
 
   it("rejects save with invalid pool data", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/saved-pools",
-      headers: { "content-type": "application/json" },
-      payload: {
+    const res = await injectWithCsrf(app, "POST", "/saved-pools", {
         wallet_address: walletAddress,
         pool: { pool_id: "p1", pool_name: "Bad", status: "unknown" },
-      },
-    });
+      }, { "content-type": "application/json" });
 
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe("INVALID_PAYLOAD");
@@ -164,17 +114,9 @@ describe("Saved pools API", () => {
   it("isolates saved pools between different wallets", async () => {
     const walletB = "GSAVED9876543210987654321098765432109876543210987654321";
 
-    await app.inject({
-      method: "POST",
-      url: "/saved-pools",
-      headers: { "content-type": "application/json" },
-      payload: { wallet_address: walletAddress, pool: samplePool },
-    });
+    await injectWithCsrf(app, "POST", "/saved-pools", { wallet_address: walletAddress, pool: samplePool }, { "content-type": "application/json" });
 
-    const resB = await app.inject({
-      method: "GET",
-      url: `/saved-pools?wallet=${walletB}`,
-    });
+    const resB = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletB}`, headers: { "x-internal-secret": "test-secret" } });
     expect(resB.json().data).toHaveLength(0);
   });
 
@@ -186,12 +128,7 @@ describe("Saved pools API", () => {
     const poolBOnly = { ...samplePool, pool_id: "pool-b-only", pool_name: "B Only" };
 
     async function save(wallet: string, pool: typeof samplePool) {
-      return app.inject({
-        method: "POST",
-        url: "/saved-pools",
-        headers: { "content-type": "application/json" },
-        payload: { wallet_address: wallet, pool },
-      });
+      return injectWithCsrf(app, "POST", "/saved-pools", { wallet_address: wallet, pool }, { "content-type": "application/json" });
     }
 
     it("keeps overlapping and distinct saved pools scoped per wallet", async () => {
@@ -200,8 +137,8 @@ describe("Saved pools API", () => {
       await save(walletB, poolShared);
       await save(walletB, poolBOnly);
 
-      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}` });
-      const listB = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletB}` });
+      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}`, headers: { "x-internal-secret": "test-secret" } });
+      const listB = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletB}`, headers: { "x-internal-secret": "test-secret" } });
 
       expect(listA.json().data.map((p: any) => p.pool_id).sort()).toEqual(
         ["pool-a-only", "pool-shared"].sort()
@@ -214,14 +151,11 @@ describe("Saved pools API", () => {
     it("does not let wallet B delete wallet A's saved pool by guessing the poolId", async () => {
       await save(walletA, poolAOnly);
 
-      const del = await app.inject({
-        method: "DELETE",
-        url: `/saved-pools/${poolAOnly.pool_id}?wallet=${walletB}`,
-      });
+      const del = await injectWithCsrf(app, "DELETE", `/saved-pools/${poolAOnly.pool_id}?wallet=${walletB}`,);
       expect(del.statusCode).toBe(200);
       expect(del.json().data.deleted).toBe(0); // no rows matched wallet B's scope
 
-      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}` });
+      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}`, headers: { "x-internal-secret": "test-secret" } });
       expect(listA.json().data.map((p: any) => p.pool_id)).toContain(poolAOnly.pool_id);
     });
 
@@ -229,14 +163,11 @@ describe("Saved pools API", () => {
       await save(walletA, poolShared);
       await save(walletB, poolShared);
 
-      const delA = await app.inject({
-        method: "DELETE",
-        url: `/saved-pools/${poolShared.pool_id}?wallet=${walletA}`,
-      });
+      const delA = await injectWithCsrf(app, "DELETE", `/saved-pools/${poolShared.pool_id}?wallet=${walletA}`,);
       expect(delA.json().data.deleted).toBe(1);
 
-      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}` });
-      const listB = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletB}` });
+      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}`, headers: { "x-internal-secret": "test-secret" } });
+      const listB = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletB}`, headers: { "x-internal-secret": "test-secret" } });
 
       expect(listA.json().data).toHaveLength(0);
       expect(listB.json().data.map((p: any) => p.pool_id)).toContain(poolShared.pool_id);
@@ -246,7 +177,7 @@ describe("Saved pools API", () => {
       await save(walletA, poolShared);
       await save(walletB, { ...poolShared, pool_name: "Renamed by B" });
 
-      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}` });
+      const listA = await app.inject({ method: "GET", url: `/saved-pools?wallet=${walletA}`, headers: { "x-internal-secret": "test-secret" } });
       expect(listA.json().data[0].pool_name).toBe(poolShared.pool_name);
     });
   });

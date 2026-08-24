@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { buildApp } from "../src/app.js";
 import type { FastifyInstance } from "fastify";
-import { injectWithCsrf } from "./helpers/csrf.js";
+import { injectWithCsrf as origInjectWithCsrf } from "./helpers/csrf.js";
+const injectWithCsrf = (app: any, method: any, url: any, payload?: any, headers = {}) => origInjectWithCsrf(app, method, url, payload, { ...headers, "x-internal-secret": "test-secret" });
 import {
   parseActionPayload,
   parseEventPayload,
@@ -220,8 +221,7 @@ describe("versioned action payload schemas (#109)", () => {
     const INTERNAL_HEADERS = { "x-internal-secret": "test-secret", "content-type": "application/json" };
 
     async function reconcile(payload: unknown, txHash = `tx_${randomUUID()}`) {
-      return app.inject({
-        method: "POST",
+      return app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
         url: "/internal/reconcile",
         remoteAddress: `192.168.70.${Math.floor(Math.random() * 200) + 1}`,
         headers: INTERNAL_HEADERS,

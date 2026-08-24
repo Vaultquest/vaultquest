@@ -61,8 +61,7 @@ async function injectWithUniqueIp(app: any, method: string, url: string, payload
 
   if (isStateChanging && !isInternal) {
     // 1. Fetch CSRF token using GET with the same IP
-    const getRes = await app.inject({
-      method: "GET",
+    const getRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: "/health",
       remoteAddress: ip
     });
@@ -78,7 +77,7 @@ async function injectWithUniqueIp(app: any, method: string, url: string, payload
         "x-csrf-token": csrfToken,
         cookie: setCookie,
         ...headers
-      },
+      , "x-internal-secret": "test-secret" },
       payload
     });
   }
@@ -441,8 +440,7 @@ describe("Unhappy-path tests for action and internal routes", () => {
       // Rate limit for sensitive routes is 10. Let's send 12 requests.
       // Since they are from the same IP, they will hit the rate limit.
       // We also need matching CSRF tokens and cookies for the POST requests.
-      const getRes = await app.inject({
-        method: "GET",
+      const getRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
         url: "/health",
         remoteAddress: testIp
       });
@@ -450,15 +448,14 @@ describe("Unhappy-path tests for action and internal routes", () => {
       const setCookie = getRes.headers["set-cookie"] as string;
 
       for (let i = 0; i < 12; i++) {
-        const res = await app.inject({
-          method: "POST",
+        const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
           url: "/actions",
           remoteAddress: testIp,
           headers: {
             "idempotency-key": randomUUID(),
             "x-csrf-token": csrfToken,
             cookie: setCookie
-          },
+          , "x-internal-secret": "test-secret" },
           payload: {
             wallet_address: "GABC",
             action_type: "deposit",

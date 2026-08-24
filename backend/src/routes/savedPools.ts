@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyPluginAsync, preHandlerHookHandler } from "fastify";
 import type { SavedPoolsService } from "../services/savedPools.js";
 import {
   savedPoolDeleteParams,
@@ -27,15 +27,15 @@ function serialize(row: Awaited<ReturnType<SavedPoolsService["listSavedPools"]>>
   };
 }
 
-export const savedPoolsRoutes = (svc: SavedPoolsService): FastifyPluginAsync =>
+export const savedPoolsRoutes = (svc: SavedPoolsService, walletAuthGuard: preHandlerHookHandler): FastifyPluginAsync =>
   async (app) => {
-    app.get("/saved-pools", async (req) => {
+    app.get("/saved-pools", { preHandler: walletAuthGuard }, async (req) => {
       const q = savedPoolListQuery.parse(req.query);
       const rows = await svc.listSavedPools(q.wallet);
       return ok(rows.map(serialize));
     });
 
-    app.post("/saved-pools", async (req, reply) => {
+    app.post("/saved-pools", { preHandler: walletAuthGuard }, async (req, reply) => {
       const body = savedPoolUpsertBody.parse(req.body);
       const result = await svc.savePool({
         walletAddress: body.wallet_address,
@@ -57,7 +57,7 @@ export const savedPoolsRoutes = (svc: SavedPoolsService): FastifyPluginAsync =>
       return ok({ saved: serialize(result.record) });
     });
 
-    app.delete<{ Params: { poolId: string } }>("/saved-pools/:poolId", async (req) => {
+    app.delete<{ Params: { poolId: string } }>("/saved-pools/:poolId", { preHandler: walletAuthGuard }, async (req) => {
       const q = savedPoolListQuery.parse(req.query);
       const params = savedPoolDeleteParams.parse(req.params);
       const deleted = await svc.unsavePool(q.wallet, params.poolId);

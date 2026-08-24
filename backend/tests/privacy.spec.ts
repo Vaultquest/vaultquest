@@ -125,8 +125,7 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
         },
       });
 
-      const res = await app.inject({
-        method: "GET",
+      const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
         url: `/api/privacy/export?walletAddress=${testWalletUserA}`,
       });
 
@@ -161,8 +160,7 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
         },
       });
 
-      const res = await app.inject({
-        method: "GET",
+      const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
         url: `/api/privacy/export?walletAddress=${testWalletUserA}`,
       });
 
@@ -196,10 +194,9 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
         },
       });
 
-      const res = await app.inject({
-        method: "POST",
+      const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
         url: "/api/privacy/delete",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json" , "x-internal-secret": "test-secret" },
         payload: { walletAddress: testWalletUserA },
       });
 
@@ -240,18 +237,16 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
     });
 
     it("is idempotent when deletion is triggered repeatedly", async () => {
-      const firstRes = await app.inject({
-        method: "POST",
+      const firstRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
         url: "/api/privacy/delete",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json" , "x-internal-secret": "test-secret" },
         payload: { walletAddress: testWalletUserA },
       });
       expect(firstRes.statusCode).toBe(200);
 
-      const secondRes = await app.inject({
-        method: "POST",
+      const secondRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
         url: "/api/privacy/delete",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json" , "x-internal-secret": "test-secret" },
         payload: { walletAddress: testWalletUserA },
       });
       expect(secondRes.statusCode).toBe(200);
@@ -262,8 +257,7 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
   describe("5. Legal Holds Enforcement", () => {
     it("blocks deletion when active legal hold exists and records held status", async () => {
       // Create legal hold on User A
-      await app.inject({
-        method: "POST",
+      await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
         url: "/api/privacy/legal-holds",
         headers: {
           "content-type": "application/json",
@@ -286,10 +280,9 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
       });
 
       // Attempt deletion
-      const delRes = await app.inject({
-        method: "POST",
+      const delRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
         url: "/api/privacy/delete",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json" , "x-internal-secret": "test-secret" },
         payload: { walletAddress: testWalletUserA },
       });
 
@@ -308,8 +301,7 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
 
     it("resumes deletion once legal hold is released", async () => {
       // Set active hold
-      await app.inject({
-        method: "POST",
+      await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
         url: "/api/privacy/legal-holds",
         headers: {
           "content-type": "application/json",
@@ -323,8 +315,7 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
       });
 
       // Release hold
-      await app.inject({
-        method: "POST",
+      await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
         url: "/api/privacy/legal-holds",
         headers: {
           "content-type": "application/json",
@@ -334,10 +325,9 @@ describe("Data Privacy, Encryption, Retention Export & Verifiable Deletion (#76)
       });
 
       // Delete user data
-      const delRes = await app.inject({
-        method: "POST",
+      const delRes = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "POST",
         url: "/api/privacy/delete",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json" , "x-internal-secret": "test-secret" },
         payload: { walletAddress: testWalletUserA },
       });
 
