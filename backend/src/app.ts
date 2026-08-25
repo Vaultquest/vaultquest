@@ -63,7 +63,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Inject CacheService into LedgerService
   const svc = new LedgerService(deps.prisma, deps.cacheService);
   const savedPoolsSvc = new SavedPoolsService(deps.prisma);
-  const metricsSvc = new MetricsService(deps.prisma);
+  const metricsSvc = new MetricsService(deps.prisma, deps.cacheService);
 
   app.get("/health", async () => ok({ ok: true }));
   app.get("/health/indexer", async () => {
