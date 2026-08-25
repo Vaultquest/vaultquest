@@ -117,7 +117,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ...(deps.exportSignatureTtlMs === undefined ? {} : { signatureTtlMs: deps.exportSignatureTtlMs })
   });
 
-  app.register(healthRoutes(svc));
+  app.register(healthRoutes(svc, deps.prisma, deps.cacheService));
   app.register(actionsRoutes(svc, apiKeyGuard, exportAuthGuard));
   app.register(savedPoolsRoutes(savedPoolsSvc));
   app.register(internalRoutes(svc, deps.internalSecret));

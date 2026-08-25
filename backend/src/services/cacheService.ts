@@ -681,6 +681,36 @@ export class CacheService {
   }
 
   /**
+   * Lightweight connectivity probe for readiness checks. Sends a single
+   * Redis `PING` and reports round-trip latency; does not rely on the
+   * `isOnline` flag from the connect/error event listeners, since a live
+   * round trip is the authoritative signal and that flag can lag the
+   * connection's real state.
+   *
+   * When no `redisUrl` was configured this resolves immediately with
+   * `configured: false` — that is a deliberate deployment mode (this class
+   * already degrades to PostgreSQL / in-memory fallbacks without Redis),
+   * not a failure, so callers should not treat it as unhealthy.
+   */
+  async ping(): Promise<{ configured: boolean; healthy: boolean; latencyMs: number; error?: string }> {
+    if (!this.redis) {
+      return { configured: false, healthy: true, latencyMs: 0 };
+    }
+    const start = Date.now();
+    try {
+      await this.redis.ping();
+      return { configured: true, healthy: true, latencyMs: Date.now() - start };
+    } catch (err) {
+      return {
+        configured: true,
+        healthy: false,
+        latencyMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err)
+      };
+    }
+  }
+
+  /**
    * Closes the Redis connection (if any) and clears in-memory caches.
    */
   async disconnect(): Promise<void> {
