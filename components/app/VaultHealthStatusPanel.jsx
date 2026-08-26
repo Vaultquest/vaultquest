@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity,
@@ -15,6 +15,7 @@ import {
   Database,
   Shield,
 } from "lucide-react";
+import { getStatusBadgeStyles } from "@/lib/status-badge-styles";
 
 const VAULT_SERVICES = [
   {
@@ -52,23 +53,21 @@ const VAULT_SERVICES = [
 const STATUS_CONFIG = {
   operational: {
     icon: CheckCircle,
-    color: "emerald",
     label: "Healthy",
   },
   degraded: {
     icon: AlertTriangle,
-    color: "amber",
     label: "Degraded",
   },
   outage: {
     icon: XCircle,
-    color: "red",
     label: "Outage",
   },
 };
 
 function ServiceRow({ service, status }) {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.operational;
+  const badgeStyles = getStatusBadgeStyles(status);
   const Icon = service.icon;
   const StatusIcon = config.icon;
 
@@ -79,7 +78,7 @@ function ServiceRow({ service, status }) {
         <span className="text-sm font-medium text-vault-text">{service.name}</span>
       </div>
       <span
-        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-${config.color}-500/15 text-${config.color}-600 dark:text-${config.color}-400`}
+        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${badgeStyles.badge}`}
       >
         <StatusIcon className="h-3.5 w-3.5" aria-hidden="true" />
         {config.label}
@@ -129,7 +128,7 @@ export default function VaultHealthStatusPanel() {
 
   const statusConfig = STATUS_CONFIG[overallStatus] || STATUS_CONFIG.operational;
   const StatusIcon = statusConfig.icon;
-  const statusColor = statusConfig.color;
+  const statusBadgeStyles = getStatusBadgeStyles(overallStatus);
 
   const formatTime = (date) => {
     const now = new Date();
@@ -145,7 +144,7 @@ export default function VaultHealthStatusPanel() {
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             <span
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-${statusColor}-500/20 text-${statusColor}-400 ring-2 ring-${statusColor}-400/30`}
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${statusBadgeStyles.iconAvatar}`}
             >
               {loading ? (
                 <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />

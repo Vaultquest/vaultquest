@@ -4,6 +4,7 @@ module.exports = {
   content: [
     "./app/**/*.{js,jsx}",
     "./components/**/*.{js,jsx}",
+    "./lib/**/*.{js,jsx}",
     "./stellar-wallet-connect/src/**/*.{js,jsx,ts,tsx}",
   ],
   theme: {
