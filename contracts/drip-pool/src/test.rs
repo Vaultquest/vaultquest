@@ -32,6 +32,26 @@ fn skip_lockup(env: &Env) {
     env.ledger().with_mut(|li| li.sequence_number += 120_961);
 }
 
+// ── #100: vault custody helpers ──────────────────────────────────────────
+// Real SEP-41 token plumbing for tests that exercise `vault_deposit` /
+// `vault_claim_withdrawal`'s actual token transfers, instead of the old
+// transfer-free accounting.
+
+/// Deploys a standard Stellar Asset Contract to back a vault under test.
+fn deploy_asset(env: &Env, admin: &Address) -> Address {
+    env.register_stellar_asset_contract_v2(admin.clone()).address()
+}
+
+/// Mints `amount` of `asset` to `to` via the SAC admin interface.
+fn mint(env: &Env, asset: &Address, to: &Address, amount: i128) {
+    soroban_sdk::token::StellarAssetClient::new(env, asset).mint(to, &amount);
+}
+
+/// Real token balance of `who` in `asset`.
+fn token_balance(env: &Env, asset: &Address, who: &Address) -> i128 {
+    soroban_sdk::token::Client::new(env, asset).balance(who)
+}
+
 // ── existing regression tests (updated for new Participant shape) ──────────
 
 #[test]
@@ -1344,10 +1364,13 @@ fn test_deposit_after_lockup_expiration_resets_lockup_window() {
 fn vault_withdrawal_queue_enforces_fifo_and_partial_claims_survive_pause() {
     let (env, client, admin) = setup();
     client.create(&admin);
-    client.vault_init(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
+    mint(&env, &asset, &alice, 1_000);
+    mint(&env, &asset, &bob, 1_000);
     let alice_shares = client.vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
     let bob_shares = client.vault_deposit(&bob, &1_000, &client.vault_snapshot().version);
 
@@ -1371,6 +1394,8 @@ fn vault_withdrawal_queue_enforces_fifo_and_partial_claims_survive_pause() {
     let alice_status = client.vault_withdrawal_status(&alice_request);
     assert_eq!(alice_status.claimable_assets, 100);
     assert!(alice_status.remaining_assets > 0);
+    // #100: `fulfill` is internal reservation only — no token leaves custody yet.
+    assert_eq!(token_balance(&env, &asset, &client.address), 2_000);
 
     client.vault_set_paused(&admin, &true);
     assert_eq!(
@@ -1384,16 +1409,22 @@ fn vault_withdrawal_queue_enforces_fifo_and_partial_claims_survive_pause() {
             .claimable_assets,
         0
     );
+    // #100: `claim` is where the real payout happens.
+    assert_eq!(token_balance(&env, &asset, &alice), 100);
+    assert_eq!(token_balance(&env, &asset, &client.address), 1_900);
 }
 
 #[test]
 fn vault_cancel_and_expiry_restore_shares_and_unblock_queue() {
     let (env, client, admin) = setup();
     client.create(&admin);
-    client.vault_init(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
+    mint(&env, &asset, &alice, 1_000);
+    mint(&env, &asset, &bob, 1_000);
     let alice_shares = client.vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
     let bob_shares = client.vault_deposit(&bob, &1_000, &client.vault_snapshot().version);
 
@@ -1657,9 +1688,11 @@ fn test_commit_reveal_rejection_sampling_unbiased() {
 fn legacy_deposit_rejected_once_vault_has_shares() {
     let (env, client, admin) = setup();
     client.create(&admin);
-    client.vault_init(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
 
     let alice = Address::generate(&env);
+    mint(&env, &asset, &alice, 1_000);
     client.vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
 
     // The vault now holds real (share-accounted) balance for this pool;
@@ -1683,7 +1716,8 @@ fn legacy_deposit_rejected_once_vault_has_shares() {
 fn vault_deposit_rejected_once_legacy_has_deposits() {
     let (env, client, admin) = setup();
     client.create(&admin);
-    client.vault_init(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
 
     let alice = Address::generate(&env);
     client.join(&alice);
@@ -1753,18 +1787,337 @@ fn legacy_invalid_configuration_is_safely_capped_during_accrual() {
     let (env, client, admin) = setup();
     client.create(&admin);
     let alice = Address::generate(&env);
-    
-    client.vault_init(&admin);
-    
+    let asset = deploy_asset(&env, &admin);
+    mint(&env, &asset, &alice, 100_000);
+
+    client.vault_init(&admin, &asset);
+
     // Manually force invalid config via raw storage to simulate pre-migration state
     env.as_contract(&client.address, || {
         env.storage().instance().set(&VaultKey::ManagementFeeBps, &15_000u32);
         env.storage().instance().set(&VaultKey::PerformanceFeeBps, &u32::MAX);
     });
 
-    client.vault_deposit(&alice, &100_000);
-    
+    client.vault_deposit(&alice, &100_000, &client.vault_snapshot().version);
+
     // Accrual does not overflow or panic because of min(10_000) cap
     client.vault_accrue_management_fee(&admin);
     client.vault_accrue_performance_fee(&admin);
+}
+
+// ── #100: vault custody — real token transfer coverage ─────────────────────
+// `vault_deposit`/`vault_claim_withdrawal` now move real SEP-41 tokens instead
+// of only mutating internal accounting. These tests cover the scenarios a
+// plain Stellar Asset Contract can't produce on its own (short/fee-on-transfer
+// delivery, a transfer that tries to re-enter the vault), plus atomicity,
+// duplicate-claim, and custody/accounting reconciliation.
+
+// Each mock token lives in its own submodule: `#[contractimpl]` generates
+// module-scoped helper items keyed only by method name (`__mint`,
+// `__balance`, `__transfer`, ...), so two contracts sharing method names in
+// the same Rust module would collide.
+mod fee_on_transfer_token {
+    use super::*;
+
+    #[derive(Clone)]
+    #[contracttype]
+    enum MockTokenKey {
+        Balance(Address),
+    }
+
+    /// Skims a flat 1% "fee" on every transfer: `to` receives less than
+    /// `from` was debited — the shape of a fee-on-transfer token. The vault
+    /// must reject this rather than mint shares (or mark a claim paid) for
+    /// less custody than it actually received.
+    #[contract]
+    pub struct FeeOnTransferToken;
+
+    #[contractimpl]
+    impl FeeOnTransferToken {
+        pub fn mint(env: Env, to: Address, amount: i128) {
+            let key = MockTokenKey::Balance(to);
+            let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            env.storage().persistent().set(&key, &(balance + amount));
+        }
+
+        pub fn balance(env: Env, id: Address) -> i128 {
+            env.storage()
+                .persistent()
+                .get(&MockTokenKey::Balance(id))
+                .unwrap_or(0)
+        }
+
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            from.require_auth();
+            let from_key = MockTokenKey::Balance(from);
+            let from_balance: i128 = env.storage().persistent().get(&from_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&from_key, &(from_balance - amount));
+
+            let credited = amount - (amount / 100);
+            let to_key = MockTokenKey::Balance(to);
+            let to_balance: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&to_key, &(to_balance + credited));
+        }
+    }
+}
+use fee_on_transfer_token::{FeeOnTransferToken, FeeOnTransferTokenClient};
+
+mod reentrant_token {
+    use super::*;
+
+    #[derive(Clone)]
+    #[contracttype]
+    enum ReentrantTokenKey {
+        Balance(Address),
+        Vault,
+        Attacker,
+        ExpectedVersion,
+    }
+
+    /// A token whose `transfer` calls back into the vault mid-call,
+    /// attempting a second `vault_deposit` before the first one has finished
+    /// mutating state. Proves the vault's dedicated `VaultKey::VaultLocked`
+    /// guard actually blocks reentrancy rather than relying on transfer
+    /// ordering alone.
+    #[contract]
+    pub struct ReentrantToken;
+
+    #[contractimpl]
+    impl ReentrantToken {
+        pub fn mint(env: Env, to: Address, amount: i128) {
+            let key = ReentrantTokenKey::Balance(to);
+            let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            env.storage().persistent().set(&key, &(balance + amount));
+        }
+
+        pub fn balance(env: Env, id: Address) -> i128 {
+            env.storage()
+                .persistent()
+                .get(&ReentrantTokenKey::Balance(id))
+                .unwrap_or(0)
+        }
+
+        /// Configures the vault + attacker address the reentrant call will target.
+        pub fn arm(env: Env, vault: Address, attacker: Address, expected_version: u64) {
+            env.storage().instance().set(&ReentrantTokenKey::Vault, &vault);
+            env.storage()
+                .instance()
+                .set(&ReentrantTokenKey::Attacker, &attacker);
+            env.storage()
+                .instance()
+                .set(&ReentrantTokenKey::ExpectedVersion, &expected_version);
+        }
+
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            from.require_auth();
+            let from_key = ReentrantTokenKey::Balance(from);
+            let from_balance: i128 = env.storage().persistent().get(&from_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&from_key, &(from_balance - amount));
+            let to_key = ReentrantTokenKey::Balance(to);
+            let to_balance: i128 = env.storage().persistent().get(&to_key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&to_key, &(to_balance + amount));
+
+            if let Some(vault) = env
+                .storage()
+                .instance()
+                .get::<_, Address>(&ReentrantTokenKey::Vault)
+            {
+                let attacker: Address = env
+                    .storage()
+                    .instance()
+                    .get(&ReentrantTokenKey::Attacker)
+                    .unwrap();
+                let expected_version: u64 = env
+                    .storage()
+                    .instance()
+                    .get(&ReentrantTokenKey::ExpectedVersion)
+                    .unwrap();
+                let client = DripPoolClient::new(&env, &vault);
+                // Reentrant deposit attempt while the outer deposit is still mid-flight.
+                // Must fail with `Locked`, not silently succeed and double-account.
+                let _ = client.try_vault_deposit(&attacker, &1, &expected_version);
+            }
+        }
+    }
+}
+use reentrant_token::{ReentrantToken, ReentrantTokenClient};
+
+#[test]
+fn vault_deposit_mints_shares_only_after_exact_transfer_lands() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
+
+    let alice = Address::generate(&env);
+    mint(&env, &asset, &alice, 1_000);
+
+    let shares = client.vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
+    assert!(shares > 0);
+    assert_eq!(token_balance(&env, &asset, &alice), 0);
+    assert_eq!(token_balance(&env, &asset, &client.address), 1_000);
+    assert_eq!(client.vault_snapshot().total_assets, 1_000);
+}
+
+#[test]
+fn vault_deposit_fails_atomically_when_depositor_has_no_balance() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
+
+    let alice = Address::generate(&env);
+    // Alice never received any tokens — the underlying transfer must fail
+    // (the SAC traps on insufficient balance), and it must fail atomically:
+    // no shares minted, no accounting mutated, despite the failure happening
+    // partway through `vault_deposit`.
+    let result = client.try_vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
+    assert!(result.is_err());
+
+    let snapshot = client.vault_snapshot();
+    assert_eq!(snapshot.total_shares, 0);
+    assert_eq!(snapshot.total_assets, 0);
+    assert_eq!(snapshot.version, 0);
+    assert_eq!(client.vault_share_balance(&alice), 0);
+}
+
+#[test]
+fn vault_deposit_fails_when_depositor_only_holds_a_different_asset() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset = deploy_asset(&env, &admin);
+    let unrelated_asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
+
+    let alice = Address::generate(&env);
+    // Alice holds the wrong asset — plenty of balance, just not in the token
+    // this vault custodies — so the pull must fail against the real asset.
+    mint(&env, &unrelated_asset, &alice, 1_000);
+
+    let result = client.try_vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
+    assert!(result.is_err());
+    assert_eq!(client.vault_snapshot().total_assets, 0);
+    assert_eq!(client.vault_share_balance(&alice), 0);
+}
+
+#[test]
+fn vault_deposit_rejects_fee_on_transfer_short_delivery() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset_id = env.register_contract(None, FeeOnTransferToken);
+    let asset_client = FeeOnTransferTokenClient::new(&env, &asset_id);
+    client.vault_init(&admin, &asset_id);
+
+    let alice = Address::generate(&env);
+    asset_client.mint(&alice, &1_000);
+
+    let result = client.try_vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
+    assert_eq!(result, Err(Ok(Error::TransferAmountMismatch)));
+
+    // Rejected before any share/accounting mutation, even though 990 units
+    // did land in the vault's balance — a short transfer must never be
+    // silently treated as a full one.
+    assert_eq!(client.vault_share_balance(&alice), 0);
+    assert_eq!(client.vault_snapshot().total_assets, 0);
+    assert_eq!(client.vault_snapshot().version, 0);
+}
+
+#[test]
+fn vault_deposit_reentrancy_is_blocked_by_vault_lock() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset_id = env.register_contract(None, ReentrantToken);
+    let asset_client = ReentrantTokenClient::new(&env, &asset_id);
+    client.vault_init(&admin, &asset_id);
+
+    let alice = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    asset_client.mint(&alice, &1_000);
+    asset_client.mint(&attacker, &1_000);
+    asset_client.arm(&client.address, &attacker, &client.vault_snapshot().version);
+
+    let shares = client.vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
+    assert!(shares > 0);
+
+    // The reentrant call fired mid-transfer must have been rejected by the
+    // lock: the attacker never got shares, and the vault only accounts for
+    // Alice's single legitimate deposit.
+    assert_eq!(client.vault_share_balance(&attacker), 0);
+    assert_eq!(client.vault_snapshot().total_shares, shares);
+    assert_eq!(client.vault_snapshot().total_assets, 1_000);
+}
+
+#[test]
+fn vault_claim_withdrawal_cannot_be_claimed_twice() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
+
+    let alice = Address::generate(&env);
+    mint(&env, &asset, &alice, 1_000);
+    let shares = client.vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
+    let request =
+        client.vault_request_withdrawal(&alice, &shares, &client.vault_snapshot().version);
+    client.vault_fulfill_withdrawal(&admin, &request, &1_000);
+
+    let claimed = client.vault_claim_withdrawal(&alice, &request);
+    assert_eq!(claimed, 1_000);
+    assert_eq!(token_balance(&env, &asset, &alice), 1_000);
+
+    // A second claim on the same, already-settled request must not pay out again.
+    assert_eq!(
+        client.try_vault_claim_withdrawal(&alice, &request),
+        Err(Ok(Error::WithdrawalAlreadySettled))
+    );
+    assert_eq!(token_balance(&env, &asset, &alice), 1_000);
+    assert_eq!(token_balance(&env, &asset, &client.address), 0);
+}
+
+#[test]
+fn vault_custody_balance_reconciles_with_internal_accounting_through_full_lifecycle() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
+
+    let alice = Address::generate(&env);
+    mint(&env, &asset, &alice, 1_000);
+    let shares = client.vault_deposit(&alice, &1_000, &client.vault_snapshot().version);
+
+    // Invariant: with nothing queued, real custody equals internal total_assets.
+    assert_eq!(
+        token_balance(&env, &asset, &client.address),
+        client.vault_snapshot().total_assets
+    );
+
+    let request =
+        client.vault_request_withdrawal(&alice, &shares, &client.vault_snapshot().version);
+    client.vault_fulfill_withdrawal(&admin, &request, &400);
+
+    // Invariant: real custody == total_assets still held + assets paid-but-unclaimed.
+    let status = client.vault_withdrawal_status(&request);
+    assert_eq!(
+        token_balance(&env, &asset, &client.address),
+        client.vault_snapshot().total_assets + status.claimable_assets
+    );
+
+    client.vault_claim_withdrawal(&alice, &request);
+
+    // Once claimed, the paid portion has actually left custody.
+    let status = client.vault_withdrawal_status(&request);
+    assert_eq!(status.claimable_assets, 0);
+    assert_eq!(
+        token_balance(&env, &asset, &client.address),
+        client.vault_snapshot().total_assets
+    );
+    assert_eq!(token_balance(&env, &asset, &alice), 400);
 }

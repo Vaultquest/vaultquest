@@ -6,7 +6,18 @@
 //! #263 Reentrancy / cross-contract audit
 //! - State changes in DripPool always happen before any future token transfer.
 //! - `withdraw` acquires the reentrancy lock before mutating state or removing participant.
-//! - No external contract calls exist in the hot path; interactions are placeholders only.
+//! - The legacy `deposit`/`withdraw` path still has no wired token transfer (#108) — see
+//!   its own caveat. The share-based vault (below) is real: `vault_deposit` and
+//!   `vault_claim_withdrawal` move actual SEP-41 tokens under `VaultKey::VaultLocked` (#100).
+//!
+//! #100 Vault custody — real token transfers
+//! - `vault_init` persists the vault's SEP-41 asset contract address.
+//! - `vault_deposit` pulls the exact asset amount into custody before minting shares;
+//!   a short/fee-on-transfer transfer is rejected rather than under-minting.
+//! - `vault_claim_withdrawal` marks the request claimed (idempotent) before pushing the
+//!   payout out, so a reentrant claim during the transfer callback sees nothing owed.
+//! - `vault_fulfill_withdrawal`/batch remain internal accounting only (reserving assets
+//!   already in vault custody against a request); no cross-contract call happens there.
 //!
 //! #264 Time-locked withdrawals + yield multipliers
 //! - `deposit` retains flexible behavior by default.
@@ -22,8 +33,8 @@
 //! #72 Share-based NAV vault (`shares.rs` + the `vault_*` methods below) — additive, on its own storage keys.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, vec, xdr::ToXdr, Address,
-    Bytes, BytesN, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, vec, xdr::ToXdr,
+    Address, Bytes, BytesN, Env, Vec,
 };
 
 // ── Lockup duration (ledgers, ~7 days at 5 s/ledger) ──────────────────────
@@ -62,6 +73,14 @@ pub enum VaultKey {
     ManagementFeeBps,
     PerformanceFeeBps,
     VaultPaused,
+    /// #100: the SEP-41 token contract that backs vault shares — deposits pull
+    /// this asset in, claims/strategy movements push it out. Without this,
+    /// the vault had no way to know which token custody it was accounting for.
+    AssetContract,
+    /// #100: dedicated reentrancy guard around real token transfers, separate
+    /// from `Pool.locked` since the vault can be used without the legacy pool
+    /// ever being initialized.
+    VaultLocked,
 }
 
 // ── Errors ─────────────────────────────────────────────────────────────────
@@ -115,6 +134,14 @@ pub enum Error {
     /// double-counted against the same (unverified) custody.
     MixedAccountingModeNotAllowed = 40,
     InvalidFeeBps = 41,
+    /// #100: vault operations that move real assets require the asset
+    /// contract to have been persisted via `vault_init`.
+    AssetContractNotSet = 42,
+    /// #100: the token's actual balance delta didn't match the requested
+    /// amount exactly (short transfer, fee-on-transfer token, etc). Shares
+    /// must never be minted, nor a claim marked paid, for less custody than
+    /// was recorded.
+    TransferAmountMismatch = 43,
 }
 
 // ── Structs ────────────────────────────────────────────────────────────────
@@ -1296,7 +1323,7 @@ impl DripPool {
 
     // ── #72: share-based NAV vault — additive, its own storage keys ──────────
 
-    pub fn vault_init(env: Env, caller: Address) -> Result<(), Error> {
+    pub fn vault_init(env: Env, caller: Address, asset: Address) -> Result<(), Error> {
         caller.require_auth();
         Self::require_signer(&env, &caller)?;
         if env.storage().instance().has(&VaultKey::VaultShares) {
@@ -1306,6 +1333,12 @@ impl DripPool {
         env.storage()
             .instance()
             .set(&VaultKey::VaultShares, &snapshot);
+        env.storage()
+            .instance()
+            .set(&VaultKey::AssetContract, &asset);
+        env.storage()
+            .instance()
+            .set(&VaultKey::VaultLocked, &false);
         env.storage()
             .instance()
             .set(&VaultKey::WithdrawalNonce, &0u32);
@@ -1344,6 +1377,65 @@ impl DripPool {
         env.storage()
             .instance()
             .set(&VaultKey::VaultShares, snapshot);
+    }
+
+    fn vault_asset(env: &Env) -> Result<Address, Error> {
+        env.storage()
+            .instance()
+            .get(&VaultKey::AssetContract)
+            .ok_or(Error::AssetContractNotSet)
+    }
+
+    /// Dedicated reentrancy guard for real token transfers, so a callback
+    /// during `transfer` can't re-enter and mutate vault accounting before
+    /// this call finishes. Independent of `Pool.locked` (#100).
+    fn vault_acquire_lock(env: &Env) -> Result<(), Error> {
+        let locked: bool = env
+            .storage()
+            .instance()
+            .get(&VaultKey::VaultLocked)
+            .unwrap_or(false);
+        if locked {
+            return Err(Error::Locked);
+        }
+        env.storage().instance().set(&VaultKey::VaultLocked, &true);
+        Ok(())
+    }
+
+    fn vault_release_lock(env: &Env) {
+        env.storage().instance().set(&VaultKey::VaultLocked, &false);
+    }
+
+    /// Pulls `assets` of the vault's token into vault custody and verifies the
+    /// contract's balance moved by exactly that amount, rejecting short
+    /// transfers (fee-on-transfer tokens, non-standard asset behavior) that
+    /// would otherwise let shares mint for less custody than recorded (#100).
+    fn pull_assets(env: &Env, from: &Address, assets: i128) -> Result<(), Error> {
+        let asset = Self::vault_asset(env)?;
+        let client = token::Client::new(env, &asset);
+        let vault_addr = env.current_contract_address();
+        let before = client.balance(&vault_addr);
+        client.transfer(from, &vault_addr, &assets);
+        let after = client.balance(&vault_addr);
+        if after.checked_sub(before) != Some(assets) {
+            return Err(Error::TransferAmountMismatch);
+        }
+        Ok(())
+    }
+
+    /// Pays `assets` out of vault custody to `to`, verifying the exact amount
+    /// moved (#100).
+    fn push_assets(env: &Env, to: &Address, assets: i128) -> Result<(), Error> {
+        let asset = Self::vault_asset(env)?;
+        let client = token::Client::new(env, &asset);
+        let vault_addr = env.current_contract_address();
+        let before = client.balance(&vault_addr);
+        client.transfer(&vault_addr, to, &assets);
+        let after = client.balance(&vault_addr);
+        if before.checked_sub(after) != Some(assets) {
+            return Err(Error::TransferAmountMismatch);
+        }
+        Ok(())
     }
 
     fn fee_config(env: &Env) -> Result<(u32, u32), Error> {
@@ -1541,10 +1633,25 @@ impl DripPool {
         who.require_auth();
         Self::ensure_vault_unpaused(&env)?;
         Self::check_vault_accounting_allowed(&env)?;
+        if assets <= 0 {
+            return Err(Error::InvalidAmount);
+        }
         let mut snapshot = Self::load_vault(&env)?;
         if snapshot.version != expected_version {
             return Err(Error::StaleSnapshot);
         }
+
+        // #100: pull real custody in before any share accounting changes, so
+        // shares only ever mint against assets actually received. Guarded by
+        // the vault lock so a reentrant call can't observe or mutate
+        // accounting mid-transfer; the lock is released as soon as the
+        // transfer attempt resolves (success or failure) since nothing after
+        // this point makes another external call.
+        Self::vault_acquire_lock(&env)?;
+        let pulled = Self::pull_assets(&env, &who, assets);
+        Self::vault_release_lock(&env);
+        pulled?;
+
         Self::checkpoint_fees(&env, &mut snapshot)?;
         // Already validated above — checkpoint_fees' own version bumps must not re-trip this.
         let post_checkpoint_version = snapshot.version;
@@ -1804,9 +1911,19 @@ impl DripPool {
             .get(&VaultKey::WithdrawalRequest(request_id))
             .ok_or(Error::WithdrawalNotFound)?;
         let claimed = shares::claim_withdrawal(&mut request)?;
+        // #100: mark claimed *before* the external transfer (checks-effects-
+        // interactions) — `shares::claim_withdrawal` is idempotent on
+        // `assets_claimed`, so a reentrant claim during the transfer callback
+        // sees nothing left to claim instead of double-paying.
         env.storage()
             .persistent()
             .set(&VaultKey::WithdrawalRequest(request_id), &request);
+
+        Self::vault_acquire_lock(&env)?;
+        let pushed = Self::push_assets(&env, &destination, claimed);
+        Self::vault_release_lock(&env);
+        pushed?;
+
         env.events().publish(
             (symbol_short!("vault"), symbol_short!("q_claim")),
             (request_id, destination, claimed),
