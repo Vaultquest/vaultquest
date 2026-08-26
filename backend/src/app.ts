@@ -16,6 +16,7 @@ import { rateLimiter } from "./middleware/rateLimiter.js";
 import { requireApiKey } from "./middleware/api-key-auth.js";
 import { requireExportAuth } from "./middleware/export-auth.js";
 import { createLogger } from "./logger.js";
+import { requestLogContext } from "./utils/logRedaction.js";
 import type { Logger } from "pino";
 import type { CacheService } from "./services/cacheService.js";
 
@@ -59,34 +60,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Register Prometheus metrics plugin
   app.register(prometheusPlugin);
 
-  // Structured Logging for incoming requests and performance duration
-  app.addHook("onRequest", async (req, reply) => {
+  // Structured logging for incoming requests and performance duration.
+  // Only the normalized route template and allowlisted, redacted metadata are
+  // logged - never `req.url`, which carries wallet addresses, cursors, and
+  // other caller-controlled query values (issue #105).
+  app.addHook("onRequest", async (req) => {
     (req.raw as any).tempStartTime = performance.now();
+    const context = requestLogContext(req);
     req.log.info(
       {
         event: "request_incoming",
-        method: req.method,
-        url: req.url,
+        ...context,
         correlation_id: req.correlationId,
         ip: req.ip,
       },
-      `Incoming request: ${req.method} ${req.url}`,
+      `Incoming request: ${context.method} ${context.route}`,
     );
   });
 
   app.addHook("onResponse", async (req, reply) => {
     const startTime = (req.raw as any).tempStartTime || performance.now();
     const duration = performance.now() - startTime;
+    const context = requestLogContext(req);
     req.log.info(
       {
         event: "request_completed",
-        method: req.method,
-        url: req.url,
+        ...context,
         correlation_id: req.correlationId,
         status_code: reply.statusCode,
         duration_ms: Math.round(duration * 100) / 100,
       },
-      `Request completed: ${req.method} ${req.url} -> ${reply.statusCode} (${duration.toFixed(2)}ms)`,
+      `Request completed: ${context.method} ${context.route} -> ${reply.statusCode} (${duration.toFixed(2)}ms)`,
     );
   });
 

@@ -98,6 +98,37 @@ An intent is durably recorded *before* the wallet signs anything, so:
 - The `correlation_id` is carried through every log line and structured
   error response so the frontend can quote it in support tickets.
 
+## Request-log safety contract
+
+Request logs are shipped to long-lived aggregation systems, so they must not
+carry anything that identifies a wallet. `src/utils/logRedaction.ts` is the
+single place that decides what a request may contribute to a log line, and
+every request-scoped log statement goes through it - the `onRequest` and
+`onResponse` hooks in `src/app.ts`, the validation middleware, the central
+error handler, and the rate-limit plugin:
+
+- **Route, not URL.** Lines carry `route`, the registered route template
+  (`/actions/export`, `/api/privacy/deletion-manifest/:id`), never `req.url`.
+  A request that matched no route falls back to a normalized path whose
+  identifier-shaped segments become `:id` / `:wallet` / `:segment`.
+- **Allowlisted query metadata.** Low-cardinality, non-identifying values
+  (`limit`, `status`, `format`, `type`, `from`, `to`, `stale_after_ms`) are
+  logged as-is. Wallet addresses, cursors, and ids are logged as short salted
+  digests (`sha256:…`, salted by `LOG_REDACTION_SALT`), so a wallet's requests
+  stay correlatable without the address itself being recoverable. Secret-like
+  keys are dropped outright, and unrecognized keys default to `[redacted]` -
+  the allowlist fails closed as routes gain parameters.
+- **Both outcomes.** The same context is emitted on the success path, the
+  validation-failure path, and the error path. Zod errors are logged as issue
+  codes and field paths only, because a Zod message quotes the rejected value.
+- **Backstop.** `createLogger` additionally redacts `url`, `wallet`, `cursor`,
+  and credential headers at the pino level, so a call site that forgets the
+  contract still cannot leak them. Values that are already salted digests pass
+  through unchanged.
+
+Prometheus HTTP metrics use the same route template, which keeps identifiers
+out of metric labels and bounds label cardinality.
+
 ## Migration strategy
 
 Schema lives in `backend/prisma/schema.prisma`. Migrations live in
@@ -135,6 +166,7 @@ Required values:
 | `INTERNAL_SECRET` | Shared secret for `X-Internal-Secret` on `/internal/reconcile`. |
 | `PORT` | HTTP port (optional, default 3000). |
 | `LOG_LEVEL` | Pino log level (`info`, `debug`, …). |
+| `LOG_REDACTION_SALT` | Optional salt for hashed identifiers in logs. Random per process when unset. |
 
 ## Replay safety
 
