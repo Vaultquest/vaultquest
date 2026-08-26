@@ -439,7 +439,7 @@ impl VaultProxy {
                 unique.push_back(signer);
             }
         }
-        if unique.len() == 0 {
+        if unique.is_empty() {
             return Err(Error::Unauthorized);
         }
         Ok(unique)

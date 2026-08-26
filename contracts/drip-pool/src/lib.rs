@@ -233,12 +233,12 @@ pub enum ProposalAction {
     RemoveAdmin(Address),
     ChangeThreshold(u32),
     // ── Vault economic mutations — require quorum (#107) ──────────────────
-    VaultReportGain(i128),                       // amount
-    VaultReportLoss(i128),                       // amount
-    VaultSetFeeRecipient(Address),               // new recipient
-    VaultSetManagementFeeBps(u32),               // bps
-    VaultSetPerformanceFeeBps(u32),              // bps
-    VaultApplyEmergencyHaircut(u32, u32),        // (request_id, haircut_bps)
+    VaultReportGain(i128),                // amount
+    VaultReportLoss(i128),                // amount
+    VaultSetFeeRecipient(Address),        // new recipient
+    VaultSetManagementFeeBps(u32),        // bps
+    VaultSetPerformanceFeeBps(u32),       // bps
+    VaultApplyEmergencyHaircut(u32, u32), // (request_id, haircut_bps)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -365,7 +365,7 @@ impl DripPool {
         pool: &mut Pool,
         new_admins: Vec<Address>,
     ) -> Result<(), Error> {
-        Self::validate_quorum(new_admins.len() as u32, pool.threshold)?;
+        Self::validate_quorum(new_admins.len(), pool.threshold)?;
         pool.signer_epoch += 1;
         pool.signer_set_hash = env.crypto().sha256(&new_admins.clone().to_xdr(env)).into();
         env.storage().instance().set(&DataKey::Admins, &new_admins);
@@ -565,7 +565,7 @@ impl DripPool {
 
         env.events().publish(
             (symbol_short!("prop_app"), proposal_id, signer),
-            proposal.approvals.len() as u32,
+            proposal.approvals.len(),
         );
 
         let threshold_met = proposal.approvals.len() >= pool.threshold;
@@ -656,7 +656,7 @@ impl DripPool {
                     .instance()
                     .get(&DataKey::Admins)
                     .unwrap_or(vec![env]);
-                Self::validate_quorum(admins.len() as u32, new_threshold)?;
+                Self::validate_quorum(admins.len(), new_threshold)?;
                 pool.threshold = new_threshold;
                 env.storage().instance().set(&DataKey::Pool, &pool);
 
@@ -701,7 +701,11 @@ impl DripPool {
                 if bps > 10_000 {
                     return Err(Error::InvalidFeeBps);
                 }
-                let old_bps: u32 = env.storage().instance().get(&VaultKey::ManagementFeeBps).unwrap_or(0);
+                let old_bps: u32 = env
+                    .storage()
+                    .instance()
+                    .get(&VaultKey::ManagementFeeBps)
+                    .unwrap_or(0);
                 env.storage()
                     .instance()
                     .set(&VaultKey::ManagementFeeBps, &bps);
@@ -714,7 +718,11 @@ impl DripPool {
                 if bps > 10_000 {
                     return Err(Error::InvalidFeeBps);
                 }
-                let old_bps: u32 = env.storage().instance().get(&VaultKey::PerformanceFeeBps).unwrap_or(0);
+                let old_bps: u32 = env
+                    .storage()
+                    .instance()
+                    .get(&VaultKey::PerformanceFeeBps)
+                    .unwrap_or(0);
                 env.storage()
                     .instance()
                     .set(&VaultKey::PerformanceFeeBps, &bps);
@@ -1192,8 +1200,8 @@ impl DripPool {
             let hash: BytesN<32> = env.crypto().sha256(&input).into();
 
             let mut bytes = [0u8; 8];
-            for i in 0..8 {
-                bytes[i] = hash.get_unchecked(i as u32);
+            for (i, byte) in bytes.iter_mut().enumerate() {
+                *byte = hash.get_unchecked(i as u32);
             }
             let x = u64::from_be_bytes(bytes);
 
@@ -1336,9 +1344,7 @@ impl DripPool {
         env.storage()
             .instance()
             .set(&VaultKey::AssetContract, &asset);
-        env.storage()
-            .instance()
-            .set(&VaultKey::VaultLocked, &false);
+        env.storage().instance().set(&VaultKey::VaultLocked, &false);
         env.storage()
             .instance()
             .set(&VaultKey::WithdrawalNonce, &0u32);
@@ -2023,7 +2029,7 @@ impl DripPool {
         request_id: u32,
         haircut_bps: u32,
     ) -> Result<u32, Error> {
-        caller.require_auth();
+        // See `vault_set_management_fee_bps` — `propose` already authorizes `caller`.
         Self::require_signer(&env, &caller)?;
         Self::propose(
             env,
@@ -2075,7 +2081,7 @@ impl DripPool {
     /// Deprecated single-signer entrypoint — now gated: creates a proposal that
     /// requires quorum before taking effect. Returns the proposal id. (#107)
     pub fn vault_report_gain(env: Env, caller: Address, amount: i128) -> Result<u32, Error> {
-        caller.require_auth();
+        // See `vault_set_management_fee_bps` — `propose` already authorizes `caller`.
         Self::require_signer(&env, &caller)?;
         Self::propose(env, caller, ProposalAction::VaultReportGain(amount))
     }
@@ -2083,7 +2089,7 @@ impl DripPool {
     /// Deprecated single-signer entrypoint — now gated: creates a proposal that
     /// requires quorum before taking effect. Returns the proposal id. (#107)
     pub fn vault_report_loss(env: Env, caller: Address, amount: i128) -> Result<u32, Error> {
-        caller.require_auth();
+        // See `vault_set_management_fee_bps` — `propose` already authorizes `caller`.
         Self::require_signer(&env, &caller)?;
         Self::propose(env, caller, ProposalAction::VaultReportLoss(amount))
     }
@@ -2155,7 +2161,7 @@ impl DripPool {
         caller: Address,
         recipient: Address,
     ) -> Result<u32, Error> {
-        caller.require_auth();
+        // See `vault_set_management_fee_bps` — `propose` already authorizes `caller`.
         Self::require_signer(&env, &caller)?;
         Self::propose(env, caller, ProposalAction::VaultSetFeeRecipient(recipient))
     }
@@ -2176,7 +2182,9 @@ impl DripPool {
     /// Deprecated single-signer entrypoint — now gated: creates a proposal that
     /// requires quorum before taking effect. Returns the proposal id. (#107)
     pub fn vault_set_management_fee_bps(env: Env, caller: Address, bps: u32) -> Result<u32, Error> {
-        caller.require_auth();
+        // `propose` below performs both `require_auth` and `require_signer` for
+        // `caller` — calling `require_auth` here too double-authorizes the same
+        // address within one invocation frame, which the host rejects.
         Self::require_signer(&env, &caller)?;
         if bps > 10_000 {
             return Err(Error::InvalidFeeBps);
@@ -2186,8 +2194,12 @@ impl DripPool {
 
     /// Deprecated single-signer entrypoint — now gated: creates a proposal that
     /// requires quorum before taking effect. Returns the proposal id. (#107)
-    pub fn vault_set_performance_fee_bps(env: Env, caller: Address, bps: u32) -> Result<u32, Error> {
-        caller.require_auth();
+    pub fn vault_set_performance_fee_bps(
+        env: Env,
+        caller: Address,
+        bps: u32,
+    ) -> Result<u32, Error> {
+        // See `vault_set_management_fee_bps` — `propose` already authorizes `caller`.
         Self::require_signer(&env, &caller)?;
         if bps > 10_000 {
             return Err(Error::InvalidFeeBps);

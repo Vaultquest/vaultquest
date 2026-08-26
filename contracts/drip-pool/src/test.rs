@@ -39,7 +39,8 @@ fn skip_lockup(env: &Env) {
 
 /// Deploys a standard Stellar Asset Contract to back a vault under test.
 fn deploy_asset(env: &Env, admin: &Address) -> Address {
-    env.register_stellar_asset_contract_v2(admin.clone()).address()
+    env.register_stellar_asset_contract_v2(admin.clone())
+        .address()
 }
 
 /// Mints `amount` of `asset` to `to` via the SAC admin interface.
@@ -1750,7 +1751,7 @@ fn legacy_deposit_still_works_when_vault_unused() {
 
 #[test]
 fn fee_setters_reject_out_of_bounds_values_before_storage_mutation() {
-    let (env, client, admin) = setup();
+    let (_env, client, admin) = setup();
     client.create(&admin);
 
     // 0 is valid
@@ -1758,8 +1759,12 @@ fn fee_setters_reject_out_of_bounds_values_before_storage_mutation() {
     assert!(client.try_vault_set_performance_fee_bps(&admin, &0).is_ok());
 
     // 10,000 (max) is valid
-    assert!(client.try_vault_set_management_fee_bps(&admin, &10_000).is_ok());
-    assert!(client.try_vault_set_performance_fee_bps(&admin, &10_000).is_ok());
+    assert!(client
+        .try_vault_set_management_fee_bps(&admin, &10_000)
+        .is_ok());
+    assert!(client
+        .try_vault_set_performance_fee_bps(&admin, &10_000)
+        .is_ok());
 
     // 10,001 (max + 1) is invalid
     assert_eq!(
@@ -1794,8 +1799,12 @@ fn legacy_invalid_configuration_is_safely_capped_during_accrual() {
 
     // Manually force invalid config via raw storage to simulate pre-migration state
     env.as_contract(&client.address, || {
-        env.storage().instance().set(&VaultKey::ManagementFeeBps, &15_000u32);
-        env.storage().instance().set(&VaultKey::PerformanceFeeBps, &u32::MAX);
+        env.storage()
+            .instance()
+            .set(&VaultKey::ManagementFeeBps, &15_000u32);
+        env.storage()
+            .instance()
+            .set(&VaultKey::PerformanceFeeBps, &u32::MAX);
     });
 
     client.vault_deposit(&alice, &100_000, &client.vault_snapshot().version);
@@ -1903,7 +1912,9 @@ mod reentrant_token {
 
         /// Configures the vault + attacker address the reentrant call will target.
         pub fn arm(env: Env, vault: Address, attacker: Address, expected_version: u64) {
-            env.storage().instance().set(&ReentrantTokenKey::Vault, &vault);
+            env.storage()
+                .instance()
+                .set(&ReentrantTokenKey::Vault, &vault);
             env.storage()
                 .instance()
                 .set(&ReentrantTokenKey::Attacker, &attacker);
