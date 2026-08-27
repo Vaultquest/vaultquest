@@ -118,7 +118,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const exportAuthGuard = requireExportAuth({
     apiKey: deps.apiKey,
     internalSecret: deps.internalSecret,
-    ...(deps.exportSignatureTtlMs === undefined ? {} : { signatureTtlMs: deps.exportSignatureTtlMs })
+    ...(deps.exportSignatureTtlMs === undefined ? {} : { signatureTtlMs: deps.exportSignatureTtlMs }),
+    ...(deps.cacheService === undefined ? {} : { cacheService: deps.cacheService })
   });
 
   app.register(healthRoutes(svc, deps.prisma, deps.cacheService));
