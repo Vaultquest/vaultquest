@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import { getPrometheusMetrics } from "../services/prometheusMetrics.js";
+import { routeTemplate } from "../utils/logRedaction.js";
 
 /**
  * Fastify plugin that automatically records HTTP metrics for Prometheus
@@ -10,13 +11,16 @@ const prometheusPlugin: FastifyPluginAsync = async (app) => {
   // Record request start time and route
   app.addHook("onRequest", async (req) => {
     (req as any).prometheusStartTime = performance.now();
-    (req as any).prometheusRoute = req.url.split("?")[0]; // Remove query params
+    // Normalized route template, not the raw URL: keeps wallet addresses and
+    // cursors out of metric labels (issue #105) and keeps label cardinality
+    // bounded by the number of registered routes.
+    (req as any).prometheusRoute = routeTemplate(req);
   });
 
   // Record request metrics on response
   app.addHook("onResponse", async (req, reply) => {
     const startTime = (req as any).prometheusStartTime || performance.now();
-    const route = (req as any).prometheusRoute || req.url;
+    const route = (req as any).prometheusRoute || routeTemplate(req);
     const duration = (performance.now() - startTime) / 1000; // Convert to seconds
 
     let method = req.method;

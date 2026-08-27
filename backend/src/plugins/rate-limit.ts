@@ -5,6 +5,7 @@
 import fp from "fastify-plugin";
 import type { FastifyInstance, FastifyPluginOptions } from "fastify";
 import rateLimit from "@fastify/rate-limit";
+import { requestLogContext } from "../utils/logRedaction.js";
 
 export interface RateLimitOptions extends FastifyPluginOptions {
   /** Max requests per window per IP (default: 100) */
@@ -38,14 +39,14 @@ async function rateLimitPlugin(
     // Log exceeded attempts for observability.
     onExceeding(request) {
       request.log.warn(
-        { ip: request.ip, url: request.url },
+        { ip: request.ip, ...requestLogContext(request) },
         "Rate limit approaching for IP"
       );
     },
 
     onExceeded(request) {
       request.log.warn(
-        { ip: request.ip, url: request.url },
+        { ip: request.ip, ...requestLogContext(request) },
         "Rate limit exceeded for IP – returning 429"
       );
     },
