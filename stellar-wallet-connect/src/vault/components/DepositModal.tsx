@@ -7,14 +7,14 @@ import { useState, useCallback } from "react";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import Modal from "../../components/Modal";
 import type { PoolSummary } from "../contract/types";
-import { formatAmount } from "../lib/format";
+import { explorerTxUrl, formatAmount } from "../lib/format";
 
 type Step = "input" | "review" | "broadcasting" | "success";
 
 export interface DepositModalProps {
   pool: PoolSummary;
   walletBalance: string;
-  onDeposit: (amount: string) => Promise<void>;
+  onDeposit: (amount: string) => Promise<{ txHash: string }>;
   onClose: () => void;
 }
 
@@ -32,9 +32,13 @@ function estimateWinChanceChange(currentTvl: bigint, depositAmount: bigint, part
 export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDeposit, onClose }) => {
   const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
   const assetDisplayName = pool ? getAssetDisplayName(network, pool.asset) : "";
+  // stellar.expert only serves "public" and "testnet" explorers; futurenet/standalone
+  // deployments fall back to the testnet path rather than a broken mainnet link.
+  const explorerNetwork = network === "mainnet" ? "public" : "testnet";
   const [step, setStep] = useState<Step>("input");
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
 
   const balanceNum = parseFloat(walletBalance);
   const amountNum = parseFloat(amount) || 0;
@@ -66,7 +70,8 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
     setStep("broadcasting");
     setError(null);
     try {
-      await onDeposit(amount);
+      const result = await onDeposit(amount);
+      setTxHash(result.txHash);
       setStep("success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Transaction failed");
@@ -249,6 +254,16 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
             <p className="text-sm text-gray-400 text-center max-w-xs">
               Your deposit of {amount} {assetDisplayName} has been successfully submitted and confirmed on-chain.
             </p>
+            {txHash && (
+              <a
+                href={explorerTxUrl(txHash, explorerNetwork)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-mono text-red-400 underline hover:text-red-300"
+              >
+                View on Stellar Expert
+              </a>
+            )}
             <button
               type="button"
               onClick={onClose}
