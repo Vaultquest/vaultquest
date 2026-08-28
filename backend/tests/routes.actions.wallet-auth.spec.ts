@@ -4,7 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { createTestWallet } from "./helpers/wallet.js";
-import { buildExportChallenge } from "../src/middleware/export-auth.js";
+import { buildWalletChallenge } from "../src/middleware/wallet-auth.js";
 import { CacheService } from "../src/services/cacheService.js";
 import { createLogger } from "../src/logger.js";
 
@@ -124,7 +124,7 @@ describe("GET /actions/export authorization (#10)", () => {
       const res = await get(app, `/actions/export?wallet=${walletA.address}`, {
         "x-wallet-address": walletA.address,
         "x-wallet-timestamp": String(timestamp),
-        "x-wallet-signature": walletA.signMessage(buildExportChallenge(walletB.address, timestamp))
+        "x-wallet-signature": walletA.signMessage(buildWalletChallenge(walletB.address, timestamp))
       });
 
       expect(res.statusCode).toBe(401);

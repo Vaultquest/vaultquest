@@ -1,9 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { buildApp } from "../src/app.js";
 import type { FastifyInstance } from "fastify";
-import { injectWithCsrf } from "./helpers/csrf.js";
+import { injectWithCsrf as origInjectWithCsrf } from "./helpers/csrf.js";
+const injectWithCsrf = (app: any, method: any, url: any, payload?: any, headers = {}) => origInjectWithCsrf(app, method, url, payload, { ...headers, "x-internal-secret": "very-secret-123" });
 
 describe("/internal/reconcile", () => {
   let db: TestDb;
@@ -38,6 +40,7 @@ describe("/internal/reconcile", () => {
       action_type: "deposit",
       action_payload: { schema_version: 1, vault_id: "v1", amount: "100", token: "USDC" }
     }, { "idempotency-key": key });
+    if (create.statusCode !== 201 && create.statusCode !== 200) throw new Error("create failed: " + JSON.stringify(create.json()));
     const id = create.json().data.id;
     await injectWithCsrf(app, "PATCH", `/actions/${id}/submitted`, { tx_hash: "tx_match" });
 
@@ -49,7 +52,7 @@ describe("/internal/reconcile", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().data.matched).toBe(true);
 
-    const row = await app.inject({ method: "GET", url: `/actions/${id}` });
+    const row = await app.inject({ headers: { "x-internal-secret": "very-secret-123" }, method: "GET", url: `/actions/${id}` });
     expect(row.json().data.status).toBe("confirmed");
   });
 

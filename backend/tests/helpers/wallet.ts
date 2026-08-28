@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { buildExportChallenge } from "../../src/middleware/export-auth.js";
+import { buildWalletChallenge } from "../../src/middleware/wallet-auth.js";
 
 /**
  * Generates real ed25519 wallets and real signatures, so the authorization
@@ -73,12 +73,12 @@ export function createTestWallet(): TestWallet {
     address,
     privateKey,
     signMessage,
-    sign: (timestampMs: number) => signMessage(buildExportChallenge(address, timestampMs)),
+    sign: (timestampMs: number) => signMessage(buildWalletChallenge(address, timestampMs)),
     authHeaders(timestampMs = Date.now()) {
       return {
         "x-wallet-address": address,
         "x-wallet-timestamp": String(timestampMs),
-        "x-wallet-signature": signMessage(buildExportChallenge(address, timestampMs))
+        "x-wallet-signature": signMessage(buildWalletChallenge(address, timestampMs))
       };
     }
   };

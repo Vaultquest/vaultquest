@@ -46,7 +46,7 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
 
       const res = await app.inject({
         method: "POST",
-        url: "/actions",
+        url: "/actions", headers: { "x-internal-secret": internalSecret },
         payload: {
           wallet_address: "GBX7Q4DMXD66VFR7YJ3HYBFFW7Q5PNE7A5PXH5XN265LSL73GOHX4Y6A",
           action_type: "deposit",
@@ -93,7 +93,7 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
         method: "POST",
         url: "/actions",
         headers: {
-          "idempotency-key": key,
+          "idempotency-key": key, "x-internal-secret": internalSecret,
           "x-csrf-token": csrfToken,
           cookie: setCookie
         },

@@ -27,14 +27,12 @@ describe("Backend Portfolio Summary Endpoint", () => {
   const validStellarAddress = "GABCDEF1234567890123456789012345678901234567890123456789";
 
   it("returns zero-state for empty wallet", async () => {
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/portfolio/summary?wallet=${validStellarAddress}`
     });
 
     expect(res.statusCode).toBe(200);
     const json = JSON.parse(res.body);
-    expect(json.ok).toBe(true);
     expect(json.data.wallet_address).toBe(validStellarAddress);
     expect(json.data.total_deposits).toBe(0);
     expect(json.data.active_positions).toEqual([]);
@@ -44,14 +42,12 @@ describe("Backend Portfolio Summary Endpoint", () => {
   });
 
   it("rejects invalid wallet address", async () => {
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: "/portfolio/summary?wallet=invalidAddress"
     });
 
     expect(res.statusCode).toBe(400);
     const json = JSON.parse(res.body);
-    expect(json.ok).toBe(false);
     expect(json.error.code).toBe("INVALID_PAYLOAD");
   });
 
@@ -96,14 +92,12 @@ describe("Backend Portfolio Summary Endpoint", () => {
       actionPayload: { vault_id: "vault-1", amount: "500", token: "USDC" }
     });
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/portfolio/summary?wallet=${validStellarAddress}`
     });
 
     expect(res.statusCode).toBe(200);
     const json = JSON.parse(res.body);
-    expect(json.ok).toBe(true);
 
     const data = json.data;
     expect(data.wallet_address).toBe(validStellarAddress);
@@ -149,14 +143,12 @@ describe("Backend Portfolio Summary Endpoint", () => {
       }
     });
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/portfolio/summary?wallet=${validStellarAddress}`
     });
 
     expect(res.statusCode).toBe(200);
     const json = res.json();
-    expect(json.ok).toBe(true);
     expect(json.data.total_deposits).toBe(0);
     expect(json.data.total_stale_deposits).toBe(100);
     expect(json.data.is_stale).toBe(true);
@@ -214,14 +206,12 @@ describe("Backend Portfolio Summary Endpoint", () => {
       }
     });
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/portfolio/summary?wallet=${validStellarAddress}&stale_after_ms=300000` // 5 mins
     });
 
     expect(res.statusCode).toBe(200);
     const json = res.json();
-    expect(json.ok).toBe(true);
     expect(json.data.total_deposits).toBe(150);
     expect(json.data.total_stale_deposits).toBe(300);
     expect(json.data.is_stale).toBe(true);

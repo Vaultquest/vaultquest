@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
-import { PrivacyEncryptionService, type EncryptedPayload } from "./privacyEncryptionService.js";
-import { PrivacyAuditService } from "./privacyAuditService.js";
+import type { PrivacyEncryptionService} from "./privacyEncryptionService.js";
+import { type EncryptedPayload } from "./privacyEncryptionService.js";
+import type { PrivacyAuditService } from "./privacyAuditService.js";
 
 export interface DataExportBundle {
   provenance: {

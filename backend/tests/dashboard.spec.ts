@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { buildApp } from "../src/app.js";
 import type { FastifyInstance } from "fastify";
-import { injectWithCsrf } from "./helpers/csrf.js";
+import { injectWithCsrf as origInjectWithCsrf } from "./helpers/csrf.js";
+const injectWithCsrf = (app: any, method: any, url: any, payload?: any, headers = {}) => origInjectWithCsrf(app, method, url, payload, { ...headers, "x-internal-secret": "test-secret" });
 
 describe("GET /dashboard/summary (#14)", () => {
   let db: TestDb;
@@ -32,13 +33,12 @@ describe("GET /dashboard/summary (#14)", () => {
   }
 
   it("rejects requests without ?wallet=", async () => {
-    const res = await app.inject({ method: "GET", url: "/dashboard/summary" });
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET", url: "/dashboard/summary" });
     expect(res.statusCode).toBe(400);
   });
 
   it("returns zeroed summary for an unknown wallet", async () => {
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: "/dashboard/summary?wallet=GUNKNOWN"
     });
     expect(res.statusCode).toBe(200);
@@ -71,8 +71,7 @@ describe("GET /dashboard/summary (#14)", () => {
     await injectWithCsrf(app, "PATCH", `/actions/${a}/submitted`, { tx_hash: "TX_A_HASH" });
     await injectWithCsrf(app, "PATCH", `/actions/${b}/submitted`, { tx_hash: "TX_B_HASH" });
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/dashboard/summary?wallet=${wallet}`
     });
     expect(res.statusCode).toBe(200);
@@ -91,8 +90,7 @@ describe("GET /dashboard/summary (#14)", () => {
     const wallet = "GSTALE";
     await postAction(wallet);
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/dashboard/summary?wallet=${wallet}&stale_after_ms=0`
     });
     expect(res.statusCode).toBe(200);
@@ -104,8 +102,7 @@ describe("GET /dashboard/summary (#14)", () => {
     await postAction("GA");
     await postAction("GB");
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: "/dashboard/summary?wallet=GA"
     });
     expect(res.statusCode).toBe(200);

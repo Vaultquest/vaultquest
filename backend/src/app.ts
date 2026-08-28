@@ -14,7 +14,8 @@ import { MetricsService } from "./services/metricsService.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { rateLimiter } from "./middleware/rateLimiter.js";
 import { requireApiKey } from "./middleware/api-key-auth.js";
-import { requireExportAuth } from "./middleware/export-auth.js";
+import { requireWalletAuth } from "./middleware/wallet-auth.js";
+import { requireServiceAuth } from "./middleware/service-auth.js";
 import { createLogger } from "./logger.js";
 import { requestLogContext } from "./utils/logRedaction.js";
 import type { Logger } from "pino";
@@ -115,7 +116,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // Export authorization (#10). Deliberately not disabled by absent config:
   // export discloses a wallet's history, so it always demands a principal.
-  const exportAuthGuard = requireExportAuth({
+  const serviceAuthGuard = requireServiceAuth(deps.internalSecret);
+  const walletAuthGuard = requireWalletAuth({
     apiKey: deps.apiKey,
     internalSecret: deps.internalSecret,
     ...(deps.exportSignatureTtlMs === undefined ? {} : { signatureTtlMs: deps.exportSignatureTtlMs }),
@@ -123,8 +125,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.register(healthRoutes(svc, deps.prisma, deps.cacheService));
-  app.register(actionsRoutes(svc, apiKeyGuard, exportAuthGuard));
-  app.register(savedPoolsRoutes(savedPoolsSvc));
+  app.register(actionsRoutes(svc, apiKeyGuard, walletAuthGuard, serviceAuthGuard));
+  app.register(savedPoolsRoutes(savedPoolsSvc, walletAuthGuard));
   app.register(internalRoutes(svc, deps.internalSecret));
   app.register(metricsRoutes(metricsSvc, apiKeyGuard));
   app.register(prometheusRoutes(prometheusScrapeGuard));

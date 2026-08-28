@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { startTestDb, resetDb, type TestDb } from "./helpers/db.js";
 import { buildApp } from "../src/app.js";
 import type { FastifyInstance } from "fastify";
-import { injectWithCsrf } from "./helpers/csrf.js";
+import { injectWithCsrf as origInjectWithCsrf } from "./helpers/csrf.js";
+const injectWithCsrf = (app: any, method: any, url: any, payload?: any, headers = {}) => origInjectWithCsrf(app, method, url, payload, { ...headers, "x-internal-secret": "test-secret" });
 
 describe("Pool status API endpoints", () => {
   let db: TestDb;
@@ -45,8 +46,7 @@ describe("Pool status API endpoints", () => {
     await createPoolAction("GPOOL1", "pool-1");
     const different = await createPoolAction("GPOOL2", "pool-2");
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: "/actions?wallet=GPOOL1&limit=10"
     });
     expect(res.statusCode).toBe(200);
@@ -73,8 +73,7 @@ describe("Pool status API endpoints", () => {
   });
 
   it("rejects pool action with invalid wallet address on portfolio", async () => {
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: "/portfolio/summary?wallet=invalidAddress"
     });
     expect(res.statusCode).toBe(400);
@@ -88,8 +87,7 @@ describe("Pool status API endpoints", () => {
 
     await injectWithCsrf(app, "PATCH", `/actions/${a}/submitted`, { tx_hash: "TX_POOL_A" });
 
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/dashboard/summary?wallet=${wallet}`
     });
     expect(res.statusCode).toBe(200);
@@ -102,8 +100,7 @@ describe("Pool status API endpoints", () => {
   });
 
   it("handles empty pool actions for unknown wallet", async () => {
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: "/actions?wallet=GUNKNOWN&limit=5"
     });
     expect(res.statusCode).toBe(200);
@@ -111,8 +108,7 @@ describe("Pool status API endpoints", () => {
   });
 
   it("returns stable error shape for non-existent pool action", async () => {
-    const res = await app.inject({
-      method: "GET",
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: "/actions/00000000-0000-0000-0000-000000000000"
     });
     expect(res.statusCode).toBe(404);
@@ -130,8 +126,7 @@ describe("Pool status API endpoints", () => {
       await createPoolAction(wallet, `pool-${i}`);
     }
 
-    const page1 = await app.inject({
-      method: "GET",
+    const page1 = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/actions?wallet=${wallet}&limit=2`
     });
     expect(page1.statusCode).toBe(200);
@@ -139,8 +134,7 @@ describe("Pool status API endpoints", () => {
     expect(page1.json().meta.pagination.has_more).toBe(true);
 
     const cursor = page1.json().meta.pagination.next_cursor;
-    const page2 = await app.inject({
-      method: "GET",
+    const page2 = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET",
       url: `/actions?wallet=${wallet}&limit=2&cursor=${cursor}`
     });
     expect(page2.statusCode).toBe(200);

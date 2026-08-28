@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import type { CacheService } from "../cacheService.js";
-import { PrivacyAuditService } from "./privacyAuditService.js";
+import type { PrivacyAuditService } from "./privacyAuditService.js";
 
 export interface DeletionResult {
   manifestId: string;
@@ -130,7 +130,7 @@ export class PrivacyDeletionService {
       where: { walletAddress: normalizedWallet },
       data: {
         walletAddress: anonymizedWallet,
-        actionPayload: undefined,
+        actionPayload: require("@prisma/client").Prisma.DbNull,
         errorDetail: null,
         redactedAt: new Date(),
       },

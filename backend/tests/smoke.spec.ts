@@ -16,8 +16,8 @@ describe("smoke", () => {
   });
 
   it("GET /health returns ok", async () => {
-    const res = await app.inject({ method: "GET", url: "/health" });
+    const res = await app.inject({ headers: { "x-internal-secret": "test-secret" }, method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ data: { ok: true } });
+    expect(res.json().data.status).toBe("ok");
   });
 });

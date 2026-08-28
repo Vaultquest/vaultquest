@@ -24,7 +24,7 @@ const prometheusPlugin: FastifyPluginAsync = async (app) => {
     const duration = (performance.now() - startTime) / 1000; // Convert to seconds
 
     let method = req.method;
-    let statusCode = reply.statusCode;
+    const statusCode = reply.statusCode;
 
     // Normalize method and route for better metrics
     method = method.toUpperCase();

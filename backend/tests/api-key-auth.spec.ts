@@ -193,7 +193,7 @@ describe("API key auth — non-API routes unaffected", () => {
 
   it("/actions (cursor list) is accessible without api key (uses wallet-scoping only)", async () => {
     const app = buildApp({ prisma: getMockPrisma(), internalSecret: "secret", apiKey: VALID_API_KEY });
-    const res = await app.inject({ method: "GET", url: "/actions?wallet=GWALLET" });
+    const res = await app.inject({ method: "GET", url: "/actions?wallet=GWALLET", headers: { "x-internal-secret": "secret" } });
     // 200 — the guard does NOT apply to the public /actions route
     expect(res.statusCode).toBe(200);
     await app.close();

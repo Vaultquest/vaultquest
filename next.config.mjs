@@ -3,6 +3,7 @@ import i18nConfig from "./next-i18next.config.js";
 
 /** @type {import('next').NextConfig} */
 const { i18n } = i18nConfig;
+const { localePath, reloadOnPrerender, ...nextI18n } = i18n;
 
 const nextConfig = {
   reactStrictMode: true,
@@ -23,7 +24,7 @@ const nextConfig = {
     };
     return config;
   },
-  i18n,
+  i18n: nextI18n,
   images: {
     formats: ['image/avif', 'image/webp'],
     remotePatterns: [],
