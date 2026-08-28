@@ -2,7 +2,7 @@ import type { FastifyRequest } from "fastify";
 import { AppError } from "../errors.js";
 import { ERROR_CODES } from "../constants.js";
 import { verifySignature, isValidStellarAddress } from "../utils/stellarKey.js";
-import type { CacheService } from "../services/cacheService.js";
+import { timingSafeEqual, verifyInternalSecret } from "./internal-secret.js";
 
 /**
  * Authorization for the activity export endpoint (issue #10).
@@ -63,16 +63,6 @@ function header(req: FastifyRequest, name: string): string | undefined {
   const raw = req.headers[name];
   const value = Array.isArray(raw) ? raw[0] : raw;
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-/** Constant-time comparison, matching the approach in `api-key-auth.ts`. */
-function timingSafeEqual(a: string, b: string): boolean {
-  const maxLen = Math.max(a.length, b.length);
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < maxLen; i++) {
-    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  }
-  return diff === 0;
 }
 
 function unauthorized(message: string): AppError {
@@ -146,9 +136,8 @@ async function authenticate(
   replayGuard: Pick<CacheService, "consumeOnce">
 ): Promise<ExportPrincipal> {
   // Service credentials first: they are unambiguous and cheap to check.
-  const internalSecret = header(req, INTERNAL_SECRET_HEADER);
-  if (internalSecret !== undefined) {
-    if (!timingSafeEqual(internalSecret, options.internalSecret)) {
+  if (header(req, INTERNAL_SECRET_HEADER) !== undefined) {
+    if (!verifyInternalSecret(req, options.internalSecret)) {
       throw unauthorized("invalid internal service secret");
     }
     return { kind: "service", via: "internal-secret" };
