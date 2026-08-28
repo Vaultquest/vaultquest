@@ -1,9 +1,17 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
-import { useAccount } from "wagmi";
-import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { useStore } from "@nanostores/react";
+import {
+  connectedPublicKey,
+  connectedNetwork,
+  networkReadiness,
+} from "@vaultquest/stellar-wallet-connect/src/core/store";
+import { EXPECTED_NETWORK } from "@vaultquest/stellar-wallet-connect/src/lib/wallets";
+import { DepositModal } from "@vaultquest/stellar-wallet-connect/src/vault/components/DepositModal";
+import { createSorobanVaultClient } from "@vaultquest/stellar-wallet-connect/src/vault/contract/sorobanClient";
+import { defaultVaultDataConfig } from "@vaultquest/stellar-wallet-connect/src/vault/data/config";
 import {
   Wallet,
   ChevronLeft,
@@ -20,7 +28,7 @@ import {
   Ticket,
 } from "lucide-react";
 import { MOCK_VAULTS } from "@/components/app/VaultList";
-import DepositModal from "@/components/app/DepositModal";
+import { ROUND_STATUS } from "@/lib/vault-status";
 import RoundStatusBadge from "@/components/app/RoundStatusBadge";
 import VaultHealthStatusPanel from "@/components/app/VaultHealthStatusPanel";
 import VaultRewardsExplanationModal from "@/components/app/VaultRewardsExplanationModal";
@@ -101,13 +109,22 @@ function DetailSkeleton() {
   );
 }
 
+const POOL_STATUS_BY_ROUND = {
+  [ROUND_STATUS.ACTIVE]: "open",
+  [ROUND_STATUS.PENDING]: "locked",
+  [ROUND_STATUS.COMPLETED]: "settled",
+};
+
 export default function VaultDetailPage({ params }) {
   const { id } = params;
-  const { isConnected } = useAccount();
-  const { openConnectModal } = useConnectModal();
+  const walletAddress = useStore(connectedPublicKey);
+  const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
+  const readiness = useStore(networkReadiness);
+  const stellarConnected = Boolean(walletAddress);
   const [mounted, setMounted] = useState(false);
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [connecting, setConnecting] = useState(false);
 
   // Estimator States
   const [calcPrincipal, setCalcPrincipal] = useState("1000");
@@ -119,6 +136,83 @@ export default function VaultDetailPage({ params }) {
   const vault = useMemo(() => {
     return MOCK_VAULTS.find((v) => String(v.id) === id);
   }, [id]);
+
+  // The vault directory's per-vault "network" badge (Avalanche/Solana/Stellar) is
+  // decorative catalog metadata — every vault settles through the one real,
+  // deployed Soroban drip-pool contract, so the deposit transaction itself is
+  // always Stellar-signed regardless of that badge.
+  const pool = useMemo(() => {
+    if (!vault) return null;
+    return {
+      id: String(vault.id),
+      name: vault.name,
+      status: POOL_STATUS_BY_ROUND[vault.status] ?? "open",
+      tvl: String(vault.tvl),
+      asset: vault.asset,
+      participantCount: vault.participantCount ?? 0,
+      expectedYield: `${vault.apy}% APY`,
+      prize: undefined,
+      opensAt: null,
+      locksAt: null,
+      drawsAt: null,
+    };
+  }, [vault]);
+
+  const sorobanClient = useMemo(
+    () =>
+      createSorobanVaultClient({
+        contractId: defaultVaultDataConfig.dripPoolContractId,
+        rpcUrl: defaultVaultDataConfig.network.sorobanRpcUrl,
+        networkPassphrase: defaultVaultDataConfig.network.passphrase,
+        network,
+      }),
+    [network],
+  );
+
+  const [usdcBalance, setUsdcBalance] = useState("0");
+
+  useEffect(() => {
+    if (!walletAddress) {
+      setUsdcBalance("0");
+      return;
+    }
+    let cancelled = false;
+    import("@vaultquest/stellar-wallet-connect/src/core/walletService").then((walletService) =>
+      walletService.getWalletHealth(walletAddress).then((health) => {
+        if (!cancelled && health.balances) {
+          setUsdcBalance(health.balances.USDC.decimal);
+        }
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [walletAddress]);
+
+  const handleConnectStellar = useCallback(async () => {
+    setConnecting(true);
+    try {
+      const walletService = await import("@vaultquest/stellar-wallet-connect/src/core/walletService");
+      await walletService.connectWallet("freighter");
+    } catch (err) {
+      toast.error(err?.message || "Unable to connect wallet");
+    } finally {
+      setConnecting(false);
+    }
+  }, []);
+
+  const handleDeposit = useCallback(
+    async (amount) => {
+      if (!vault) throw new Error("Vault not found");
+      const result = await sorobanClient.submitAction("join", {
+        poolId: String(vault.id),
+        walletAddress,
+        amount,
+      });
+      return result;
+    },
+    [sorobanClient, vault, walletAddress],
+  );
 
   const copyAddress = () => {
     navigator.clipboard.writeText("0x9c31A47055Cf166e5fD8dfDFf9d85449A38cCc10");
@@ -326,7 +420,7 @@ export default function VaultDetailPage({ params }) {
               </p>
             </div>
 
-            {isConnected ? (
+            {stellarConnected ? (
               <div className="space-y-6">
                 <div className="grid gap-3">
                   <div className="rounded-xl border border-vault-border bg-vault-surface/40 p-4">
@@ -372,7 +466,9 @@ export default function VaultDetailPage({ params }) {
                   <button
                     type="button"
                     onClick={() => setIsDepositOpen(true)}
-                    className="vq-btn-primary w-full"
+                    disabled={readiness !== "verified"}
+                    title={readiness !== "verified" ? "Waiting on wallet network verification" : undefined}
+                    className="vq-btn-primary w-full disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Deposit Funds
                   </button>
@@ -413,10 +509,11 @@ export default function VaultDetailPage({ params }) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => openConnectModal?.()}
-                  className="vq-btn-primary w-full py-2.5"
+                  onClick={handleConnectStellar}
+                  disabled={connecting}
+                  className="vq-btn-primary w-full py-2.5 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Connect Wallet
+                  {connecting ? "Connecting…" : "Connect Wallet"}
                 </button>
               </div>
             )}
@@ -424,7 +521,14 @@ export default function VaultDetailPage({ params }) {
         </aside>
       </div>
 
-      <DepositModal isOpen={isDepositOpen} onClose={() => setIsDepositOpen(false)} />
+      {isDepositOpen && pool && (
+        <DepositModal
+          pool={pool}
+          walletBalance={usdcBalance}
+          onDeposit={handleDeposit}
+          onClose={() => setIsDepositOpen(false)}
+        />
+      )}
 
       <div className="flex justify-center">
         <VaultRewardsExplanationModal />
