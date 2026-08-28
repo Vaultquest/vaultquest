@@ -58,4 +58,17 @@ describe("service-auth middleware", () => {
     expect(res.statusCode).toBe(200);
     await app.close();
   });
+
+  it("rejects a wrong secret", async () => {
+    const app = Fastify();
+    const guard = requireServiceAuth("top-secret");
+    app.post("/internal", { preHandler: guard }, async () => ({ ok: true }));
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal",
+      headers: { "x-internal-secret": "wrong-secret" }
+    });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
 });

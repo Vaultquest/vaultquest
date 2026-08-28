@@ -1,5 +1,6 @@
 import type { FastifyRequest } from "fastify";
 import { AppError } from "../errors.js";
+import { timingSafeEqual } from "./internal-secret.js";
 
 /**
  * Fastify preHandler that enforces API key authentication for external-service
@@ -32,18 +33,4 @@ export function requireApiKey(expectedKey: string | undefined) {
       throw AppError.unauthorized();
     }
   };
-}
-
-/**
- * Naive constant-time string comparison that avoids early-exit short-circuits.
- * Uses the same length for both operands so the loop count is always
- * `max(a.length, b.length)`.
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  const maxLen = Math.max(a.length, b.length);
-  let diff = a.length ^ b.length; // non-zero if lengths differ
-  for (let i = 0; i < maxLen; i++) {
-    diff |= (a.charCodeAt(i) ?? 0) ^ (b.charCodeAt(i) ?? 0);
-  }
-  return diff === 0;
 }
