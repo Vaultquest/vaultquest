@@ -2,6 +2,8 @@ import type { FastifyRequest } from "fastify";
 import { AppError } from "../errors.js";
 import { ERROR_CODES } from "../constants.js";
 import { verifySignature, isValidStellarAddress } from "../utils/stellarKey.js";
+import { timingSafeEqual, verifyInternalSecret } from "./internal-secret.js";
+import type { CacheService } from "../services/cacheService.js";
 
 /**
  * Authorization for wallet-scoped endpoints.
@@ -63,16 +65,6 @@ function header(req: FastifyRequest, name: string): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/** Constant-time comparison, matching the approach in `api-key-auth.ts`. */
-function timingSafeEqual(a: string, b: string): boolean {
-  const maxLen = Math.max(a.length, b.length);
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < maxLen; i++) {
-    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  }
-  return diff === 0;
-}
-
 function unauthorized(message: string): AppError {
   return new AppError(ERROR_CODES.UNAUTHORIZED, 401, message);
 }
@@ -86,14 +78,38 @@ export interface WalletAuthOptions {
   signatureTtlMs?: number;
   /** Injectable for deterministic tests. */
   now?: () => number;
+  /**
+   * Backs single-use consumption of signed wallet challenges (replay guard).
+   * Shares a store across instances when Redis-backed; falls back to an
+   * in-memory store here when omitted, e.g. in tests that do not wire a
+   * `CacheService`.
+   */
+  cacheService?: CacheService;
+}
+
+/** In-memory fallback replay guard, used only when no `cacheService` is configured. */
+function inMemoryReplayGuard(): Pick<CacheService, "consumeOnce"> {
+  const consumed = new Map<string, number>();
+  return {
+    async consumeOnce(key: string, ttlMs: number): Promise<boolean> {
+      const now = Date.now();
+      for (const [k, expiresAt] of consumed) {
+        if (expiresAt <= now) consumed.delete(k);
+      }
+      if (consumed.has(key)) return false;
+      consumed.set(key, now + ttlMs);
+      return true;
+    }
+  };
 }
 
 export function requireWalletAuth(options: WalletAuthOptions) {
   const ttlMs = options.signatureTtlMs ?? DEFAULT_SIGNATURE_TTL_MS;
   const now = options.now ?? (() => Date.now());
+  const replayGuard = options.cacheService ?? inMemoryReplayGuard();
 
   return async function walletAuthGuard(req: FastifyRequest): Promise<void> {
-    const principal = authenticate(req, options, ttlMs, now);
+    const principal = await authenticate(req, options, ttlMs, now, replayGuard);
 
     // A service may act on any wallet; a wallet owner may act on only its own.
     if (principal.kind === "wallet") {
@@ -127,17 +143,17 @@ export function requireWalletAuth(options: WalletAuthOptions) {
   };
 }
 
-function authenticate(
+async function authenticate(
   req: FastifyRequest,
   options: WalletAuthOptions,
   ttlMs: number,
-  now: () => number
-): WalletPrincipal {
+  now: () => number,
+  replayGuard: Pick<CacheService, "consumeOnce">
+): Promise<WalletPrincipal> {
   // Service credentials first: they are unambiguous and cheap to check.
-  const internalSecret = header(req, INTERNAL_SECRET_HEADER);
-  if (internalSecret !== undefined) {
-    if (!timingSafeEqual(internalSecret, options.internalSecret)) {
-      throw unauthorized("invalid internal service secret. Expected: " + options.internalSecret + " but got: " + internalSecret);
+  if (header(req, INTERNAL_SECRET_HEADER) !== undefined) {
+    if (!verifyInternalSecret(req, options.internalSecret)) {
+      throw unauthorized("invalid internal service secret");
     }
     return { kind: "service", via: "internal-secret" };
   }
@@ -183,6 +199,17 @@ function authenticate(
 
   if (!verifySignature(walletAddress, buildWalletChallenge(walletAddress, timestampMs), signature)) {
     throw unauthorized("wallet signature verification failed");
+  }
+
+  // Single-use: a captured signature must not authorize more than one export.
+  // Keyed on the exact purpose-bound challenge text, so consumption for this
+  // challenge can never be confused with a record for a different purpose,
+  // wallet, or timestamp. Consumption is atomic, so concurrent replays of the
+  // same signature settle to exactly one success.
+  const replayKey = buildWalletChallenge(walletAddress, timestampMs);
+  const firstUse = await replayGuard.consumeOnce(replayKey, ttlMs);
+  if (!firstUse) {
+    throw unauthorized("signed challenge has already been used");
   }
 
   return { kind: "wallet", walletAddress };

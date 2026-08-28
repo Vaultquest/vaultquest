@@ -72,6 +72,13 @@ const schema = z.object({
     })
     .optional(),
   /**
+   * Salt for the identifier hashes in request logs (issue #105). Optional: when
+   * unset, each process generates a random salt at boot, which redacts just as
+   * strongly but makes hashes incomparable across processes and restarts. Set a
+   * stable secret to correlate a wallet's requests across replicas.
+   */
+  LOG_REDACTION_SALT: z.string().min(16).optional(),
+  /**
    * How long a signed export challenge stays valid, in milliseconds (issue #10).
    * Wide enough to absorb clock skew between a browser and the server, short
    * enough that a captured signature is not useful for long. Default 5 minutes.
@@ -119,6 +126,7 @@ export function getEnv(): Env {
       BACKUP_PG_RESTORE_PATH: process.env.BACKUP_PG_RESTORE_PATH ?? "pg_restore",
       PRIVACY_MASTER_KEY: process.env.PRIVACY_MASTER_KEY || undefined,
       PROMETHEUS_SCRAPE_KEY: process.env.PROMETHEUS_SCRAPE_KEY || undefined,
+      LOG_REDACTION_SALT: process.env.LOG_REDACTION_SALT || undefined,
       EXPORT_SIGNATURE_TTL_MS: Number(process.env.EXPORT_SIGNATURE_TTL_MS ?? 5 * 60 * 1000)
     } satisfies Env;
   }

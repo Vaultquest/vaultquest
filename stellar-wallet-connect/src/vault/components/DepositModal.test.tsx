@@ -18,7 +18,7 @@ const pool: PoolSummary = {
   drawsAt: "2026-05-09T00:00:00Z",
 };
 
-function renderModal(onDeposit: (amount: string) => Promise<void>, onClose = vi.fn()) {
+function renderModal(onDeposit: (amount: string) => Promise<{ txHash: string }>, onClose = vi.fn()) {
   return render(
     <DepositModal pool={pool} walletBalance="100" onDeposit={onDeposit} onClose={onClose} />,
   );
@@ -27,7 +27,7 @@ function renderModal(onDeposit: (amount: string) => Promise<void>, onClose = vi.
 describe("DepositModal", () => {
   it("walks input -> review -> broadcasting -> success on a successful deposit", async () => {
     const user = userEvent.setup();
-    const onDeposit = vi.fn().mockResolvedValue(undefined);
+    const onDeposit = vi.fn().mockResolvedValue({ txHash: "abc123def456" });
     renderModal(onDeposit);
 
     await user.type(screen.getByLabelText("Amount"), "10");
@@ -38,6 +38,11 @@ describe("DepositModal", () => {
     expect(onDeposit).toHaveBeenCalledWith("10");
 
     expect(await screen.findByText("Deposit successful!")).toBeInTheDocument();
+    const explorerLink = screen.getByRole("link", { name: "View on Stellar Expert" });
+    expect(explorerLink).toHaveAttribute(
+      "href",
+      "https://stellar.expert/explorer/testnet/tx/abc123def456",
+    );
   });
 
   it("shows an error back on the review step after a failed deposit, with a working retry", async () => {
@@ -45,7 +50,7 @@ describe("DepositModal", () => {
     const onDeposit = vi
       .fn()
       .mockRejectedValueOnce(new Error("rpc failed: try again"))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ txHash: "retrytx789" });
     renderModal(onDeposit);
 
     await user.type(screen.getByLabelText("Amount"), "10");
@@ -90,9 +95,9 @@ describe("DepositModal", () => {
 
   it("disables modal close while broadcasting to avoid navigating away mid-transaction", async () => {
     const user = userEvent.setup();
-    let resolveDeposit!: () => void;
+    let resolveDeposit!: (result: { txHash: string }) => void;
     const onDeposit = vi.fn().mockImplementation(
-      () => new Promise<void>((resolve) => { resolveDeposit = resolve; }),
+      () => new Promise<{ txHash: string }>((resolve) => { resolveDeposit = resolve; }),
     );
     renderModal(onDeposit);
 
@@ -102,7 +107,7 @@ describe("DepositModal", () => {
 
     expect(await screen.findByText("Broadcasting deposit...")).toBeInTheDocument();
     await act(async () => {
-      resolveDeposit();
+      resolveDeposit({ txHash: "closetx" });
       await Promise.resolve();
     });
   });

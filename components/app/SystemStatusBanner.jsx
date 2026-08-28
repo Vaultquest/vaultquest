@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { getStatusBadgeStyles } from "@/lib/status-badge-styles";
 
 const ENDPOINTS = [
   {
@@ -31,9 +32,9 @@ const ENDPOINTS = [
 ];
 
 const STATUS_SEVERITY = {
-  operational: { color: "emerald", icon: CheckCircle, label: "Operational" },
-  degraded: { color: "amber", icon: AlertTriangle, label: "Degraded" },
-  outage: { color: "red", icon: XCircle, label: "Outage" },
+  operational: { icon: CheckCircle, label: "Operational" },
+  degraded: { icon: AlertTriangle, label: "Degraded" },
+  outage: { icon: XCircle, label: "Outage" },
 };
 
 export default function SystemStatusBanner() {
@@ -85,17 +86,18 @@ export default function SystemStatusBanner() {
 
   const severity = criticalIssues > 0 ? "outage" : "degraded";
   const severityConfig = STATUS_SEVERITY[severity];
+  const severityBadgeStyles = getStatusBadgeStyles(severity);
 
   return (
     <div
       role="alert"
       aria-live="assertive"
-      className={`vq-glass mb-6 border-${severityConfig.color}-500/40 bg-${severityConfig.color}-500/10`}
+      className={`vq-glass mb-6 ${severityBadgeStyles.banner}`}
     >
       <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
           <span
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-${severityConfig.color}-500/20 text-${severityConfig.color}-400 ring-2 ring-${severityConfig.color}-400/30`}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${severityBadgeStyles.iconAvatar}`}
           >
             <severityConfig.icon className="h-5 w-5" aria-hidden="true" />
           </span>
@@ -159,6 +161,7 @@ export default function SystemStatusBanner() {
             <div className="space-y-2 p-4">
               {services.map((service) => {
                 const statusConfig = STATUS_SEVERITY[service.status];
+                const statusBadgeStyles = getStatusBadgeStyles(service.status);
                 return (
                   <div
                     key={service.id}
@@ -166,7 +169,7 @@ export default function SystemStatusBanner() {
                   >
                     <div className="flex items-center gap-3">
                       <statusConfig.icon
-                        className={`h-4 w-4 text-${statusConfig.color}-500`}
+                        className={`h-4 w-4 ${statusBadgeStyles.solidIcon}`}
                         aria-hidden="true"
                       />
                       <div>
@@ -180,7 +183,7 @@ export default function SystemStatusBanner() {
                     </div>
                     <div className="text-right">
                       <span
-                        className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-${statusConfig.color}-500/15 text-${statusConfig.color}-600 dark:text-${statusConfig.color}-400`}
+                        className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${statusBadgeStyles.badge}`}
                       >
                         {statusConfig.label}
                       </span>

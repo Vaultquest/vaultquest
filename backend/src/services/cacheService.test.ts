@@ -29,16 +29,21 @@ function makeMockPrisma() {
 }
 
 // A minimal in-memory Redis stand-in that tracks key→value pairs and TTLs.
+// `set` honours a trailing `NX` flag (as `SET key val PX ttl NX` does): it
+// returns 'OK' and writes only when the key is absent, null otherwise.
 function makeMockRedis(online: boolean = true) {
   const store = new Map<string, string>();
   return {
     _store: store,
     _online: online,
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: string, _ex?: string, _ttl?: number) => {
+    set: vi.fn(async (key: string, value: string, ..._rest: unknown[]) => {
+      const nx = _rest.includes('NX');
+      if (nx && store.has(key)) return null;
       store.set(key, value);
       return 'OK';
     }),
+    ping: vi.fn(async () => 'PONG'),
     del: vi.fn(async (key: string) => {
       const existed = store.has(key);
       store.delete(key);
@@ -484,6 +489,115 @@ describe('CacheService.invalidate', () => {
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ key: 'bad:key' }),
       expect.stringContaining('Redis invalidate failed')
+    );
+  });
+});
+
+describe('CacheService.ping', () => {
+  it('reports not configured when no Redis URL was provided (no live Redis needed)', async () => {
+    const svc = new CacheService(makeMockPrisma(), makeMockLogger());
+    const result = await svc.ping();
+    expect(result).toEqual({ configured: false, healthy: true, latencyMs: 0 });
+  });
+
+  it('reports healthy with round-trip latency when PING succeeds', async () => {
+    const redis = makeMockRedis();
+    const svc = buildService(redis);
+
+    const result = await svc.ping();
+
+    expect(redis.ping).toHaveBeenCalled();
+    expect(result.configured).toBe(true);
+    expect(result.healthy).toBe(true);
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('reports unhealthy with the error message when PING rejects, without throwing', async () => {
+    const redis = makeMockRedis();
+    redis.ping.mockRejectedValueOnce(new Error('connection reset'));
+    const svc = buildService(redis);
+
+    const result = await svc.ping();
+
+    expect(result.configured).toBe(true);
+    expect(result.healthy).toBe(false);
+    expect(result.error).toBe('connection reset');
+  });
+
+  it('attempts a live PING rather than trusting a stale isOnline=false flag', async () => {
+    // isOnline can lag the real connection state (it is only updated by
+    // connect/error events); ping() must not short-circuit on it.
+    const redis = makeMockRedis();
+    const svc = buildService(redis, false);
+
+    const result = await svc.ping();
+
+    expect(redis.ping).toHaveBeenCalled();
+    expect(result.healthy).toBe(true);
+  });
+});
+
+describe('CacheService.consumeOnce', () => {
+  it('allows the first consumption and rejects a second within the ttl (Redis-backed)', async () => {
+    const redis = makeMockRedis();
+    const svc = buildService(redis);
+
+    await expect(svc.consumeOnce('nonce:a', 60_000)).resolves.toBe(true);
+    await expect(svc.consumeOnce('nonce:a', 60_000)).resolves.toBe(false);
+    expect(redis.set).toHaveBeenCalledWith('replay:nonce:a', '1', 'PX', 60_000, 'NX');
+  });
+
+  it('settles concurrent redemptions of the same key to exactly one success (Redis-backed)', async () => {
+    const redis = makeMockRedis();
+    const svc = buildService(redis);
+
+    const results = await Promise.all([
+      svc.consumeOnce('nonce:concurrent', 60_000),
+      svc.consumeOnce('nonce:concurrent', 60_000),
+      svc.consumeOnce('nonce:concurrent', 60_000)
+    ]);
+
+    expect(results.filter((r) => r === true)).toHaveLength(1);
+    expect(results.filter((r) => r === false)).toHaveLength(2);
+  });
+
+  it('shares consumption across instances backed by the same Redis store', async () => {
+    const redis = makeMockRedis();
+    // Two separate CacheService instances standing in for two app instances,
+    // both backed by the same (mocked) Redis - i.e. cross-instance replay.
+    const instanceA = buildService(redis);
+    const instanceB = buildService(redis);
+
+    await expect(instanceA.consumeOnce('nonce:cross', 60_000)).resolves.toBe(true);
+    await expect(instanceB.consumeOnce('nonce:cross', 60_000)).resolves.toBe(false);
+  });
+
+  it('falls back to an in-memory store and still rejects a replay when Redis is offline', async () => {
+    const svc = buildService(null, false);
+
+    await expect(svc.consumeOnce('nonce:offline', 60_000)).resolves.toBe(true);
+    await expect(svc.consumeOnce('nonce:offline', 60_000)).resolves.toBe(false);
+  });
+
+  it('allows reconsumption once the ttl has elapsed (in-memory fallback)', async () => {
+    const svc = buildService(null, false);
+
+    await expect(svc.consumeOnce('nonce:expiring', 10)).resolves.toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await expect(svc.consumeOnce('nonce:expiring', 10)).resolves.toBe(true);
+  });
+
+  it('falls back to memory and logs a warning when Redis.set fails', async () => {
+    const redis = makeMockRedis();
+    redis.set.mockRejectedValueOnce(new Error('write error'));
+    const svc = buildService(redis);
+    const logger = (svc as any).logger;
+
+    await expect(svc.consumeOnce('nonce:broken', 60_000)).resolves.toBe(true);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'nonce:broken' }),
+      expect.stringContaining('consumeOnce failed')
     );
   });
 });

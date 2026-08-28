@@ -14,6 +14,7 @@ import {
 import { AppError } from "../errors.js";
 import { ok, page } from "../responses.js";
 import { parseActionPayload, toActionPayloadView } from "../schemas/actionPayloads.js";
+import { toSafeCsvCell } from "../utils/csvEncoding.js";
 
 function serialize(row: Awaited<ReturnType<LedgerService["getAction"]>>) {
   if (!row) return null;
@@ -204,7 +205,7 @@ export const actionsRoutes = (
             r.errorCode ?? "",
             r.submittedAt?.toISOString() ?? "",
             r.confirmedAt?.toISOString() ?? ""
-          ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",");
+          ].map(toSafeCsvCell).join(",");
         });
 
         const csv = [CSV_HEADERS.join(","), ...csvRows].join("\n");

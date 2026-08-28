@@ -5,6 +5,8 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { createTestWallet } from "./helpers/wallet.js";
 import { buildWalletChallenge } from "../src/middleware/wallet-auth.js";
+import { CacheService } from "../src/services/cacheService.js";
+import { createLogger } from "../src/logger.js";
 
 /**
  * Authorization for GET /actions/export (issue #10).
@@ -388,6 +390,128 @@ describe("GET /actions/export authorization (#10)", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.json().error.code).toBe("INVALID_PAYLOAD");
+      await app.close();
+    });
+  });
+
+  describe("single-use export challenges (replay guard, #129)", () => {
+    it("authorizes at most one export for a captured signature (same instance)", async () => {
+      const wallet = createTestWallet();
+      const prisma = getMockPrisma({ [wallet.address]: [actionRow(wallet.address)] });
+      const app = buildApp({ prisma, internalSecret: INTERNAL_SECRET });
+      const headers = wallet.authHeaders();
+
+      const first = await get(app, `/actions/export?wallet=${wallet.address}`, headers);
+      expect(first.statusCode).toBe(200);
+
+      const replay = await get(app, `/actions/export?wallet=${wallet.address}`, headers);
+      expect(replay.statusCode).toBe(401);
+      expect(replay.json().error.message).toContain("already been used");
+
+      await app.close();
+    });
+
+    it("rejects a replay presented to a different instance sharing the replay store", async () => {
+      const wallet = createTestWallet();
+      const prisma = getMockPrisma({ [wallet.address]: [actionRow(wallet.address)] });
+      const logger = createLogger("silent");
+      // No REDIS_URL configured, so this exercises the in-memory fallback -
+      // shared here across two `buildApp()` instances the same way Redis
+      // would share it across two real server processes.
+      const cacheService = new CacheService(prisma, logger);
+
+      const appA = buildApp({ prisma, internalSecret: INTERNAL_SECRET, cacheService, logger });
+      const appB = buildApp({ prisma, internalSecret: INTERNAL_SECRET, cacheService, logger });
+      const headers = wallet.authHeaders();
+
+      const first = await get(appA, `/actions/export?wallet=${wallet.address}`, headers);
+      expect(first.statusCode).toBe(200);
+
+      const replay = await get(appB, `/actions/export?wallet=${wallet.address}`, headers);
+      expect(replay.statusCode).toBe(401);
+      expect(replay.json().error.message).toContain("already been used");
+
+      await appA.close();
+      await appB.close();
+    });
+
+    it("settles concurrent replays of the same signature to exactly one success", async () => {
+      const wallet = createTestWallet();
+      const prisma = getMockPrisma({ [wallet.address]: [actionRow(wallet.address)] });
+      const app = buildApp({ prisma, internalSecret: INTERNAL_SECRET });
+      const headers = wallet.authHeaders();
+
+      const results = await Promise.all([
+        get(app, `/actions/export?wallet=${wallet.address}`, headers),
+        get(app, `/actions/export?wallet=${wallet.address}`, headers),
+        get(app, `/actions/export?wallet=${wallet.address}`, headers)
+      ]);
+
+      const successes = results.filter((r) => r.statusCode === 200);
+      const rejections = results.filter((r) => r.statusCode === 401);
+      expect(successes).toHaveLength(1);
+      expect(rejections).toHaveLength(2);
+      for (const rejection of rejections) {
+        expect(rejection.json().error.message).toContain("already been used");
+      }
+
+      await app.close();
+    });
+
+    it("does not consume the challenge when the signature is invalid", async () => {
+      // A garbage signature must fail on its own terms, not get folded into
+      // the replay guard as if it were a legitimate first use.
+      const wallet = createTestWallet();
+      const app = buildApp({ prisma: getMockPrisma(), internalSecret: INTERNAL_SECRET });
+      const timestamp = Date.now();
+
+      const res = await get(app, `/actions/export?wallet=${wallet.address}`, {
+        "x-wallet-address": wallet.address,
+        "x-wallet-timestamp": String(timestamp),
+        "x-wallet-signature": "bm90LWEtc2lnbmF0dXJl"
+      });
+
+      expect(res.statusCode).toBe(401);
+      expect(res.json().error.message).not.toContain("already been used");
+      await app.close();
+    });
+
+    it("does not let a signature for one wallet's challenge consume another wallet's record", async () => {
+      // The replay key is bound to wallet + timestamp + purpose (the exact
+      // challenge text), so two different wallets signing at the same
+      // millisecond do not collide in the replay store.
+      const walletA = createTestWallet();
+      const walletB = createTestWallet();
+      const prisma = getMockPrisma({
+        [walletA.address]: [actionRow(walletA.address)],
+        [walletB.address]: [actionRow(walletB.address)]
+      });
+      const app = buildApp({ prisma, internalSecret: INTERNAL_SECRET });
+      const timestamp = Date.now();
+
+      const resA = await get(app, `/actions/export?wallet=${walletA.address}`, walletA.authHeaders(timestamp));
+      expect(resA.statusCode).toBe(200);
+
+      const resB = await get(app, `/actions/export?wallet=${walletB.address}`, walletB.authHeaders(timestamp));
+      expect(resB.statusCode).toBe(200);
+
+      await app.close();
+    });
+
+    it("still rejects on expiry rather than reporting a replay", async () => {
+      const wallet = createTestWallet();
+      const app = buildApp({
+        prisma: getMockPrisma(),
+        internalSecret: INTERNAL_SECRET,
+        exportSignatureTtlMs: 1000
+      });
+
+      const stale = Date.now() - 60_000;
+      const res = await get(app, `/actions/export?wallet=${wallet.address}`, wallet.authHeaders(stale));
+
+      expect(res.statusCode).toBe(401);
+      expect(res.json().error.message).toContain("expired");
+      expect(res.json().error.message).not.toContain("already been used");
       await app.close();
     });
   });

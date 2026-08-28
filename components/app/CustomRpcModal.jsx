@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Check, Loader2, Server, X } from "lucide-react";
+import { avalanche, avalancheFuji } from "wagmi/chains";
 import {
   DEFAULT_RPC,
   pingEvmRpc,
@@ -16,22 +17,22 @@ const FIELDS = [
     key: "horizon",
     label: "Stellar Horizon URL",
     placeholder: DEFAULT_RPC.horizon,
-    hint: "Validated via Horizon root endpoint (horizon_version).",
+    hint: "Validated via Horizon root endpoint and must match the configured network passphrase.",
     ping: pingHorizon,
   },
   {
     key: "avalanche",
     label: "Avalanche C-Chain RPC",
     placeholder: DEFAULT_RPC.avalanche,
-    hint: "Validated via eth_blockNumber JSON-RPC.",
-    ping: pingEvmRpc,
+    hint: "Validated via eth_chainId and must match the Avalanche C-Chain ID.",
+    ping: (url) => pingEvmRpc(url, avalanche.id),
   },
   {
     key: "avalancheFuji",
     label: "Avalanche Fuji RPC",
     placeholder: DEFAULT_RPC.avalancheFuji,
-    hint: "Validated via eth_blockNumber JSON-RPC.",
-    ping: pingEvmRpc,
+    hint: "Validated via eth_chainId and must match the Avalanche Fuji chain ID.",
+    ping: (url) => pingEvmRpc(url, avalancheFuji.id),
   },
 ];
 
@@ -131,6 +132,12 @@ export default function CustomRpcModal({ open, onClose }) {
             <p className="mt-1 text-sm text-vault-muted">
               Advanced: override Horizon and Avalanche nodes. Invalid endpoints fall back to defaults on
               failure.
+            </p>
+            <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-vault-muted">
+              A custom node can see every account address you look up and every transaction you submit
+              through it. Only use nodes you trust. Endpoints must use HTTPS (except localhost), cannot
+              embed credentials or point at private network addresses, and must report the expected
+              network before they are saved.
             </p>
           </div>
           <button

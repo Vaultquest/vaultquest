@@ -115,6 +115,8 @@ export class CacheService {
   private readonly inFlight = new Map<string, Promise<unknown>>();
   /** Remembered source failures, bounding how fast a broken source is re-polled. */
   private readonly lastFailures = new Map<string, { at: number; error: unknown }>();
+  /** In-memory fallback for `consumeOnce`, keyed by replay key -> expiry epoch ms. */
+  private readonly consumedOnce = new Map<string, number>();
 
   /**
    * @param prisma - Prisma client for database fallback access
@@ -637,6 +639,46 @@ export class CacheService {
     }
   }
 
+  // --- single-use replay guard ---
+
+  /**
+   * Atomically marks `key` as consumed for `ttlMs`. Returns `true` the first
+   * time a key is consumed, so the caller may proceed; returns `false` if the
+   * key was already consumed within the window, i.e. a replay.
+   *
+   * Backed by Redis `SET key val PX ttl NX` when online, so consumption is
+   * atomic across instances. Falls back to a bounded in-memory map for a
+   * single process when Redis is unavailable.
+   *
+   * @param key - Unique identifier for the thing being consumed once
+   * @param ttlMs - How long the consumption record is remembered
+   */
+  async consumeOnce(key: string, ttlMs: number): Promise<boolean> {
+    if (this.redis && this.isOnline) {
+      try {
+        const result = await this.redis.set(`replay:${key}`, "1", "PX", ttlMs, "NX");
+        return result === "OK";
+      } catch (err) {
+        this.logger.warn({ err, key }, "Redis consumeOnce failed, falling back to memory");
+      }
+    }
+    return this.consumeOnceInMemory(key, ttlMs);
+  }
+
+  private consumeOnceInMemory(key: string, ttlMs: number): boolean {
+    const now = Date.now();
+    for (const [k, expiresAt] of this.consumedOnce) {
+      if (expiresAt <= now) this.consumedOnce.delete(k);
+    }
+    if (this.consumedOnce.has(key)) return false;
+    if (this.consumedOnce.size >= this.maxEntries) {
+      const oldestKey = this.consumedOnce.keys().next().value;
+      if (oldestKey !== undefined) this.consumedOnce.delete(oldestKey);
+    }
+    this.consumedOnce.set(key, now + ttlMs);
+    return true;
+  }
+
   // --- protocol config ---
 
   /**
@@ -678,6 +720,36 @@ export class CacheService {
     this.pendingMap.clear();
     this.assetMap.clear();
     this.configMap.clear();
+  }
+
+  /**
+   * Lightweight connectivity probe for readiness checks. Sends a single
+   * Redis `PING` and reports round-trip latency; does not rely on the
+   * `isOnline` flag from the connect/error event listeners, since a live
+   * round trip is the authoritative signal and that flag can lag the
+   * connection's real state.
+   *
+   * When no `redisUrl` was configured this resolves immediately with
+   * `configured: false` — that is a deliberate deployment mode (this class
+   * already degrades to PostgreSQL / in-memory fallbacks without Redis),
+   * not a failure, so callers should not treat it as unhealthy.
+   */
+  async ping(): Promise<{ configured: boolean; healthy: boolean; latencyMs: number; error?: string }> {
+    if (!this.redis) {
+      return { configured: false, healthy: true, latencyMs: 0 };
+    }
+    const start = Date.now();
+    try {
+      await this.redis.ping();
+      return { configured: true, healthy: true, latencyMs: Date.now() - start };
+    } catch (err) {
+      return {
+        configured: true,
+        healthy: false,
+        latencyMs: Date.now() - start,
+        error: err instanceof Error ? err.message : String(err)
+      };
+    }
   }
 
   /**

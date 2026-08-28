@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import { AppError } from "../errors.js";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { requestLogContext, sanitizeIssues } from "../utils/logRedaction.js";
 
 export function errorHandler(
   err: FastifyError,
@@ -11,8 +12,22 @@ export function errorHandler(
 ) {
   const errorId = req.correlationId || randomUUID();
 
-  // Log error with request context (including correlation ID)
-  req.log.error({ err, errorId }, "Error occurred during request processing");
+  // Log the error with redacted request context (issue #105): the normalized
+  // route template and allowlisted metadata, never the raw URL.
+  //
+  // A ZodError is logged as issue codes and paths only. Its `message` is a
+  // JSON dump of the issues, which for a rejected query quotes the wallet
+  // address or cursor verbatim - so the error object itself is deliberately
+  // not handed to the log serializer on that branch.
+  const logContext = { errorId, ...requestLogContext(req) };
+  if (err instanceof ZodError) {
+    req.log.error(
+      { ...logContext, error_type: "ZodError", issues: sanitizeIssues(err.issues) },
+      "Validation failed during request processing"
+    );
+  } else {
+    req.log.error({ err, ...logContext }, "Error occurred during request processing");
+  }
 
   let statusCode = 500;
   let code = "INTERNAL";

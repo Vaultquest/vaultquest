@@ -6,6 +6,7 @@
  */
 export * from "./contract/types";
 export { createMockVaultClient, SAMPLE_ADDRESS, type MockVaultConfig } from "./contract/mockClient";
+export { createSorobanVaultClient, type SorobanVaultClientConfig } from "./contract/sorobanClient";
 export * from "./lib/format";
 export { useAccountView, usePoolAction, usePoolDetail, usePoolDiscovery, usePrizeViews, useRewardHistory, useSavedPools, useTransactionStatus, invalidatePoolActionQueries, useActivityExport, type AccountView, type AsyncResource, type PoolActionFlow, type PoolDetailResource, type PoolDiscoveryOptions, type PrizeViewsOptions, type SavedPoolsResource, type TransactionStatusResource, type ExportFormat, type ExportState, type ActivityExportOptions, type ActivityExportResult } from "./hooks";
 export { VaultApiClient, isTerminalTransaction, type TransactionStatus, type TransactionStatusView } from "./data/apiClient";
@@ -17,3 +18,5 @@ export { SavedPoolsWatchlist, type SavedPoolsWatchlistProps } from "./components
 export { PoolDetail, availableActions, type PoolDetailProps } from "./components/PoolDetail";
 export { OnboardingChecklist, ONBOARDING_STORAGE_KEY, type OnboardingChecklistProps } from "./components/OnboardingChecklist";
 export { ActivityExport, type ActivityExportProps } from "./components/ActivityExport";
+export { DepositModal, type DepositModalProps } from "./components/DepositModal";
+export { WithdrawalModal, type WithdrawalModalProps } from "./components/WithdrawalModal";

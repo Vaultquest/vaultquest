@@ -4,6 +4,7 @@ import type { PrivacyDeletionService } from "../services/privacy/privacyDeletion
 import type { PrivacyEncryptionService } from "../services/privacy/privacyEncryptionService.js";
 import type { PrivacyAuditService } from "../services/privacy/privacyAuditService.js";
 import type { PrismaClient } from "@prisma/client";
+import { verifyInternalSecret } from "../middleware/internal-secret.js";
 
 export interface PrivacyRoutesDeps {
   exportSvc: PrivacyExportService;
@@ -63,8 +64,7 @@ export function privacyRoutes(deps: PrivacyRoutesDeps): FastifyPluginAsync {
 
     // 4. Privileged Legal Hold Endpoint
     fastify.post("/api/privacy/legal-holds", async (req, reply) => {
-      const authHeader = req.headers["x-internal-secret"];
-      if (authHeader !== deps.internalSecret) {
+      if (!verifyInternalSecret(req, deps.internalSecret)) {
         return reply.status(401).send({ error: "Unauthorized internal endpoint" });
       }
 
@@ -129,8 +129,7 @@ export function privacyRoutes(deps: PrivacyRoutesDeps): FastifyPluginAsync {
 
     // 5. Privileged Key Rotation Endpoint
     fastify.post("/api/privacy/rotate-keys", async (req, reply) => {
-      const authHeader = req.headers["x-internal-secret"];
-      if (authHeader !== deps.internalSecret) {
+      if (!verifyInternalSecret(req, deps.internalSecret)) {
         return reply.status(401).send({ error: "Unauthorized internal endpoint" });
       }
 
