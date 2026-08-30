@@ -12,7 +12,7 @@ const LOCKUP_OPTIONS = [
   { label: "Long (30+ days)", value: "long" },
 ];
 const STRATEGIES = ["Stable Yield", "Growth", "High Yield", "Flexible Drip", "Conservative"];
-const STATUSES = ["Active", "Pending", "Completed"];
+const STATUSES = ["Active", "Pending", "Paused", "Completed", "Failed"];
 
 export default function VaultFilters({ filters, setFilters, onClear }) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
