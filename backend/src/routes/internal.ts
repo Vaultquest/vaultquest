@@ -4,6 +4,7 @@ import { reconcileBody, checkpointBody } from "../schemas/actions.js";
 import { parseEventPayload } from "../schemas/actionPayloads.js";
 import { requireServiceAuth } from "../middleware/service-auth.js";
 import { validateBody } from "../middleware/validate.js";
+import { sanitizeIssuesForClient } from "../middleware/errorHandler.js";
 import { ok } from "../responses.js";
 import type { z } from "zod";
 
@@ -24,7 +25,7 @@ export const internalRoutes = (svc: LedgerService, secret: string): FastifyPlugi
           error: {
             code: "INVALID_PAYLOAD",
             message: "invalid event_payload",
-            issues: parsedEvent.issues,
+            issues: sanitizeIssuesForClient(parsedEvent.issues),
             ...(parsedEvent.quarantined
               ? { details: { quarantined: true, reason: "legacy event payload could not be migrated to a versioned schema" } }
               : {})

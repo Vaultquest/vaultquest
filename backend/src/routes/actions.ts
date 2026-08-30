@@ -12,6 +12,7 @@ import {
   actionHistoryQuery
 } from "../schemas/actions.js";
 import { AppError } from "../errors.js";
+import { sanitizeIssuesForClient } from "../middleware/errorHandler.js";
 import { ok, page } from "../responses.js";
 import { parseActionPayload, toActionPayloadView } from "../schemas/actionPayloads.js";
 import { toSafeCsvCell } from "../utils/csvEncoding.js";
@@ -55,7 +56,7 @@ export const actionsRoutes = (
           error: {
             code: "INVALID_PAYLOAD",
             message: "Idempotency-Key header must be a UUID",
-            issues: keyParsed.error.issues
+            issues: sanitizeIssuesForClient(keyParsed.error.issues)
           }
         });
       }
@@ -70,7 +71,7 @@ export const actionsRoutes = (
           error: {
             code: "INVALID_PAYLOAD",
             message: "invalid action_payload",
-            issues: parsedPayload.issues,
+            issues: sanitizeIssuesForClient(parsedPayload.issues),
             ...(parsedPayload.quarantined
               ? { details: { quarantined: true, reason: "legacy payload could not be migrated to a versioned schema" } }
               : {})
