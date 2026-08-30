@@ -136,6 +136,21 @@ model SavedPool {
   @@map("saved_pools")
 }
 
+model UserProfile {
+  id            String    @id @default(uuid()) @db.Uuid
+  walletAddress String    @map("wallet_address")
+  displayName   String?   @map("display_name") @db.VarChar(60)
+  bio           String?   @db.VarChar(600)
+  badgeId       String?   @map("badge_id") @db.VarChar(120)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@unique([walletAddress])
+  @@unique([displayName])
+  @@index([walletAddress])
+  @@map("user_profiles")
+}
+
 model UserNotificationPref {
   id            String   @id @default(uuid()) @db.Uuid
   walletAddress String   @map("wallet_address")

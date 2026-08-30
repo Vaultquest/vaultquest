@@ -11,6 +11,7 @@ export interface DeletionResult {
     actionLedgerAnonymized: number;
     userQuestsDeleted: number;
     savedPoolsDeleted: number;
+    userProfilesDeleted: number;
     notificationPrefsDeleted: number;
     supportEvidenceDeleted: number;
     activityLogsDeleted: number;
@@ -72,7 +73,10 @@ export class PrivacyDeletionService {
       const poolCount = await this.prisma.savedPool.count({
         where: { walletAddress: normalizedWallet },
       });
-      const heldCount = ledgerCount + questCount + poolCount;
+      const profileCount = await this.prisma.userProfile.count({
+        where: { walletAddress: normalizedWallet },
+      });
+      const heldCount = ledgerCount + questCount + poolCount + profileCount;
 
       const manifestId = randomUUID();
       const manifestHash = createHash("sha256")
@@ -84,6 +88,7 @@ export class PrivacyDeletionService {
         actionLedgerAnonymized: 0,
         userQuestsDeleted: 0,
         savedPoolsDeleted: 0,
+        userProfilesDeleted: 0,
         notificationPrefsDeleted: 0,
         supportEvidenceDeleted: 0,
         activityLogsDeleted: 0,
@@ -146,6 +151,11 @@ export class PrivacyDeletionService {
       where: { walletAddress: normalizedWallet },
     });
 
+    // 2c-ii. Delete the durable User Profile
+    const profileDelete = await this.prisma.userProfile.deleteMany({
+      where: { walletAddress: normalizedWallet },
+    });
+
     // 2d. Delete Notification Prefs
     const prefDelete = await this.prisma.userNotificationPref.deleteMany({
       where: { walletAddress: normalizedWallet },
@@ -168,7 +178,8 @@ export class PrivacyDeletionService {
         await this.cacheSvc.invalidate(`user:${normalizedWallet}`);
         await this.cacheSvc.invalidate(`user_quests:${normalizedWallet}`);
         await this.cacheSvc.invalidate(`saved_pools:${normalizedWallet}`);
-        cacheKeysInvalidated = 3;
+        await this.cacheSvc.invalidate(`profile:${normalizedWallet}`);
+        cacheKeysInvalidated = 4;
       } catch {
         // Cache invalidate best effort
       }
@@ -178,6 +189,7 @@ export class PrivacyDeletionService {
       actionLedgerAnonymized: ledgerUpdate.count,
       userQuestsDeleted: questDelete.count,
       savedPoolsDeleted: poolDelete.count,
+      userProfilesDeleted: profileDelete.count,
       notificationPrefsDeleted: prefDelete.count,
       supportEvidenceDeleted: evidenceDelete.count,
       activityLogsDeleted: logDelete.count,

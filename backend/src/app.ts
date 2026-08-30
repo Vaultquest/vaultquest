@@ -4,8 +4,10 @@ import correlation from "./middleware/correlation.js";
 import prometheusPlugin from "./middleware/prometheusPlugin.js";
 import { LedgerService } from "./services/ledger.js";
 import { SavedPoolsService } from "./services/savedPools.js";
+import { ProfileService } from "./services/profile.js";
 import { actionsRoutes } from "./routes/actions.js";
 import { savedPoolsRoutes } from "./routes/savedPools.js";
+import { profileRoutes } from "./routes/profile.js";
 import { internalRoutes } from "./routes/internal.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { prometheusRoutes } from "./routes/prometheus.js";
@@ -98,6 +100,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Inject CacheService into LedgerService
   const svc = new LedgerService(deps.prisma, deps.cacheService);
   const savedPoolsSvc = new SavedPoolsService(deps.prisma);
+  const profileSvc = new ProfileService(deps.prisma);
   const metricsSvc = new MetricsService(deps.prisma);
 
   // Privacy Services (issue #76)
@@ -127,6 +130,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.register(healthRoutes(svc, deps.prisma, deps.cacheService));
   app.register(actionsRoutes(svc, apiKeyGuard, walletAuthGuard, serviceAuthGuard));
   app.register(savedPoolsRoutes(savedPoolsSvc, walletAuthGuard));
+  app.register(profileRoutes(profileSvc, walletAuthGuard));
   app.register(internalRoutes(svc, deps.internalSecret));
   app.register(metricsRoutes(metricsSvc, apiKeyGuard));
   app.register(prometheusRoutes(prometheusScrapeGuard));

@@ -64,6 +64,14 @@
           "tables": ["vault_settlements"],
           "breaking": false,
           "relatedIssues": ["#settlement"]
+        },
+        {
+          "id": "20260630000000_feature_user_profiles",
+          "timestamp": "2026-06-30T00:00:00Z",
+          "description": "Durable user profile contract with editable fields and achievements",
+          "tables": ["user_profiles"],
+          "breaking": false,
+          "relatedIssues": ["#134"]
         }
       ]
     },
@@ -117,6 +125,11 @@
       "phase": "features",
       "createdIn": "20260531000001_feature_vault_settlements",
       "description": "Vault settlement state machine"
+    },
+    "user_profiles": {
+      "phase": "features",
+      "createdIn": "20260630000000_feature_user_profiles",
+      "description": "Durable user profile with editable fields"
     }
   }
 }

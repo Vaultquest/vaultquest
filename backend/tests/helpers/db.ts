@@ -58,6 +58,7 @@ async function safeDelete(deleteFn: () => Promise<any>) {
 export async function resetDb(prisma: PrismaClient): Promise<void> {
   await safeDelete(() => prisma.pendingEvent.deleteMany({}));
   await safeDelete(() => prisma.savedPool.deleteMany({}));
+  await safeDelete(() => prisma.userProfile.deleteMany({}));
   await safeDelete(() => prisma.userQuest.deleteMany({}));
   await safeDelete(() => prisma.actionLedger.deleteMany({}));
   await safeDelete(() => prisma.indexerCheckpoint.deleteMany({}));
