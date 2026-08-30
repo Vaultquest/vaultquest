@@ -1,5 +1,5 @@
 import type { FC } from "react";
-import { ExternalLink, History, Trophy } from "lucide-react";
+import { AlertTriangle, ExternalLink, History, ShieldCheck, Trophy } from "lucide-react";
 import {
   EmptyState,
   ErrorState,
@@ -8,6 +8,7 @@ import {
   WalletDisconnectedState,
 } from "../../components/FallbackStates";
 import type { RewardHistoryEntry, RewardOutcome } from "../contract/types";
+import { hasProof } from "../lib/draw-proof";
 import { explorerTxUrl, formatAmount, formatDate, truncateAddress, type StellarNetwork } from "../lib/format";
 import { TransactionTimeline } from "../../components/TransactionTimeline";
 import type { TxFlowResult } from "../lib/txStateMachine";
@@ -39,6 +40,9 @@ const OUTCOME_BADGE: Record<RewardOutcome, { label: string; className: string }>
   won: { label: "Won", className: "bg-emerald-500/15 text-emerald-300" },
   no_win: { label: "No win", className: "bg-gray-500/15 text-gray-300" },
   pending: { label: "Pending", className: "bg-amber-500/15 text-amber-300" },
+  claimed: { label: "Claimed", className: "bg-sky-500/15 text-sky-300" },
+  failed: { label: "Failed", className: "bg-red-500/15 text-red-300" },
+  disputed: { label: "Disputed", className: "bg-purple-500/15 text-purple-300" },
 };
 
 const OutcomeBadge: FC<{ status: RewardOutcome }> = ({ status }) => {
@@ -64,6 +68,37 @@ const TxLink: FC<{ txHash: string | null; network: StellarNetwork }> = ({ txHash
   ) : (
     <span className="text-sm text-gray-500">—</span>
   );
+
+/**
+ * Draw-proof column (#175): shows the originating draw round id plus a
+ * verification flag. Missing proof and confirmed mismatches (`disputed`) are
+ * flagged so an unverified claim is never presented as final without notice.
+ */
+const ProofColumn: FC<{ entry: RewardHistoryEntry }> = ({ entry }) => {
+  const proof = entry.drawProof;
+  if (!proof || !hasProof(entry)) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-400" title="No draw proof recorded">
+        <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+        No proof
+      </span>
+    );
+  }
+  if (entry.status === "disputed" || proof.verified === false) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-purple-300" title="Proof does not match indexer data">
+        <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+        Round {proof.roundId} · disputed
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-gray-300" title={`Draw proof verified${proof.verified === null ? " (unverified)" : ""}`}>
+      <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
+      Round {proof.roundId}{proof.verified === null ? " · unverified" : ""}
+    </span>
+  );
+};
 
 export const RewardHistory: FC<RewardHistoryProps> = ({
   entries,
@@ -116,6 +151,7 @@ export const RewardHistory: FC<RewardHistoryProps> = ({
               <th scope="col" className="px-4 py-3 font-medium">Reward</th>
               <th scope="col" className="px-4 py-3 font-medium">Winner</th>
               <th scope="col" className="px-4 py-3 font-medium">Status</th>
+              <th scope="col" className="px-4 py-3 font-medium">Draw proof</th>
               <th scope="col" className="px-4 py-3 font-medium">Tx</th>
               {onClaim && <th scope="col" className="px-4 py-3 font-medium">Action</th>}
             </tr>
@@ -130,6 +166,7 @@ export const RewardHistory: FC<RewardHistoryProps> = ({
                   {entry.winnerAddress ? truncateAddress(entry.winnerAddress) : "—"}
                 </td>
                 <td className="px-4 py-3"><OutcomeBadge status={entry.status} /></td>
+                <td className="px-4 py-3"><ProofColumn entry={entry} /></td>
                 <td className="px-4 py-3"><TxLink txHash={entry.txHash} network={network} /></td>
                 {onClaim && (
                   <td className="px-4 py-3">
@@ -177,6 +214,10 @@ export const RewardHistory: FC<RewardHistoryProps> = ({
               <div className="flex justify-between gap-2">
                 <dt className="text-gray-400">Tx</dt>
                 <dd><TxLink txHash={entry.txHash} network={network} /></dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-gray-400">Draw proof</dt>
+                <dd><ProofColumn entry={entry} /></dd>
               </div>
               {onClaim && entry.status === "won" && !entry.txHash && (
                 <div className="pt-1">

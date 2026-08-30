@@ -106,6 +106,7 @@ describe("mock VaultContractClient — read flows", () => {
           status: "won",
           winnerAddress: SAMPLE_ADDRESS,
           txHash: "abc123",
+          drawProof: { roundId: "7", txHash: "abc123", proof: "digest", verified: true },
         },
       ],
     });

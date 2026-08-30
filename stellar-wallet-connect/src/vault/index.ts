@@ -8,6 +8,7 @@ export * from "./contract/types";
 export { createMockVaultClient, SAMPLE_ADDRESS, type MockVaultConfig } from "./contract/mockClient";
 export { createSorobanVaultClient, type SorobanVaultClientConfig } from "./contract/sorobanClient";
 export * from "./lib/format";
+export { attachDrawProof, flagDisputed, hasProof, verifyDrawProof, type DrawProofIndexerSnapshot, type ProofVerdict } from "./lib/draw-proof";
 export { useAccountView, usePoolAction, usePoolDetail, usePoolDiscovery, usePrizeViews, useRewardHistory, useSavedPools, useTransactionStatus, invalidatePoolActionQueries, useActivityExport, type AccountView, type AsyncResource, type PoolActionFlow, type PoolDetailResource, type PoolDiscoveryOptions, type PrizeViewsOptions, type SavedPoolsResource, type TransactionStatusResource, type ExportFormat, type ExportState, type ActivityExportOptions, type ActivityExportResult } from "./hooks";
 export { VaultApiClient, isTerminalTransaction, type TransactionStatus, type TransactionStatusView } from "./data/apiClient";
 export { createVaultDataConfig, defaultVaultDataConfig, type VaultDataConfig, type VaultFeatureFlags, type VaultNetworkConfig } from "./data/config";
