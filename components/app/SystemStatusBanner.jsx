@@ -12,64 +12,134 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { getStatusBadgeStyles } from "@/lib/status-badge-styles";
 
-const ENDPOINTS = [
-  {
-    id: "stellar-horizon",
-    name: "Stellar Horizon API",
-    url: "https://horizon.stellar.org",
-  },
-  {
-    id: "stellar-rpc",
-    name: "Stellar RPC",
-    url: "https://soroban-testnet.stellar.org",
-  },
-  {
-    id: "avalanche-rpc",
-    name: "Avalanche RPC",
-    url: "https://api.avax.network",
-  },
-  { id: "backend-api", name: "VaultQuest Backend", url: "/api/health" },
-];
-
 const STATUS_SEVERITY = {
   operational: { icon: CheckCircle, label: "Operational" },
   degraded: { icon: AlertTriangle, label: "Degraded" },
   outage: { icon: XCircle, label: "Outage" },
 };
 
+const PROBE_STATUSES = new Set(["operational", "degraded", "outage"]);
+const PROBE_TIMEOUT_MS = 10000;
+
+function normalizeStatus(status) {
+  return PROBE_STATUSES.has(status) ? status : "outage";
+}
+
+function isValidProbe(data) {
+  return (
+    data &&
+    typeof data === "object" &&
+    typeof data.status === "string" &&
+    Array.isArray(data.checks)
+  );
+}
+
+function outageFrame(message) {
+  return {
+    aggregate: "outage",
+    checkedAt: new Date(),
+    checks: [
+      {
+        id: "backend",
+        name: "VaultQuest Backend",
+        url: "/api/health",
+        status: "outage",
+        latency: null,
+        error: message,
+      },
+    ],
+  };
+}
+
+function degradedFrame(message) {
+  return {
+    aggregate: "degraded",
+    checkedAt: new Date(),
+    checks: [
+      {
+        id: "backend",
+        name: "VaultQuest Backend",
+        url: "/api/health",
+        status: "degraded",
+        latency: null,
+        error: message,
+      },
+    ],
+  };
+}
+
+async function probeStatus() {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+
+  try {
+    const response = await fetch("/api/health", {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    // Defense-in-depth: a `mode: "no-cors"` opaque response (or any response
+    // without a usable status) must never be treated as healthy — the whole
+    // point of #116 is that an opaque response hides the real status.
+    if (response.type === "opaque" || response.status === 0) {
+      return outageFrame("Status probe returned an opaque response");
+    }
+    if (!response.ok) {
+      return outageFrame(`Status probe failed (HTTP ${response.status})`);
+    }
+
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      return outageFrame("Status probe returned an invalid response");
+    }
+    if (!isValidProbe(payload)) {
+      return outageFrame("Status probe returned an invalid payload");
+    }
+
+    const checks = payload.checks.map((check) => ({
+      id: check.id ?? check.name ?? "unknown",
+      name: check.name ?? "Unknown service",
+      url: check.url ?? "",
+      status: normalizeStatus(check.status),
+      latency: typeof check.latency_ms === "number" ? check.latency_ms : null,
+      error: typeof check.error === "string" ? check.error : null,
+    }));
+
+    return {
+      aggregate: normalizeStatus(payload.status),
+      checkedAt: payload.checked_at ? new Date(payload.checked_at) : new Date(),
+      checks,
+    };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return degradedFrame("Status probe timed out");
+    }
+    return outageFrame(error?.message ?? "Status probe failed");
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export default function SystemStatusBanner() {
   const [services, setServices] = useState([]);
+  const [aggregate, setAggregate] = useState("operational");
   const [expanded, setExpanded] = useState(false);
   const [lastCheck, setLastCheck] = useState(null);
   const [checking, setChecking] = useState(false);
 
-  const checkServiceHealth = async (endpoint) => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      const response = await fetch(endpoint.url, {
-        method: "HEAD",
-        signal: controller.signal,
-        mode: "no-cors",
-      });
-
-      clearTimeout(timeoutId);
-      return { ...endpoint, status: "operational", latency: Date.now() };
-    } catch (error) {
-      if (error.name === "AbortError") {
-        return { ...endpoint, status: "degraded", error: "Timeout" };
-      }
-      return { ...endpoint, status: "outage", error: error.message };
-    }
-  };
-
   const checkAllServices = useCallback(async () => {
     setChecking(true);
-    const results = await Promise.all(ENDPOINTS.map(checkServiceHealth));
-    setServices(results);
-    setLastCheck(new Date());
-    setChecking(false);
+    try {
+      const result = await probeStatus();
+      setServices(result.checks);
+      setAggregate(result.aggregate);
+      setLastCheck(result.checkedAt);
+    } finally {
+      setChecking(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -78,13 +148,13 @@ export default function SystemStatusBanner() {
     return () => clearInterval(interval);
   }, [checkAllServices]);
 
-  const hasIssues = services.some((s) => s.status !== "operational");
+  const hasIssues = aggregate !== "operational";
   const criticalIssues = services.filter((s) => s.status === "outage").length;
   const degradedIssues = services.filter((s) => s.status === "degraded").length;
 
   if (!hasIssues) return null;
 
-  const severity = criticalIssues > 0 ? "outage" : "degraded";
+  const severity = aggregate === "outage" ? "outage" : "degraded";
   const severityConfig = STATUS_SEVERITY[severity];
   const severityBadgeStyles = getStatusBadgeStyles(severity);
 
@@ -187,9 +257,13 @@ export default function SystemStatusBanner() {
                       >
                         {statusConfig.label}
                       </span>
-                      {service.error && (
+                      {(service.latency !== null || service.error) && (
                         <p className="mt-1 text-xs text-vault-muted">
-                          {service.error}
+                          {service.latency !== null
+                            ? `${service.latency}ms`
+                            : ""}
+                          {service.latency !== null && service.error ? " — " : ""}
+                          {service.error ?? ""}
                         </p>
                       )}
                     </div>
