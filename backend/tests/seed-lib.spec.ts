@@ -87,7 +87,7 @@ describe("seedDatabase", () => {
 
     // Realistic lifecycle coverage: deposits, withdrawals, claims, draws, and
     // the failure states that otherwise regress silently.
-    const statuses = new Set(actions.map((a) => a.status));
+    const statuses = new Set<string>(actions.map((a) => a.status));
     for (const s of VALID_ACTION_STATUSES) {
       expect(statuses.has(s), s).toBe(true);
     }
