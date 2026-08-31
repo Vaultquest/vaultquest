@@ -59,7 +59,34 @@ export interface UserPosition {
   joined: boolean;
 }
 
-export type RewardOutcome = "won" | "no_win" | "pending";
+export type RewardOutcome =
+  | "won"
+  | "no_win"
+  | "pending"
+  | "claimed"
+  | "failed"
+  | "disputed";
+
+/**
+ * Draw-proof metadata tying a reward entry to its originating prize draw (#175).
+ *
+ * Populated and verified by the helpers in `../lib/draw-proof`. `verified` is
+ * tri-state to distinguish "confirmed against the indexer" from "not yet
+ * checked" or "mismatch flagged".
+ */
+export interface DrawProof {
+  /** The prize draw round this reward belongs to. */
+  roundId: string;
+  /** On-chain claim/win transaction hash for provenance, or null before a claim resolves. */
+  txHash: string | null;
+  /** Draw proof digest/record compared against authoritative indexer data. */
+  proof: string | null;
+  /**
+   * Verification state against the latest transaction/indexer data:
+   * `true` matches, `false` is a confirmed mismatch, `null` is unverified.
+   */
+  verified: boolean | null;
+}
 
 export interface RewardHistoryEntry {
   id: string;
@@ -74,6 +101,8 @@ export interface RewardHistoryEntry {
   winnerAddress: string | null;
   /** On-chain reference for explorer links, when available. */
   txHash: string | null;
+  /** Draw-proof metadata (#175). Absent entries have no proof and are flagged. */
+  drawProof: DrawProof | null;
 }
 
 export type PoolActionType = "create" | "join" | "drip" | "claim" | "withdraw";

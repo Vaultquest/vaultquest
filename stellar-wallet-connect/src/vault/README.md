@@ -11,6 +11,7 @@ Pool-level UI for VaultQuest plus a testable contract seam.
 | `contract/` | #67 | `VaultContractClient` interface + in-memory mock |
 | `hooks.ts` | #73 / #75 / #89 / #90 | `usePoolDetail`, `useRewardHistory`, `useSavedPools` data adapters |
 | `lib/format.ts` | #73 / #75 | Address truncation, amount/date formatting, explorer links |
+| `lib/draw-proof.ts` | #175 | Draw-proof attach/verify/flag helpers for reward history |
 
 All states (loading, empty, stale, error, wallet-disconnected) reuse the shared
 `components/FallbackStates` from #61, and wallet references render truncated.
@@ -100,6 +101,37 @@ Every failure surfaces as a `ContractInterfaceError` whose `kind` is one of:
    `failActions` so error states stay injectable.
 3. Add a test in `contract/mockClient.test.ts` covering success **and** at
    least one failure kind.
+
+## Reward history and draw proofs (#175)
+
+Reward history ties each claim to its originating prize draw. Every
+`RewardHistoryEntry` carries an optional `drawProof` field:
+
+```ts
+interface DrawProof {
+  roundId: string;        // the prize draw round the reward belongs to
+  txHash: string | null;  // on-chain claim tx hash (provenance)
+  proof: string | null;   // draw proof digest compared against indexer data
+  verified: boolean | null; // true = verified, false = mismatch, null = unverified
+}
+```
+
+`lib/draw-proof.ts` provides pure, network-free helpers:
+
+- `attachDrawProof(entry, proof)` — attach proof metadata without mutating the entry.
+- `verifyDrawProof(entry, indexer)` — reconcile the stored proof/tx against an
+  authoritative indexer snapshot and derive the reward's *final* status:
+  verified + confirmed tx ⇒ `claimed`, a still-claimable win stays `won`, a
+  missing proof/tx stays `pending`, and any mismatch resolves to `disputed`.
+- `flagDisputed(entry)` — mark an entry found not to reconcile with the indexer.
+- `hasProof(entry)` — true when a proof digest is present (used to flag "No proof").
+
+`RewardHistory` renders this metadata: the draw round id plus a verification
+flag, with missing and mismatched (disputed) proofs surfaced explicitly, and the
+claim transaction hash linked to the Stellar explorer. The `RewardOutcome`
+status covers the full lifecycle — `won`, `no_win`, `pending`, `claimed`,
+`failed`, and `disputed` — so pending, claimed, failed, and disputed rewards are
+each represented in the UI.
 
 ## Running the tests
 
