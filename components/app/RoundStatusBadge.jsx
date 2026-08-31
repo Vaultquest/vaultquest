@@ -1,18 +1,20 @@
 "use client";
 
-import { CheckCircle2, Clock, Zap } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Zap } from "lucide-react";
 import { getRoundStatusMeta } from "@/lib/vault-status";
 
 const TONE_CLASSES = {
   success: "border-emerald-500/20 bg-emerald-500/10 text-emerald-500",
   warning: "border-amber-500/20 bg-amber-500/10 text-amber-500",
   neutral: "border-vault-border bg-vault-surface text-vault-muted",
+  danger: "border-red-500/20 bg-red-500/10 text-red-500",
 };
 
 const TONE_ICONS = {
   success: Zap,
   warning: Clock,
   neutral: CheckCircle2,
+  danger: AlertTriangle,
 };
 
 export default function RoundStatusBadge({ status, className = "" }) {

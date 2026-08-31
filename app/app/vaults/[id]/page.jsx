@@ -113,6 +113,8 @@ const POOL_STATUS_BY_ROUND = {
   [ROUND_STATUS.ACTIVE]: "open",
   [ROUND_STATUS.PENDING]: "locked",
   [ROUND_STATUS.COMPLETED]: "settled",
+  [ROUND_STATUS.PAUSED]: "locked",
+  [ROUND_STATUS.FAILED]: "settled",
 };
 
 export default function VaultDetailPage({ params }) {
