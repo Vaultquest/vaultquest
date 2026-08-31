@@ -101,7 +101,12 @@ const schema = z.object({
   EXPORT_SIGNATURE_TTL_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
   REMINDER_LEAD_HOURS: z.coerce.number().int().positive().default(24),
   SENDGRID_API_KEY: z.string().min(1).optional(),
-  EMAIL_FROM: z.string().email().optional()
+  EMAIL_FROM: z.string().email().optional(),
+  /**
+   * Trusted proxies for canonical client IP parsing and X-Forwarded-For resolution (issue #96).
+   * Comma-separated list of IP addresses or CIDR blocks, e.g. "127.0.0.1, ::1, loopback".
+   */
+  TRUSTED_PROXIES: z.string().default("127.0.0.1, ::1, loopback")
 })
 .refine(
   (data) => {

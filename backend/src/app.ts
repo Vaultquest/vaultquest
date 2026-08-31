@@ -58,8 +58,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     disableRequestLogging: true,
   });
 
-  // Register rate limiting and CSRF protection
-  app.register(rateLimiter);
+  // Register rate limiting and CSRF protection (issue #96)
+  app.register(rateLimiter, {
+    cacheService: deps.cacheService,
+    trustedProxies: process.env.TRUSTED_PROXIES || "127.0.0.1, ::1, loopback"
+  });
 
   // Register correlation ID middleware
   app.register(correlation);
