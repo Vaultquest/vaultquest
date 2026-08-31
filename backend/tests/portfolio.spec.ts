@@ -12,7 +12,7 @@ describe("Backend Portfolio Summary Endpoint", () => {
   beforeAll(async () => {
     db = await startTestDb();
     svc = new LedgerService(db.prisma);
-    app = buildApp({ prisma: db.prisma, internalSecret: "test-secret" });
+    app = buildApp({ prisma: db.prisma, internalSecret: "test-secret", allowUnauthenticatedDevApi: true });
   });
 
   afterAll(async () => {

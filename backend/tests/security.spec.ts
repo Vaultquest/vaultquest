@@ -26,7 +26,7 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
   describe("CSRF Protection", () => {
     it("sets a CSRF token cookie on GET requests", async () => {
       const mockPrisma = getMockPrisma();
-      const app = buildApp({ prisma: mockPrisma, internalSecret });
+      const app = buildApp({ prisma: mockPrisma, internalSecret, allowUnauthenticatedDevApi: true });
 
       const res = await app.inject({
         method: "GET",
@@ -42,7 +42,7 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
 
     it("blocks POST requests without a valid CSRF token with 403 Forbidden", async () => {
       const mockPrisma = getMockPrisma();
-      const app = buildApp({ prisma: mockPrisma, internalSecret });
+      const app = buildApp({ prisma: mockPrisma, internalSecret, allowUnauthenticatedDevApi: true });
 
       const res = await app.inject({
         method: "POST",
@@ -75,7 +75,7 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
         updatedAt: new Date()
       });
 
-      const app = buildApp({ prisma: mockPrisma, internalSecret });
+      const app = buildApp({ prisma: mockPrisma, internalSecret, allowUnauthenticatedDevApi: true });
 
       // First, get the CSRF token
       const getRes = await app.inject({
@@ -113,7 +113,7 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
       const mockPrisma = getMockPrisma();
       mockPrisma.indexerCheckpoint.findUnique.mockResolvedValue(null);
 
-      const app = buildApp({ prisma: mockPrisma, internalSecret });
+      const app = buildApp({ prisma: mockPrisma, internalSecret, allowUnauthenticatedDevApi: true });
 
       const res = await app.inject({
         method: "POST",
@@ -136,7 +136,7 @@ describe("Security Middleware Integration Tests (Rate Limiting & CSRF)", () => {
   describe("Rate Limiting", () => {
     it("blocks public requests after limit is reached (mocked limit window)", async () => {
       const mockPrisma = getMockPrisma();
-      const app = buildApp({ prisma: mockPrisma, internalSecret });
+      const app = buildApp({ prisma: mockPrisma, internalSecret, allowUnauthenticatedDevApi: true });
 
       // public route limit is 100 requests. Let's make 101 requests from same IP.
       // In-memory test is extremely fast, so we can verify rate limiting kicks in.
