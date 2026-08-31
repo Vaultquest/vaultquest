@@ -44,7 +44,8 @@ export default function DepositPlannerPage() {
   // Prevent NextJS Hydration mismatches
   useEffect(() => {
     setMounted(true);
-    const stored = localStorage.getItem("vaultquest_deposit_schedules");
+    const key = `vaultquest_schedules_${walletAddress || "default"}`;
+    const stored = localStorage.getItem(key);
     if (stored) {
       try {
         setSchedules(JSON.parse(stored));
@@ -52,11 +53,12 @@ export default function DepositPlannerPage() {
         console.error("Failed to parse schedules from storage", e);
       }
     }
-  }, []);
+  }, [walletAddress]);
 
   const saveSchedules = (newSchedules) => {
     setSchedules(newSchedules);
-    localStorage.setItem("vaultquest_deposit_schedules", JSON.stringify(newSchedules));
+    const key = `vaultquest_schedules_${walletAddress || "default"}`;
+    localStorage.setItem(key, JSON.stringify(newSchedules));
   };
 
   const selectedVault = useMemo(() => {
