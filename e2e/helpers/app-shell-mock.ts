@@ -44,7 +44,48 @@ export async function mockAppShell(page: Page, { connected = false } = {}) {
       }
 
       if (url.includes("/api/health")) {
-        return new Response("", { status: 200, statusText: "OK" });
+        // Same-origin health probe (#116): the banner reads this JSON and
+        // hides when every probe reports operational, so the mock must return
+        // a well-formed probe payload rather than an empty body.
+        const now = new Date().toISOString();
+        const probe = {
+          status: "operational",
+          checked_at: now,
+          checks: [
+            {
+              id: "stellar-horizon",
+              name: "Stellar Horizon API",
+              url: "https://horizon.stellar.org",
+              status: "operational",
+              latency_ms: 120,
+            },
+            {
+              id: "stellar-rpc",
+              name: "Stellar RPC",
+              url: "https://soroban-testnet.stellar.org",
+              status: "operational",
+              latency_ms: 210,
+            },
+            {
+              id: "avalanche-rpc",
+              name: "Avalanche RPC",
+              url: "https://api.avax.network/ext/bc/C/rpc",
+              status: "operational",
+              latency_ms: 340,
+            },
+            {
+              id: "backend",
+              name: "VaultQuest Backend",
+              url: "/health/probe",
+              status: "operational",
+              latency_ms: 18,
+            },
+          ],
+        };
+        return new Response(JSON.stringify(probe), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
 
       return originalFetch(input, init);

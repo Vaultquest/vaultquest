@@ -3,13 +3,18 @@ import type { PrismaClient } from "@prisma/client";
 import type { LedgerService } from "../services/ledger.js";
 import type { CacheService } from "../services/cacheService.js";
 import { getReadiness, type ReadinessOptions } from "../services/readinessService.js";
+import {
+  probeDependencies,
+  type ProbeOptions,
+} from "../services/probeService.js";
 import { ok } from "../responses.js";
 
 export const healthRoutes = (
   svc: LedgerService,
   prisma: PrismaClient,
   cacheService: CacheService | undefined,
-  readinessOptions: ReadinessOptions = {}
+  readinessOptions: ReadinessOptions = {},
+  probeOptions: ProbeOptions = {}
 ): FastifyPluginAsync =>
   async (app) => {
     // Cheap liveness: no dependency checks, so an orchestrator can use it to
@@ -47,5 +52,20 @@ export const healthRoutes = (
       );
       reply.status(readiness.status === "ready" ? 200 : 503);
       return ok(readiness);
+    });
+
+    // External dependency probe for the browser status banner (#116). Runs
+    // the network checks server-side (where CORS does not apply), so the
+    // banner no longer needs `mode: "no-cors"` fetches whose opaque
+    // responses hide the real status. Shares the caller-provided mutation
+    // options so tests can inject a stub fetch and fixed clock; the
+    // production default probes the real third-party endpoints.
+    app.get("/health/probe", async (req) => {
+      const probe = await probeDependencies(probeOptions);
+      req.log.debug(
+        { event: "health_probe", status: probe.status },
+        "dependency probe completed"
+      );
+      return ok(probe);
     });
   };
