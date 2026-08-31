@@ -14,6 +14,7 @@ export interface DataExportBundle {
       actionLedger: number;
       userQuests: number;
       savedPools: number;
+      userProfiles: number;
       notificationPrefs: number;
       supportEvidence: number;
       activityLogs: number;
@@ -24,6 +25,7 @@ export interface DataExportBundle {
     actionLedger: unknown[];
     userQuests: unknown[];
     savedPools: unknown[];
+    userProfiles: unknown[];
     notificationPrefs: unknown[];
     supportEvidence: unknown[];
     activityLogs: unknown[];
@@ -112,6 +114,11 @@ export class PrivacyExportService {
       where: { walletAddress: normalizedWallet },
     });
 
+    // 3b. Fetch the durable User Profile
+    const profileRecords = await this.prisma.userProfile.findMany({
+      where: { walletAddress: normalizedWallet },
+    });
+
     // 4. Fetch Notification Prefs
     const prefRecords = await this.prisma.userNotificationPref.findMany({
       where: { walletAddress: normalizedWallet },
@@ -151,6 +158,7 @@ export class PrivacyExportService {
       actionLedger: decryptedLedger,
       userQuests: questRecords,
       savedPools: poolRecords,
+      userProfiles: profileRecords,
       notificationPrefs: decryptedPrefs,
       supportEvidence: decryptedEvidence,
       activityLogs: decryptedLogs,
@@ -169,6 +177,7 @@ export class PrivacyExportService {
           actionLedger: decryptedLedger.length,
           userQuests: questRecords.length,
           savedPools: poolRecords.length,
+          userProfiles: profileRecords.length,
           notificationPrefs: decryptedPrefs.length,
           supportEvidence: decryptedEvidence.length,
           activityLogs: decryptedLogs.length,

@@ -106,6 +106,26 @@ export const DATA_PRIVACY_INVENTORY: Record<string, FieldPrivacyDefinition> = {
     legalHoldApplies: false,
     onChainPublic: false,
   },
+  "UserProfile.displayName": {
+    entity: "UserProfile",
+    field: "displayName",
+    sensitivity: "SENSITIVE",
+    purpose: "user_preferences",
+    retentionDays: "indefinite",
+    encryptAtRest: false,
+    legalHoldApplies: false,
+    onChainPublic: false,
+  },
+  "UserProfile.bio": {
+    entity: "UserProfile",
+    field: "bio",
+    sensitivity: "SENSITIVE",
+    purpose: "user_preferences",
+    retentionDays: "indefinite",
+    encryptAtRest: false,
+    legalHoldApplies: false,
+    onChainPublic: false,
+  },
 };
 
 /**
