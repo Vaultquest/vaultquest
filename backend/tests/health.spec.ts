@@ -161,7 +161,7 @@ describe("Indexer Health & Sync-Lag Tests", () => {
         }
       } as any;
 
-      const app = buildApp({ prisma: mockPrisma, internalSecret });
+      const app = buildApp({ prisma: mockPrisma, internalSecret, allowUnauthenticatedDevApi: true });
       const res = await app.inject({
         method: "GET",
         url: "/health/indexer"
@@ -176,7 +176,7 @@ describe("Indexer Health & Sync-Lag Tests", () => {
 
     it("POST /internal/checkpoint rejects unauthorized requests", async () => {
       const mockPrisma = {} as any;
-      const app = buildApp({ prisma: mockPrisma, internalSecret });
+      const app = buildApp({ prisma: mockPrisma, internalSecret, allowUnauthenticatedDevApi: true });
 
       const res = await app.inject({
         method: "POST",
@@ -213,7 +213,7 @@ describe("Indexer Health & Sync-Lag Tests", () => {
         }
       } as any;
 
-      const app = buildApp({ prisma: mockPrisma, internalSecret });
+      const app = buildApp({ prisma: mockPrisma, internalSecret, allowUnauthenticatedDevApi: true });
       const res = await app.inject({
         method: "POST",
         url: "/internal/checkpoint",

@@ -25,6 +25,11 @@ const schema = z.object({
    * When set, all `/api/*` routes require `X-Api-Key: <value>`.
    * Leave unset in local development to skip enforcement.
    */
+  /**
+   * API key for external/third-party service endpoints (issue #273, issue #97).
+   * When set, all `/api/*` routes require `X-Api-Key: <value>`.
+   * Must be explicitly configured or bypassed via ALLOW_UNAUTHENTICATED_DEV_API in dev.
+   */
   API_KEY: z
     .string()
     .min(32, "API_KEY must be at least 32 characters")
@@ -32,6 +37,16 @@ const schema = z.object({
       message: "API_KEY must not be a placeholder value"
     })
     .optional(),
+  /**
+   * Explicit opt-in flag to bypass API_KEY enforcement in development/testing (issue #97).
+   * Strictly disallowed in production.
+   */
+  ALLOW_UNAUTHENTICATED_DEV_API: z
+    .string()
+    .transform((val) => val === "true" || val === "1")
+    .or(z.boolean())
+    .optional()
+    .default(false),
   /**
    * Automated database backup configuration (issue #275).
    * BACKUP_DIR: absolute path where pg_dump files are written.
@@ -83,8 +98,47 @@ const schema = z.object({
    * Wide enough to absorb clock skew between a browser and the server, short
    * enough that a captured signature is not useful for long. Default 5 minutes.
    */
-  EXPORT_SIGNATURE_TTL_MS: z.coerce.number().int().positive().default(5 * 60 * 1000)
-});
+  EXPORT_SIGNATURE_TTL_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
+  REMINDER_LEAD_HOURS: z.coerce.number().int().positive().default(24),
+  SENDGRID_API_KEY: z.string().min(1).optional(),
+  EMAIL_FROM: z.string().email().optional()
+})
+.refine(
+  (data) => {
+    if (data.NODE_ENV === "production") {
+      return !data.ALLOW_UNAUTHENTICATED_DEV_API;
+    }
+    return true;
+  },
+  {
+    message: "ALLOW_UNAUTHENTICATED_DEV_API cannot be enabled in production environment",
+    path: ["ALLOW_UNAUTHENTICATED_DEV_API"]
+  }
+)
+.refine(
+  (data) => {
+    if (data.NODE_ENV === "production") {
+      return typeof data.API_KEY === "string" && data.API_KEY.length >= 32;
+    }
+    return true;
+  },
+  {
+    message: "API_KEY is required in production environment and must be at least 32 characters",
+    path: ["API_KEY"]
+  }
+)
+.refine(
+  (data) => {
+    if (!data.API_KEY && !data.ALLOW_UNAUTHENTICATED_DEV_API) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: "API_KEY is required for protected routes unless ALLOW_UNAUTHENTICATED_DEV_API=true is explicitly enabled for development/testing",
+    path: ["API_KEY"]
+  }
+);
 
 export type Env = z.infer<typeof schema>;
 
@@ -113,6 +167,9 @@ export function getEnv(): Env {
       SOROBAN_RPC_URL: process.env.SOROBAN_RPC_URL || undefined,
       INDEXER_CONTRACT_IDS: process.env.INDEXER_CONTRACT_IDS || undefined,
       API_KEY: process.env.API_KEY || undefined,
+      ALLOW_UNAUTHENTICATED_DEV_API:
+        process.env.ALLOW_UNAUTHENTICATED_DEV_API === "true" ||
+        process.env.ALLOW_UNAUTHENTICATED_DEV_API === "1",
       BACKUP_DIR: process.env.BACKUP_DIR || undefined,
       BACKUP_RETAIN_DAYS: Number(process.env.BACKUP_RETAIN_DAYS ?? 7),
       BACKUP_SCHEDULE: process.env.BACKUP_SCHEDULE ?? "0 2 * * *",
@@ -132,3 +189,4 @@ export function getEnv(): Env {
   }
   return parseEnv();
 }
+

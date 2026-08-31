@@ -12,7 +12,7 @@ describe("GET /dashboard/summary (#14)", () => {
 
   beforeAll(async () => {
     db = await startTestDb();
-    app = buildApp({ prisma: db.prisma, internalSecret: "test-secret" });
+    app = buildApp({ prisma: db.prisma, internalSecret: "test-secret", allowUnauthenticatedDevApi: true });
   });
   afterAll(async () => {
     await app.close();

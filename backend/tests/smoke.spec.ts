@@ -8,7 +8,7 @@ describe("smoke", () => {
   let app: FastifyInstance;
   beforeAll(async () => {
     db = await startTestDb();
-    app = buildApp({ prisma: db.prisma, internalSecret: "s" });
+    app = buildApp({ prisma: db.prisma, internalSecret: "s", allowUnauthenticatedDevApi: true });
   });
   afterAll(async () => {
     await app.close();

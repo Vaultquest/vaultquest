@@ -136,6 +136,7 @@ model SavedPool {
   @@map("saved_pools")
 }
 
+<<<<<<< HEAD
 model UserProfile {
   id            String    @id @default(uuid()) @db.Uuid
   walletAddress String    @map("wallet_address")
@@ -157,6 +158,75 @@ model UserNotificationPref {
   category      String
   encryptedPref Json     @map("encrypted_pref")
   keyVersion    Int      @default(1) @map("key_version")
+  createdAt     DateTime @default(now()) @map("created_at")
+=======
+
+model Product {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String
+  categoryId String   @map("category_id")
+  price      Float
+  images     ProductImage[]
+  createdAt  DateTime @default(now())
+
+  @@index([categoryId])
+  @@index([price])
+}
+
+model ProductImage {
+  id        String   @id @default(uuid()) @db.Uuid
+  url       String
+  productId String   @map("product_id") @db.Uuid
+  product   Product  @relation(fields: [productId], references: [id])
+}
+
+model DrawProof {
+  id                String    @id @default(uuid()) @db.Uuid
+  drawId            String    @unique @map("draw_id")
+  roundId           Int       @map("round_id")
+  contractId        String    @map("contract_id")
+  proofJson         Json      @map("proof_json")
+  proofHash         String    @unique @map("proof_hash")
+  signature         String?
+  verified          Boolean   @default(false)
+  verifiedAt        DateTime? @map("verified_at")
+  verificationError String?   @map("verification_error")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@index([roundId])
+  @@index([contractId, createdAt(sort: Desc)])
+  @@map("draw_proofs")
+}
+
+model Category {
+  id          String   @id @default(uuid()) @db.Uuid
+  slug        String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("categories")
+}
+
+model Notification {
+  id             String    @id @default(uuid()) @db.Uuid
+  walletAddress  String    @map("wallet_address")
+  type           String
+  positionId     String    @map("position_id")
+  title          String
+  message        String
+  dismissedAt    DateTime? @map("dismissed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@unique([walletAddress, positionId, type])
+  @@index([walletAddress, dismissedAt])
+  @@map("notifications")
+model UserNotificationPref {
+  id            String   @id @default(uuid()) @db.Uuid
+  walletAddress String   @map("wallet_address")
+  category      String
+  enabled       Boolean  @default(true)
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 

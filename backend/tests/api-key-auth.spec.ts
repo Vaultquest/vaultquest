@@ -106,18 +106,47 @@ describe("API key auth — guard enabled", () => {
   });
 });
 
-// ─── Guard disabled (no API_KEY set) ─────────────────────────────────────────
+// ─── Guard disabled via explicit opt-in (no API_KEY set) ────────────────────
 
-describe("API key auth — guard disabled (no apiKey configured)", () => {
-  it("allows /api/actions/:wallet without key → 200", async () => {
-    const app = buildApp({ prisma: getMockPrisma(), internalSecret: "secret" /* no apiKey */ });
+describe("API key auth — fail-closed startup behavior (issue #97)", () => {
+  it("throws a startup error when apiKey is missing and dev bypass is not enabled", () => {
+    expect(() =>
+      buildApp({ prisma: getMockPrisma(), internalSecret: "secret" /* no apiKey, no allowUnauthenticatedDevApi */ })
+    ).toThrow(/API key guard configuration error/);
+  });
+
+  it("throws a startup error in production environment even if dev bypass is set", () => {
+    expect(() =>
+      buildApp({
+        prisma: getMockPrisma(),
+        internalSecret: "secret",
+        allowUnauthenticatedDevApi: true,
+        environment: "production"
+      })
+    ).toThrow(/production environment/);
+  });
+});
+
+describe("API key auth — explicit dev bypass (allowUnauthenticatedDevApi: true)", () => {
+  it("allows /api/actions/:wallet without key when dev bypass is explicitly enabled → 200", async () => {
+    const app = buildApp({
+      prisma: getMockPrisma(),
+      internalSecret: "secret",
+      allowUnauthenticatedDevApi: true,
+      environment: "development"
+    });
     const res = await app.inject({ method: "GET", url: "/api/actions/GWALLET" });
     expect(res.statusCode).toBe(200);
     await app.close();
   });
 
-  it("allows /api/metrics without key → 200", async () => {
-    const app = buildApp({ prisma: getMockPrisma(), internalSecret: "secret" });
+  it("allows /api/metrics without key when dev bypass is explicitly enabled → 200", async () => {
+    const app = buildApp({
+      prisma: getMockPrisma(),
+      internalSecret: "secret",
+      allowUnauthenticatedDevApi: true,
+      environment: "development"
+    });
     const res = await app.inject({ method: "GET", url: "/api/metrics" });
     expect(res.statusCode).toBe(200);
     await app.close();
@@ -135,7 +164,8 @@ describe("Prometheus scrape guard (issue #102)", () => {
     const app = buildApp({
       prisma: getMockPrisma(),
       internalSecret: "secret",
-      prometheusScrapeKey: VALID_SCRAPE_KEY
+      prometheusScrapeKey: VALID_SCRAPE_KEY,
+      allowUnauthenticatedDevApi: true
     });
     const res = await app.inject({ method: "GET", url: "/metrics" });
     expect(res.statusCode).toBe(401);
@@ -146,7 +176,8 @@ describe("Prometheus scrape guard (issue #102)", () => {
     const app = buildApp({
       prisma: getMockPrisma(),
       internalSecret: "secret",
-      prometheusScrapeKey: VALID_SCRAPE_KEY
+      prometheusScrapeKey: VALID_SCRAPE_KEY,
+      allowUnauthenticatedDevApi: true
     });
     const res = await app.inject({
       method: "GET",
@@ -174,7 +205,7 @@ describe("Prometheus scrape guard (issue #102)", () => {
   });
 
   it("allows /metrics without a key only when no scrape key is configured (local dev)", async () => {
-    const app = buildApp({ prisma: getMockPrisma(), internalSecret: "secret" /* no prometheusScrapeKey */ });
+    const app = buildApp({ prisma: getMockPrisma(), internalSecret: "secret", allowUnauthenticatedDevApi: true /* no prometheusScrapeKey */ });
     const res = await app.inject({ method: "GET", url: "/metrics" });
     expect(res.statusCode).toBe(200);
     await app.close();
@@ -199,3 +230,4 @@ describe("API key auth — non-API routes unaffected", () => {
     await app.close();
   });
 });
+

@@ -32,7 +32,7 @@ import { PrivacyDeletionService } from "./services/privacy/privacyDeletionServic
 export type AppDeps = {
   prisma: PrismaClient;
   internalSecret: string;
-  /** API key for external-service endpoints (issue #273). Undefined disables enforcement. */
+  /** API key for external-service endpoints (issue #273, issue #97). */
   apiKey?: string;
   /**
    * Dedicated scrape credential for the raw Prometheus `/metrics` endpoint
@@ -40,6 +40,10 @@ export type AppDeps = {
    * independently. Undefined disables enforcement (local dev only).
    */
   prometheusScrapeKey?: string;
+  /** Explicit opt-in to allow unauthenticated dev access when apiKey is omitted (issue #97). */
+  allowUnauthenticatedDevApi?: boolean;
+  /** Runtime environment override (e.g. 'production', 'development', 'test'). */
+  environment?: string;
   logger?: Logger;
   cacheService?: CacheService;
   privacyMasterKey?: string;
@@ -109,13 +113,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const exportSvc = new PrivacyExportService(deps.prisma, encryptionSvc, auditSvc);
   const deletionSvc = new PrivacyDeletionService(deps.prisma, deps.cacheService, auditSvc);
 
-  // API key guard for external-service endpoints (#273).
-  // Guard is a no-op when apiKey is undefined (local dev without configuration).
-  const apiKeyGuard = requireApiKey(deps.apiKey);
+  // API key guard for external-service endpoints (#273, #97).
+  const apiKeyGuard = requireApiKey({
+    expectedKey: deps.apiKey,
+    allowUnauthenticatedDevBypass: deps.allowUnauthenticatedDevApi,
+    environment: deps.environment,
+  });
 
-  // Scrape guard for the raw Prometheus endpoint (#102). Deliberately a
-  // separate credential from apiKeyGuard.
-  const prometheusScrapeGuard = requireApiKey(deps.prometheusScrapeKey);
+
+  const prometheusScrapeGuard = requireApiKey({
+    expectedKey: deps.prometheusScrapeKey,
+    allowUnauthenticatedDevBypass: deps.allowUnauthenticatedDevApi ?? true,
+    environment: deps.environment,
+  });
 
   // Export authorization (#10). Deliberately not disabled by absent config:
   // export discloses a wallet's history, so it always demands a principal.
@@ -127,8 +137,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ...(deps.cacheService === undefined ? {} : { cacheService: deps.cacheService })
   });
 
-  app.register(healthRoutes(svc, deps.prisma, deps.cacheService));
   app.register(actionsRoutes(svc, apiKeyGuard, walletAuthGuard, serviceAuthGuard));
+  app.register(healthRoutes(svc, deps.prisma, deps.cacheService));
   app.register(savedPoolsRoutes(savedPoolsSvc, walletAuthGuard));
   app.register(profileRoutes(profileSvc, walletAuthGuard));
   app.register(internalRoutes(svc, deps.internalSecret));
