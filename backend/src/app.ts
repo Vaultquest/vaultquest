@@ -20,6 +20,7 @@ import { requireWalletAuth } from "./middleware/wallet-auth.js";
 import { requireServiceAuth } from "./middleware/service-auth.js";
 import { createLogger } from "./logger.js";
 import { requestLogContext } from "./utils/logRedaction.js";
+import corsSecurity from "./middleware/corsSecurity.js";
 import type { Logger } from "pino";
 import type { CacheService } from "./services/cacheService.js";
 
@@ -69,6 +70,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // Register Prometheus metrics plugin
   app.register(prometheusPlugin);
+
+  // Register CORS origin policy and defensive security headers (#126)
+  app.register(corsSecurity, {
+    allowedOrigins: process.env.ALLOWED_ORIGINS,
+    isProduction: deps.environment === "production" || process.env.NODE_ENV === "production",
+  });
 
   // Structured logging for incoming requests and performance duration.
   // Only the normalized route template and allowlisted, redacted metadata are
