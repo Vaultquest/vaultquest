@@ -30,6 +30,8 @@ import {
 import { MOCK_VAULTS } from "@/components/app/VaultList";
 import { ROUND_STATUS } from "@/lib/vault-status";
 import RoundStatusBadge from "@/components/app/RoundStatusBadge";
+import ApyMetric from "@/components/app/ApyMetric";
+import { APY_METRIC } from "@/lib/apy-metrics";
 import VaultHealthStatusPanel from "@/components/app/VaultHealthStatusPanel";
 import VaultRewardsExplanationModal from "@/components/app/VaultRewardsExplanationModal";
 import VaultKeyboardNavAudit from "@/components/app/VaultKeyboardNavAudit";
@@ -152,7 +154,7 @@ export default function VaultDetailPage({ params }) {
       tvl: String(vault.tvl),
       asset: vault.asset,
       participantCount: vault.participantCount ?? 0,
-      expectedYield: `${vault.apy}% APY`,
+      expectedYield: `${vault.apy}% projected APY`,
       prize: undefined,
       opensAt: null,
       locksAt: null,
@@ -306,7 +308,9 @@ export default function VaultDetailPage({ params }) {
               <div>
                 <h3 className="text-sm font-semibold text-vault-text">Performance</h3>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <MetricTile label="Est. APY" value={`${vault.apy}%`} tone="success" />
+                  <ApyMetric metric={APY_METRIC.PROJECTED} value={vault.apy} />
+                  <ApyMetric metric={APY_METRIC.REALIZED} value={vault.realizedApy ?? null} />
+                  <ApyMetric metric={APY_METRIC.PRIZE_FUNDED} value={vault.prizeFundedApy ?? null} />
                   <MetricTile label="Deposits (TVL)" value={`$${(vault.tvl / 1000000).toFixed(2)}M`} />
                 </div>
               </div>

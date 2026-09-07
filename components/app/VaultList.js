@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { Wallet, Info, ArrowUpRight } from "lucide-react";
 import RoundStatusBadge from "@/components/app/RoundStatusBadge";
+import ApyMetric from "@/components/app/ApyMetric";
+import { APY_METRIC } from "@/lib/apy-metrics";
 import { MOCK_VAULTS } from "@/lib/vault-mock-data";
 
 export { MOCK_VAULTS, VAULT_ROUND_ARCHIVE } from "@/lib/vault-mock-data";
@@ -64,10 +66,7 @@ export default function VaultList({ vaults = [], suggestions = null, onSuggestio
             </div>
 
             <div className="mt-6 grid grid-cols-3 gap-3 border-t border-vault-border pt-4">
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-vault-muted font-bold">Est. APY</p>
-                <p className="font-bold text-emerald-500">{vault.apy}%</p>
-              </div>
+              <ApyMetric metric={APY_METRIC.PROJECTED} value={vault.apy} compact />
               <div>
                 <p className="text-[10px] uppercase tracking-wider text-vault-muted font-bold">TVL</p>
                 <p className="font-medium text-vault-text">

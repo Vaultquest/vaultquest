@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { ArrowUpDown, ArrowUpRight, Wallet, Info } from "lucide-react";
 import VaultEmptyState from "@/components/app/VaultEmptyState";
+import ApyMetric from "@/components/app/ApyMetric";
+import { APY_METRIC } from "@/lib/apy-metrics";
 
 export default function VaultComparisonTable({ vaults = [], sortBy = "apy", suggestions = null, onSuggestionClick = null, onClearFilters = null }) {
   const [sortConfig, setSortConfig] = useState({ key: sortBy, direction: "desc" });
@@ -92,7 +94,7 @@ export default function VaultComparisonTable({ vaults = [], sortBy = "apy", sugg
               className="group cursor-pointer px-6 py-4 font-semibold hover:bg-white/5"
               onClick={() => handleSort("apy")}
             >
-              Est. Yield <SortIcon columnKey="apy" />
+              Projected APY <SortIcon columnKey="apy" />
             </th>
             <th
               className="group cursor-pointer px-6 py-4 font-semibold hover:bg-white/5"
@@ -136,9 +138,7 @@ export default function VaultComparisonTable({ vaults = [], sortBy = "apy", sugg
                 {vault.participantCount?.toLocaleString("en-US") ?? "Pending"}
               </td>
               <td className="px-6 py-4">
-                <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-sm font-bold text-emerald-500">
-                  {vault.apy}%
-                </span>
+                <ApyMetric metric={APY_METRIC.PROJECTED} value={vault.apy} compact />
               </td>
               <td className="px-6 py-4 text-vault-muted">
                 {vault.lockup === 0 ? "Flexible" : `${vault.lockup} Days`}
