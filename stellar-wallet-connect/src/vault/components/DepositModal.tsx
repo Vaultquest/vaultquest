@@ -3,19 +3,26 @@ import { EXPECTED_NETWORK } from "../../lib/wallets";
 import { useStore } from "@nanostores/react";
 import { connectedNetwork } from "../../core/store.js";
 import type { FC } from "react";
-import { useState, useCallback } from "react";
-import { AlertTriangle, Check, Loader2 } from "lucide-react";
+import { useState, useCallback, useMemo } from "react";
+import { AlertTriangle, Check, Loader2, RefreshCw } from "lucide-react";
 import Modal from "../../components/Modal";
 import type { PoolSummary } from "../contract/types";
 import { explorerTxUrl, formatAmount } from "../lib/format";
+import {
+  computeDepositSharesPreview,
+  formatShareAmount,
+  isPoolStateStale,
+  VaultMathError,
+} from "../lib/shareMath";
 
 type Step = "input" | "review" | "broadcasting" | "success";
 
 export interface DepositModalProps {
-  pool: PoolSummary;
+  pool: PoolSummary & { updatedAt?: string };
   walletBalance: string;
   onDeposit: (amount: string) => Promise<{ txHash: string }>;
   onClose: () => void;
+  onRefreshPool?: () => void;
 }
 
 const QUICK_AMOUNTS = [25, 50, 75] as const;
@@ -23,17 +30,21 @@ const GAS_BUFFER = 0.5;
 
 function estimateWinChanceChange(currentTvl: bigint, depositAmount: bigint, participantCount: number): string {
   if (currentTvl === 0n) return "50%";
-  const currentShare = BigInt(participantCount) * 10000n / (currentTvl / 10000n + 1n);
-  const newShare = BigInt(participantCount + 1) * 10000n / ((currentTvl + depositAmount) / 10000n + 1n);
+  const currentShare = (BigInt(participantCount) * 10000n) / (currentTvl / 10000n + 1n);
+  const newShare = (BigInt(participantCount + 1) * 10000n) / ((currentTvl + depositAmount) / 10000n + 1n);
   const change = newShare > currentShare ? newShare - currentShare : currentShare - newShare;
   return `${(Number(change) / 100).toFixed(2)}%`;
 }
 
-export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDeposit, onClose }) => {
+export const DepositModal: FC<DepositModalProps> = ({
+  pool,
+  walletBalance,
+  onDeposit,
+  onClose,
+  onRefreshPool,
+}) => {
   const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
   const assetDisplayName = pool ? getAssetDisplayName(network, pool.asset) : "";
-  // stellar.expert only serves "public" and "testnet" explorers; futurenet/standalone
-  // deployments fall back to the testnet path rather than a broken mainnet link.
   const explorerNetwork = network === "mainnet" ? "public" : "testnet";
   const [step, setStep] = useState<Step>("input");
   const [amount, setAmount] = useState("");
@@ -43,13 +54,41 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
   const balanceNum = parseFloat(walletBalance);
   const amountNum = parseFloat(amount) || 0;
   const exceedsBalance = amountNum > balanceNum - GAS_BUFFER;
-  const isValid = amountNum > 0 && !exceedsBalance;
 
-  const handleQuickAmount = useCallback((pct: number) => {
-    const raw = (balanceNum - GAS_BUFFER) * (pct / 100);
-    setAmount(raw.toFixed(2));
-    setError(null);
-  }, [balanceNum]);
+  const isStale = isPoolStateStale(pool.updatedAt);
+
+  const previewResult = useMemo(() => {
+    if (!amountNum || amountNum <= 0) {
+      return { shares: null, error: null };
+    }
+    try {
+      const depositStroops = BigInt(Math.round(amountNum * 1e7));
+      const shares = computeDepositSharesPreview(
+        {
+          tvl: pool.tvl,
+          updatedAt: pool.updatedAt,
+        },
+        depositStroops
+      );
+      return { shares, error: null };
+    } catch (err) {
+      if (err instanceof VaultMathError && err.kind === "RoundsToZero") {
+        return { shares: null, error: "Deposit amount is too small to mint shares." };
+      }
+      return { shares: null, error: null };
+    }
+  }, [amountNum, pool]);
+
+  const isValid = amountNum > 0 && !exceedsBalance && !previewResult.error;
+
+  const handleQuickAmount = useCallback(
+    (pct: number) => {
+      const raw = (balanceNum - GAS_BUFFER) * (pct / 100);
+      setAmount(raw.toFixed(2));
+      setError(null);
+    },
+    [balanceNum]
+  );
 
   const handleMax = useCallback(() => {
     const max = Math.max(0, balanceNum - GAS_BUFFER);
@@ -58,13 +97,17 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
   }, [balanceNum]);
 
   const handleContinue = useCallback(() => {
+    if (previewResult.error) {
+      setError(previewResult.error);
+      return;
+    }
     if (!isValid) {
       setError(amountNum === 0 ? "Enter an amount" : "Insufficient balance (leave buffer for gas)");
       return;
     }
     setStep("review");
     setError(null);
-  }, [isValid, amountNum]);
+  }, [isValid, amountNum, previewResult.error]);
 
   const handleConfirm = useCallback(async () => {
     setStep("broadcasting");
@@ -86,13 +129,36 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
       ariaDescribedBy="deposit-modal-desc"
     >
       <div className="space-y-5">
-        <h2 id="deposit-modal-title" className="text-xl font-bold text-white">Deposit</h2>
+        <h2 id="deposit-modal-title" className="text-xl font-bold text-white">
+          Deposit
+        </h2>
         <p id="deposit-modal-desc" className="sr-only">
           Enter the amount of assets you wish to deposit into the prize pool.
         </p>
 
         {step === "input" && (
           <div className="space-y-4">
+            {isStale && (
+              <div
+                role="alert"
+                className="flex items-start justify-between gap-2 rounded-lg border border-amber-900/40 bg-amber-900/10 p-3 text-sm text-amber-300"
+              >
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>Pool data is older than 2 minutes. Share preview may vary slightly upon broadcast.</span>
+                </div>
+                {onRefreshPool && (
+                  <button
+                    type="button"
+                    onClick={onRefreshPool}
+                    className="flex items-center gap-1 text-xs underline hover:text-amber-200 shrink-0"
+                  >
+                    <RefreshCw className="h-3 w-3" /> Refresh
+                  </button>
+                )}
+              </div>
+            )}
+
             <div>
               <label htmlFor="deposit-amount" className="block text-sm font-medium text-gray-300">
                 Amount
@@ -104,7 +170,10 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
                   step="0.01"
                   min="0"
                   value={amount}
-                  onChange={(e) => { setAmount(e.target.value); setError(null); }}
+                  onChange={(e) => {
+                    setAmount(e.target.value);
+                    setError(null);
+                  }}
                   className="w-full rounded-xl border border-red-900/40 bg-[#1A0505] px-4 py-3 pr-16 text-lg text-white placeholder-gray-600 outline-none transition-colors focus:border-red-500/60 focus:ring-1 focus:ring-red-500/30"
                   placeholder="0.00"
                 />
@@ -116,6 +185,25 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
                 Balance: {formatAmount(walletBalance, assetDisplayName)}
               </p>
             </div>
+
+            {previewResult.shares !== null && (
+              <div className="rounded-xl border border-red-900/30 bg-[#1A0505]/40 p-3 space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Expected shares to receive</span>
+                  <span className="text-white font-medium">
+                    {formatShareAmount(previewResult.shares, 7)} shares
+                  </span>
+                </div>
+                <div className="flex justify-between text-[11px] text-gray-500">
+                  <span>Rounding invariant</span>
+                  <span>Floor division (favors existing pool)</span>
+                </div>
+              </div>
+            )}
+
+            {previewResult.error && (
+              <p className="text-sm text-amber-400">{previewResult.error}</p>
+            )}
 
             {exceedsBalance && (
               <div className="flex items-start gap-2 rounded-lg border border-amber-900/40 bg-amber-900/10 p-3 text-sm text-amber-300">
@@ -144,9 +232,7 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
               </button>
             </div>
 
-            {error && (
-              <p className="text-sm text-red-400">{error}</p>
-            )}
+            {error && <p className="text-sm text-red-400">{error}</p>}
 
             <button
               type="button"
@@ -170,9 +256,23 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
                 <span className="text-gray-400">Pool</span>
                 <span className="text-white">{pool.name}</span>
               </div>
+              {previewResult.shares !== null && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Expected shares</span>
+                  <span className="text-white font-medium">
+                    {formatShareAmount(previewResult.shares, 7)} shares
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Rounding mode</span>
+                <span className="text-gray-300">Floor division</span>
+              </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Lock period</span>
-                <span className="text-white">Until {pool.locksAt ? new Date(pool.locksAt).toLocaleDateString() : "N/A"}</span>
+                <span className="text-white">
+                  Until {pool.locksAt ? new Date(pool.locksAt).toLocaleDateString() : "N/A"}
+                </span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Est. gas</span>
@@ -181,14 +281,17 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Win chance change</span>
                 <span className="text-emerald-400 font-semibold">
-                  +{estimateWinChanceChange(BigInt(pool.tvl || "0"), BigInt(Math.round(amountNum * 1e7)), pool.participantCount)}
+                  +
+                  {estimateWinChanceChange(
+                    BigInt(pool.tvl || "0"),
+                    BigInt(Math.round(amountNum * 1e7)),
+                    pool.participantCount
+                  )}
                 </span>
               </div>
             </div>
 
-            {error && (
-              <p className="text-sm text-red-400">{error}</p>
-            )}
+            {error && <p className="text-sm text-red-400">{error}</p>}
 
             <div className="flex gap-3">
               <button
@@ -222,14 +325,15 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
               {error ? "Transaction failed" : "Broadcasting deposit..."}
             </p>
             <p className="text-sm text-gray-400 text-center max-w-xs">
-              {error
-                ? error
-                : "Please check your wallet to approve the transaction."}
+              {error ? error : "Please check your wallet to approve the transaction."}
             </p>
             {error && (
               <button
                 type="button"
-                onClick={() => { setStep("review"); setError(null); }}
+                onClick={() => {
+                  setStep("review");
+                  setError(null);
+                }}
                 className="rounded-xl bg-red-600 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1A0505]"
               >
                 Try again
@@ -243,16 +347,16 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
             )}
           </div>
         )}
+
         {step === "success" && (
           <div className="flex flex-col items-center gap-4 py-6">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-glow-green">
               <Check className="h-8 w-8" />
             </div>
-            <p className="text-base font-semibold text-white">
-              Deposit successful!
-            </p>
+            <p className="text-base font-semibold text-white">Deposit successful!</p>
             <p className="text-sm text-gray-400 text-center max-w-xs">
-              Your deposit of {amount} {assetDisplayName} has been successfully submitted and confirmed on-chain.
+              Your deposit of {amount} {assetDisplayName} has been successfully submitted and confirmed
+              on-chain.
             </p>
             {txHash && (
               <a
