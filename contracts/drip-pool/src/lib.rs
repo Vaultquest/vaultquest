@@ -209,6 +209,7 @@ pub struct WithdrawalQueueStatus {
     pub expires_ledger: u32,
     pub emergency_haircut_bps: u32,
     pub state: shares::WithdrawalState,
+    pub queue_state: shares::QueueState,
 }
 
 /// A pending admin action that requires multi-sig approval.
@@ -1596,6 +1597,7 @@ impl DripPool {
             .assets_owed
             .checked_sub(request.assets_paid)
             .ok_or(Error::MathOverflow)?;
+        let queue_state = shares::queue_state(&request);
         Ok(WithdrawalQueueStatus {
             request_id,
             owner,
@@ -1611,6 +1613,7 @@ impl DripPool {
             expires_ledger: request.expires_ledger,
             emergency_haircut_bps: request.emergency_haircut_bps,
             state: request.state,
+            queue_state,
         })
     }
 
@@ -2254,6 +2257,48 @@ impl DripPool {
 
     pub fn vault_withdrawal_head(env: Env) -> u32 {
         Self::queue_head(&env)
+    }
+
+    /// Returns the current lifecycle queue state for a withdrawal request.
+    pub fn vault_withdrawal_queue_state(
+        env: Env,
+        request_id: u32,
+    ) -> Result<shares::QueueState, Error> {
+        let request: shares::WithdrawalRequest = env
+            .storage()
+            .persistent()
+            .get(&VaultKey::WithdrawalRequest(request_id))
+            .ok_or(Error::WithdrawalNotFound)?;
+        Ok(shares::queue_state(&request))
+    }
+
+    /// Computes the zero-indexed position of an active withdrawal request ahead of it in the FIFO queue.
+    pub fn vault_withdrawal_position(env: Env, request_id: u32) -> Result<u32, Error> {
+        let queue = Self::withdrawal_queue(&env);
+        let head = Self::queue_head(&env);
+        let mut position = 0u32;
+        let mut found = false;
+        for i in head..queue.len() {
+            let id = queue.get_unchecked(i);
+            if id == request_id {
+                found = true;
+                break;
+            }
+            if let Some(req) = env
+                .storage()
+                .persistent()
+                .get::<_, shares::WithdrawalRequest>(&VaultKey::WithdrawalRequest(id))
+            {
+                if !Self::is_terminal_withdrawal(&req) {
+                    position += 1;
+                }
+            }
+        }
+        if found {
+            Ok(position)
+        } else {
+            Err(Error::WithdrawalNotFound)
+        }
     }
 
     pub fn vault_paused(env: Env) -> bool {

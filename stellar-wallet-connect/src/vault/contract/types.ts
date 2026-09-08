@@ -149,7 +149,38 @@ export interface VaultContractClient {
   listPools?(): Promise<PoolSummary[]>;
   getUserPosition(poolId: string, walletAddress?: string): Promise<UserPosition | null>;
   listRewardHistory(walletAddress: string): Promise<RewardHistoryEntry[]>;
+  getWithdrawalStatus?(requestId: number): Promise<DelayedWithdrawalRequest | null>;
+  listUserWithdrawals?(poolId: string, walletAddress: string): Promise<DelayedWithdrawalRequest[]>;
 
   // Writes (wallet-signed)
   submitAction(type: PoolActionType, input: PoolActionInput): Promise<PoolActionResult>;
+  claimWithdrawal?(requestId: number): Promise<PoolActionResult>;
+  cancelWithdrawal?(requestId: number): Promise<PoolActionResult>;
+}
+
+/**
+ * Lifecycle states for delayed strategy withdrawals:
+ * - pending: Waiting in FIFO queue for strategy liquidity to become available.
+ * - ready: Liquidity has been reserved; available for the user to claim.
+ * - fulfilled: Principal fully disbursed to user wallet.
+ * - failed: Request cancelled or expired before fulfillment.
+ */
+export type WithdrawalQueueState = "pending" | "ready" | "fulfilled" | "failed";
+
+export interface DelayedWithdrawalRequest {
+  requestId: number;
+  poolId: string;
+  owner: string;
+  destination: string;
+  sharesBurned: string;
+  assetsOwed: string;
+  assetsPaid: string;
+  assetsClaimed: string;
+  claimableAssets: string;
+  remainingAssets: string;
+  queueState: WithdrawalQueueState;
+  positionInQueue: number;
+  requestedLedger: number;
+  expiresLedger?: number;
+  canCancel: boolean;
 }

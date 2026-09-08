@@ -10,6 +10,8 @@ import {
 } from "@vaultquest/stellar-wallet-connect/src/core/store";
 import { EXPECTED_NETWORK } from "@vaultquest/stellar-wallet-connect/src/lib/wallets";
 import { DepositModal } from "@vaultquest/stellar-wallet-connect/src/vault/components/DepositModal";
+import { WithdrawalModal } from "@vaultquest/stellar-wallet-connect/src/vault/components/WithdrawalModal";
+import { DelayedWithdrawalTracker } from "@vaultquest/stellar-wallet-connect/src/vault/components/DelayedWithdrawalTracker";
 import { createSorobanVaultClient } from "@vaultquest/stellar-wallet-connect/src/vault/contract/sorobanClient";
 import { defaultVaultDataConfig } from "@vaultquest/stellar-wallet-connect/src/vault/data/config";
 import {
@@ -127,15 +129,26 @@ export default function VaultDetailPage({ params }) {
   const stellarConnected = Boolean(walletAddress);
   const [mounted, setMounted] = useState(false);
   const [isDepositOpen, setIsDepositOpen] = useState(false);
+  const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
+  const [delayedWithdrawals, setDelayedWithdrawals] = useState([]);
   const [copied, setCopied] = useState(false);
   const [connecting, setConnecting] = useState(false);
 
-  // Estimator States
   const [calcPrincipal, setCalcPrincipal] = useState("1000");
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const userPosition = useMemo(
+    () => ({
+      walletAddress: walletAddress || "",
+      deposited: "1250.00",
+      shares: "1250.00",
+      joined: true,
+    }),
+    [walletAddress],
+  );
 
   const vault = useMemo(() => {
     return MOCK_VAULTS.find((v) => String(v.id) === id);
@@ -217,6 +230,51 @@ export default function VaultDetailPage({ params }) {
     },
     [sorobanClient, vault, walletAddress],
   );
+
+  const handleWithdraw = useCallback(
+    async (amount) => {
+      if (!vault) throw new Error("Vault not found");
+      const result = await sorobanClient.submitAction("withdraw", {
+        poolId: String(vault.id),
+        walletAddress,
+        amount,
+      });
+      toast.success("Withdrawal submitted to strategy liquidity queue");
+      return result;
+    },
+    [sorobanClient, vault, walletAddress],
+  );
+
+  const handleClaimDelayed = useCallback(async (requestId) => {
+    toast.success(`Claimed withdrawal request #${requestId}`);
+    setDelayedWithdrawals((prev) =>
+      prev.map((req) =>
+        req.requestId === requestId
+          ? {
+              ...req,
+              queueState: "fulfilled",
+              claimableAssets: "0",
+              assetsClaimed: req.assetsOwed,
+            }
+          : req,
+      ),
+    );
+  }, []);
+
+  const handleCancelDelayed = useCallback(async (requestId) => {
+    toast.success(`Cancelled withdrawal request #${requestId}`);
+    setDelayedWithdrawals((prev) =>
+      prev.map((req) =>
+        req.requestId === requestId
+          ? {
+              ...req,
+              queueState: "failed",
+              canCancel: false,
+            }
+          : req,
+      ),
+    );
+  }, []);
 
   const copyAddress = () => {
     navigator.clipboard.writeText("0x9c31A47055Cf166e5fD8dfDFf9d85449A38cCc10");
@@ -480,23 +538,10 @@ export default function VaultDetailPage({ params }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      toast.success(
-                        <div className="flex flex-col gap-1">
-                          <span>Withdrawal confirmed!</span>
-                          <a 
-                            href={`https://etherscan.io/tx/0x9b5c32af1e57c83f949e29ae8fa9`} 
-                            target="_blank" 
-                            rel="noreferrer" 
-                            className="text-xs underline text-emerald-500 hover:text-emerald-400"
-                          >
-                            View transaction
-                          </a>
-                        </div>,
-                        { duration: 5000 }
-                      );
-                    }}
-                    className="vq-btn-ghost w-full"
+                    onClick={() => setIsWithdrawOpen(true)}
+                    disabled={readiness !== "verified"}
+                    title={readiness !== "verified" ? "Waiting on wallet network verification" : undefined}
+                    className="vq-btn-ghost w-full disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Withdraw Principal
                   </button>
@@ -524,6 +569,15 @@ export default function VaultDetailPage({ params }) {
               </div>
             )}
           </section>
+
+          {stellarConnected && delayedWithdrawals.length > 0 && (
+            <DelayedWithdrawalTracker
+              requests={delayedWithdrawals}
+              assetDisplayName={vault.asset}
+              onClaim={handleClaimDelayed}
+              onCancel={handleCancelDelayed}
+            />
+          )}
         </aside>
       </div>
 
@@ -533,6 +587,37 @@ export default function VaultDetailPage({ params }) {
           walletBalance={usdcBalance}
           onDeposit={handleDeposit}
           onClose={() => setIsDepositOpen(false)}
+        />
+      )}
+
+      {isWithdrawOpen && pool && (
+        <WithdrawalModal
+          pool={pool}
+          position={userPosition}
+          onWithdraw={async (amt) => {
+            await handleWithdraw(amt);
+            setDelayedWithdrawals((prev) => [
+              {
+                requestId: prev.length + 1,
+                poolId: String(vault.id),
+                owner: walletAddress,
+                destination: walletAddress,
+                sharesBurned: amt,
+                assetsOwed: amt,
+                assetsPaid: "0",
+                assetsClaimed: "0",
+                claimableAssets: "0",
+                remainingAssets: amt,
+                queueState: "pending",
+                positionInQueue: prev.filter((r) => r.queueState === "pending").length,
+                requestedLedger: 123456,
+                canCancel: true,
+              },
+              ...prev,
+            ]);
+            setIsWithdrawOpen(false);
+          }}
+          onClose={() => setIsWithdrawOpen(false)}
         />
       )}
 

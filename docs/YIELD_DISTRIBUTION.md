@@ -12,6 +12,7 @@ This document provides a detailed explanation of how yield is calculated and dis
 6. [Precision and Rounding](#precision-and-rounding)
 7. [Examples](#examples)
 8. [Edge Cases](#edge-cases)
+9. [Delayed Strategy Liquidity & Withdrawal Queue States](#delayed-strategy-liquidity--withdrawal-queue-states)
 
 ## Overview
 
@@ -562,6 +563,63 @@ Error: 0.0001 USDC (0.1%)
 ```
 
 **Mitigation:** Accumulate dust in protocol reserve for future rounds.
+
+## 9. Delayed Strategy Liquidity & Withdrawal Queue States
+
+When vault deposits are deployed to external yield strategies (such as lending protocols, unbonding liquidity pools, or cross-chain wrappers), strategy liquidity cannot always be redeemed instantly. To preserve solvency, maintain fairness, and guarantee principal protection, VaultQuest implements an asynchronous First-In, First-Out (FIFO) withdrawal queue.
+
+### Queue States Lifecycle
+
+Every delayed withdrawal request transitions through a deterministic state machine:
+
+```
+[Requested] ──► Pending ──┬──► Ready ──► Fulfilled
+                          │
+                          └──► Failed (Cancelled or Expired)
+```
+
+| State | Enum Value | Condition | Actions Permitted |
+|---|---|---|---|
+| **Pending** | `QueueState::Pending` (0) | `assets_paid == 0`, request not expired (`ledger <= expires_ledger`), not cancelled | May be cancelled by owner (`vault_cancel_withdrawal`) |
+| **Ready** | `QueueState::Ready` (1) | `assets_paid > assets_claimed` and `assets_claimed < assets_owed` | May be claimed by recipient (`vault_claim_withdrawal`) |
+| **Fulfilled** | `QueueState::Fulfilled` (2) | `assets_claimed >= assets_owed` | Terminal settled state; no further actions |
+| **Failed** | `QueueState::Failed` (3) | Explicitly cancelled by owner, or ledger exceeded `expires_ledger` with `assets_paid == 0` | Terminal failed state; shares refunded to owner |
+
+### Queue Position Tracking
+
+Users and client interfaces can query their active FIFO position in the liquidity queue via the smart contract query endpoint:
+
+```rust
+pub fn vault_withdrawal_position(env: Env, request_id: u32) -> Result<u32, Error>;
+```
+
+- **Position Calculation:** Returns the number of prior unfulfilled requests with a lower `request_id` that are still awaiting liquidity.
+- **Queue Head:** A position of `0` denotes that the request is at the front of the queue and will be serviced by the next batch allocation.
+
+### Cancellation & Invariant Rules
+
+1. **Cancellation Window:** A user may cancel their withdrawal request if and only if it is currently in the `Pending` state and zero strategy assets have been disbursed (`assets_paid == 0`).
+2. **Non-Cancellability Once Ready:** Once a request has received partial or full liquidity allocation (`assets_paid > 0`), cancellation is disallowed (`Error::InvalidState`). This prevents accounting desyncs and preserves solvency across batch settlements.
+3. **Restoration of Shares:** When a request is cancelled or expires, the user's previously burned vault shares are automatically minted back to their address, restoring their participation and yield eligibility.
+
+### Batch Processing & Partial Disbursements
+
+Keepers or automated cron bots process the queue via:
+
+```rust
+pub fn vault_process_withdrawal_batch(env: Env, max_items: u32) -> Result<u32, Error>;
+```
+
+- **FIFO Settlement:** Requests are processed strictly in chronological order of `request_id`.
+- **Partial Fulfillment:** If vault cash is insufficient to fulfill the entire requested amount, available cash is allocated up to the debt, transitioning the request into `Ready` while keeping the remainder queued.
+
+### Frontend Integration
+
+The `@vaultquest/stellar-wallet-connect` package exports the `DelayedWithdrawalTracker` component. It renders:
+- Real-time queue status badge (`Pending Liquidity`, `Ready to Claim`, `Fulfilled`, `Failed / Cancelled`)
+- Relative queue position (`#1 in line`, etc.)
+- Financial breakdown: total owed, claimable assets, remaining assets, and claimed assets
+- One-click triggers for `Claim Assets` and `Cancel Request`
 
 ## Summary
 

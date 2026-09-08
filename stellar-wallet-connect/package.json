@@ -14,6 +14,8 @@
     "./src/vault/components/ActivityExport": "./src/vault/components/ActivityExport.tsx",
     "./src/vault/components/OnboardingChecklist": "./src/vault/components/OnboardingChecklist.tsx",
     "./src/vault/components/DepositModal": "./src/vault/components/DepositModal.tsx",
+    "./src/vault/components/WithdrawalModal": "./src/vault/components/WithdrawalModal.tsx",
+    "./src/vault/components/DelayedWithdrawalTracker": "./src/vault/components/DelayedWithdrawalTracker.tsx",
     "./src/vault/contract/sorobanClient": "./src/vault/contract/sorobanClient.ts",
     "./src/vault/data/config": "./src/vault/data/config.ts",
     "./src/lib/wallets": "./src/lib/wallets.ts"

@@ -21,3 +21,4 @@ export { OnboardingChecklist, ONBOARDING_STORAGE_KEY, type OnboardingChecklistPr
 export { ActivityExport, type ActivityExportProps } from "./components/ActivityExport";
 export { DepositModal, type DepositModalProps } from "./components/DepositModal";
 export { WithdrawalModal, type WithdrawalModalProps } from "./components/WithdrawalModal";
+export { DelayedWithdrawalTracker, type DelayedWithdrawalTrackerProps } from "./components/DelayedWithdrawalTracker";
