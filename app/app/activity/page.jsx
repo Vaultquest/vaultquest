@@ -8,7 +8,7 @@ import {
   ChevronLeft, ChevronRight, Filter, Clock, History
 } from "lucide-react";
 import { DEMO_TRANSACTIONS } from "@/lib/demo-portfolio";
-import { ActivityExport } from "@vaultquest/stellar-wallet-connect/src/vault/components/ActivityExport";
+import VaultActivityExport from "@/components/app/VaultActivityExport";
 import TransactionHistoryModal from "@/components/app/TransactionHistoryModal";
 
 const ACTIVITY_TYPES = {
@@ -192,10 +192,12 @@ export default function ActivityPage() {
         <>
           <ActivitySummary transactions={enrichedTx} />
           <ActivityFeed transactions={enrichedTx} />
-          <ActivityExport
-            walletAddress={null}
+          <VaultActivityExport
+            activities={enrichedTx}
+            walletAddress={address ?? null}
             walletConnected={isConnected}
             summary={summary}
+            network="testnet"
           />
           <div className="vq-glass flex items-center justify-between p-4 sm:p-6">
             <div>
