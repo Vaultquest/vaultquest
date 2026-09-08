@@ -57,16 +57,12 @@ describe("DepositModal", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
 
-    // On failure the modal returns to the review step (not a stuck
-    // broadcasting state) with the error message and the same confirm
-    // button available for retry.
     expect(await screen.findByText("rpc failed: try again")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Confirm deposit" })).toBeInTheDocument();
     expect(onDeposit).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
     expect(await screen.findByText("Deposit successful!")).toBeInTheDocument();
-    // Retry re-invoked onDeposit rather than reusing a stale result.
     expect(onDeposit).toHaveBeenCalledTimes(2);
   });
 
@@ -111,4 +107,45 @@ describe("DepositModal", () => {
       await Promise.resolve();
     });
   });
+
+  it("renders expected shares to receive with floor division invariant note", async () => {
+    const user = userEvent.setup();
+    renderModal(vi.fn());
+
+    await user.type(screen.getByLabelText("Amount"), "10");
+    expect(screen.getByText("Expected shares to receive")).toBeInTheDocument();
+    expect(screen.getByText("Floor division (favors existing pool)")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText("Expected shares")).toBeInTheDocument();
+    expect(screen.getByText("Floor division")).toBeInTheDocument();
+  });
+
+  it("displays stale pool warning banner and triggers refresh callback", async () => {
+    const user = userEvent.setup();
+    const onRefreshPool = vi.fn();
+    const stalePool = {
+      ...pool,
+      updatedAt: new Date(Date.now() - 130_000).toISOString(),
+    };
+
+    render(
+      <DepositModal
+        pool={stalePool}
+        walletBalance="100"
+        onDeposit={vi.fn()}
+        onClose={vi.fn()}
+        onRefreshPool={onRefreshPool}
+      />
+    );
+
+    expect(
+      screen.getByText(/Pool data is older than 2 minutes. Share preview may vary slightly upon broadcast./)
+    ).toBeInTheDocument();
+
+    const refreshButton = screen.getByRole("button", { name: /Refresh/i });
+    await user.click(refreshButton);
+    expect(onRefreshPool).toHaveBeenCalledTimes(1);
+  });
 });
+

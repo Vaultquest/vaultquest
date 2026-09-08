@@ -1,26 +1,91 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { X, Loader2, CheckCircle2, AlertTriangle, ArrowLeft } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { X, Loader2, CheckCircle2, AlertTriangle, ArrowLeft, RefreshCw } from "lucide-react";
 import GasPrioritySelector from "@/components/app/GasPrioritySelector";
-import { toast } from "react-hot-toast";
+import {
+  previewDepositDetailed,
+  formatAssetAmount,
+  isPoolStateStale,
+  VaultMathError,
+} from "@/lib/safe-amount";
 
+/**
+ * Formats token balances for display with fixed decimal precision.
+ */
 function formatToken(value, token) {
   return `${Number(value || 0).toFixed(token === "XLM" ? 6 : 4)} ${token}`;
 }
 
-export default function DepositModal({ isOpen, onClose }) {
+const DEFAULT_POOL_SNAPSHOT = {
+  total_shares: 10_000_000_000_000n,
+  total_assets: 10_000_000_000n,
+  pending_withdrawals: 0n,
+  accrued_fees: 0n,
+  high_water_mark: 1_000_000_000_000n,
+  last_fee_time: 0n,
+  version: 1n,
+  updatedAt: new Date().toISOString(),
+};
+
+/**
+ * Modal dialog for depositing assets into a prize vault with contract share preview.
+ */
+export default function DepositModal({
+  isOpen,
+  onClose,
+  pool,
+  poolSnapshot: initialSnapshot,
+  nativeBalance = 1.0,
+  onDeposit,
+  onRefresh,
+}) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
-  const [step, setStep] = useState("input"); // "input" | "confirm" | "loading" | "success"
+  const [step, setStep] = useState("input");
   const [amount, setAmount] = useState("250");
   const [feeState, setFeeState] = useState(null);
   const [error, setError] = useState(null);
-  
-  const walletBalance = 0.0018; // AVAX
-  const usdcBalance = 1000.00; // Demo USDC balance
-  
+  const [currentSnapshot, setCurrentSnapshot] = useState(initialSnapshot || DEFAULT_POOL_SNAPSHOT);
+
+  const walletBalance = nativeBalance;
+  const usdcBalance = 1000.0;
+
   const gasBudget = useMemo(() => feeState?.estimatedNative ?? 0, [feeState]);
+
+  const handleRefreshSnapshot = useCallback(() => {
+    if (onRefresh) {
+      onRefresh();
+    } else {
+      setCurrentSnapshot((prev) => ({
+        ...prev,
+        updatedAt: new Date().toISOString(),
+      }));
+    }
+  }, [onRefresh]);
+
+  const isStale = useMemo(() => {
+    return isPoolStateStale(currentSnapshot?.updatedAt);
+  }, [currentSnapshot]);
+
+  const parsedAmountStroops = useMemo(() => {
+    const num = parseFloat(amount);
+    if (!amount || isNaN(num) || num <= 0) return null;
+    return BigInt(Math.round(num * 1e7));
+  }, [amount]);
+
+  const preview = useMemo(() => {
+    if (!parsedAmountStroops) return null;
+    try {
+      return previewDepositDetailed({
+        snapshot: currentSnapshot,
+        assets: parsedAmountStroops,
+        decimals: 7,
+      });
+    } catch (err) {
+      return { error: err };
+    }
+  }, [parsedAmountStroops, currentSnapshot]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -86,6 +151,14 @@ export default function DepositModal({ isOpen, onClose }) {
       setError("Amount exceeds your available USDC balance.");
       return;
     }
+    if (preview?.error instanceof VaultMathError) {
+      if (preview.error.kind === "RoundsToZero") {
+        setError("Deposit amount is too small to mint vault shares (rounds to zero).");
+        return;
+      }
+      setError(preview.error.message);
+      return;
+    }
     if (isGasShort) {
       setError("Insufficient AVAX to cover the estimated gas fee.");
       return;
@@ -96,23 +169,18 @@ export default function DepositModal({ isOpen, onClose }) {
 
   const handleConfirmDeposit = () => {
     setStep("loading");
-    setTimeout(() => {
-      setStep("success");
-      toast.success(
-        <div className="flex flex-col gap-1">
-          <span>Deposit of {amount} USDC confirmed!</span>
-          <a 
-            href={`https://etherscan.io/tx/0x7d3a95bfce31a20df949e29ae8f9`} 
-            target="_blank" 
-            rel="noreferrer" 
-            className="text-xs underline text-emerald-500 hover:text-emerald-400"
-          >
-            View transaction
-          </a>
-        </div>,
-        { duration: 5000 }
-      );
-    }, 1800);
+    if (onDeposit) {
+      onDeposit(amount)
+        .then(() => setStep("success"))
+        .catch((err) => {
+          setError(err?.message || "Deposit transaction failed");
+          setStep("confirm");
+        });
+    } else {
+      setTimeout(() => {
+        setStep("success");
+      }, 1800);
+    }
   };
 
   const getHeaderTitle = () => {
@@ -138,7 +206,6 @@ export default function DepositModal({ isOpen, onClose }) {
         aria-labelledby="deposit-dialog-title"
         className="vq-glass w-full max-w-5xl overflow-hidden border border-vault-border/60 shadow-2xl"
       >
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-vault-border/40 px-5 py-4 sm:px-6">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.22em] text-vault-muted">
@@ -160,11 +227,36 @@ export default function DepositModal({ isOpen, onClose }) {
           </button>
         </div>
 
-        {/* Body Content */}
         <div className="p-5 lg:p-6">
           {step === "input" && (
             <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
               <section className="space-y-4 rounded-3xl border border-vault-border/40 bg-vault-surface/30 p-5">
+                {isStale && (
+                  <div
+                    role="alert"
+                    className="flex items-start justify-between gap-3 rounded-2xl border border-amber-400/40 bg-amber-500/10 p-4 text-sm text-amber-200"
+                  >
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+                      <div>
+                        <p className="font-semibold text-amber-100">Stale pool data</p>
+                        <p className="mt-1 text-xs text-amber-200/80">
+                          Vault data is older than 2 minutes. Share preview and fee calculations may
+                          not reflect latest on-chain state.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRefreshSnapshot}
+                      aria-label="Refresh pool data"
+                      className="vq-btn-ghost flex shrink-0 items-center gap-1 text-xs text-amber-300 hover:text-amber-100"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" /> Refresh
+                    </button>
+                  </div>
+                )}
+
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-vault-muted">
                     Deposit amount
@@ -188,7 +280,7 @@ export default function DepositModal({ isOpen, onClose }) {
                     placeholder="0.00"
                   />
                   {error && (
-                    <p className="mt-2 text-sm text-red-500 font-semibold" role="alert">
+                    <p className="mt-2 text-sm font-semibold text-red-500" role="alert">
                       {error}
                     </p>
                   )}
@@ -201,18 +293,30 @@ export default function DepositModal({ isOpen, onClose }) {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-2xl border border-vault-border/40 bg-vault-surface/35 p-4">
                     <p className="text-xs font-medium uppercase tracking-wide text-vault-muted">
-                      Deposit preview
+                      Expected shares to receive
                     </p>
                     <p className="mt-1 text-lg font-semibold text-vault-text">
-                      {amount || "0.00"} USDC
+                      {preview && !preview.error ? `${preview.sharesMintedFormatted} vUSDC` : "—"}
+                    </p>
+                    <p className="mt-1 text-[11px] text-vault-muted">
+                      Floor division (favors existing pool)
                     </p>
                   </div>
                   <div className="rounded-2xl border border-vault-border/40 bg-vault-surface/35 p-4">
                     <p className="text-xs font-medium uppercase tracking-wide text-vault-muted">
-                      Native balance
+                      Pool share impact
                     </p>
                     <p className="mt-1 text-lg font-semibold text-vault-text">
-                      {formatToken(walletBalance, "AVAX")}
+                      {preview && !preview.error
+                        ? `${(Number(preview.poolShareBps) / 100).toFixed(2)}%`
+                        : "—"}
+                    </p>
+                    <p className="mt-1 text-[11px] text-vault-muted">
+                      Net assets:{" "}
+                      {preview && !preview.error
+                        ? formatAssetAmount(preview.netAssetsAfter, 7)
+                        : "—"}{" "}
+                      USDC
                     </p>
                   </div>
                 </div>
@@ -225,6 +329,8 @@ export default function DepositModal({ isOpen, onClose }) {
                     {JSON.stringify(
                       {
                         amount,
+                        expectedShares:
+                          preview && !preview.error ? preview.sharesMintedFormatted : "0",
                         gasBudget: formatToken(gasBudget, "AVAX"),
                         balance: formatToken(walletBalance, "AVAX"),
                       },
@@ -242,7 +348,8 @@ export default function DepositModal({ isOpen, onClose }) {
                   >
                     <p className="font-semibold text-vault-text">Network warning</p>
                     <p className="mt-1 text-vault-muted">
-                      The connected wallet does not have enough native token to cover the selected gas fee.
+                      The connected wallet does not have enough native token to cover the selected gas
+                      fee.
                     </p>
                   </div>
                 )}
@@ -253,28 +360,42 @@ export default function DepositModal({ isOpen, onClose }) {
           )}
 
           {step === "confirm" && (
-            <section className="space-y-6 rounded-3xl border border-vault-border/40 bg-vault-surface/30 p-6 max-w-2xl mx-auto my-2">
+            <section className="mx-auto my-2 max-w-2xl space-y-6 rounded-3xl border border-vault-border/40 bg-vault-surface/30 p-6">
               <div className="text-center">
                 <p className="text-xs font-medium uppercase tracking-[0.24em] text-vault-muted">
                   Review transaction
                 </p>
-                <h3 className="mt-2 text-2xl font-bold text-vault-text">
-                  Deposit Confirmation
-                </h3>
+                <h3 className="mt-2 text-2xl font-bold text-vault-text">Deposit Confirmation</h3>
               </div>
 
-              <div className="divide-y divide-vault-border rounded-2xl border border-vault-border/40 bg-vault-surface/40 px-6 py-2 space-y-3">
+              <div className="space-y-3 divide-y divide-vault-border rounded-2xl border border-vault-border/40 bg-vault-surface/40 px-6 py-2">
                 <div className="flex justify-between py-2.5">
                   <span className="text-vault-muted">Amount to Deposit</span>
                   <span className="font-bold text-vault-text">{amount} USDC</span>
                 </div>
                 <div className="flex justify-between py-2.5">
+                  <span className="text-vault-muted">Expected Shares to Mint</span>
+                  <span className="font-bold text-emerald-400">
+                    {preview && !preview.error ? `${preview.sharesMintedFormatted} vUSDC` : "—"}
+                  </span>
+                </div>
+                <div className="flex justify-between py-2.5">
+                  <span className="text-vault-muted">Share Math Invariant</span>
+                  <span className="text-sm font-medium text-vault-text">
+                    Floor division (Soroban drip-pool)
+                  </span>
+                </div>
+                <div className="flex justify-between py-2.5">
                   <span className="text-vault-muted">Destination Pool</span>
-                  <span className="font-medium text-vault-text">USDC Stable Pool</span>
+                  <span className="font-medium text-vault-text">
+                    {pool?.name || "USDC Stable Pool"}
+                  </span>
                 </div>
                 <div className="flex justify-between py-2.5">
                   <span className="text-vault-muted">Estimated Gas Fee</span>
-                  <span className="font-medium text-vault-text">{formatToken(gasBudget, "AVAX")}</span>
+                  <span className="font-medium text-vault-text">
+                    {formatToken(gasBudget, "AVAX")}
+                  </span>
                 </div>
                 <div className="flex justify-between py-2.5 pt-4">
                   <span className="font-semibold text-vault-text">Deduction Summary</span>
@@ -285,58 +406,68 @@ export default function DepositModal({ isOpen, onClose }) {
               </div>
 
               <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4 text-xs text-vault-muted">
-                ⚠️ Yield generated from pooled deposits funds periodic prize drawings. Your original deposit (principal) remains fully withdrawable at any time.
+                Yield generated from pooled deposits funds periodic prize drawings. Your original
+                deposit principal remains fully withdrawable at any time.
               </div>
             </section>
           )}
 
           {step === "loading" && (
-            <section className="flex flex-col items-center justify-center py-16 space-y-4">
+            <section className="flex flex-col items-center justify-center space-y-4 py-16">
               <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-red-500/30">
                 <Loader2 className="h-8 w-8 animate-spin text-red-400" />
               </div>
               <h3 className="text-lg font-semibold text-vault-text">Processing Deposit</h3>
-              <p className="text-sm text-vault-muted max-w-xs text-center">
-                Please approve the transaction in your connected wallet. Broadcasting to the network...
+              <p className="max-w-xs text-center text-sm text-vault-muted">
+                Please approve the transaction in your connected wallet. Broadcasting to the
+                network...
               </p>
             </section>
           )}
 
           {step === "success" && (
-            <section className="flex flex-col items-center justify-center py-8 space-y-4 max-w-md mx-auto">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-glow-green">
+            <section className="mx-auto flex max-w-md flex-col items-center justify-center space-y-4 py-8">
+              <div className="shadow-glow-green flex h-16 w-16 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-500">
                 <CheckCircle2 className="h-10 w-10 animate-bounce" />
               </div>
               <h3 className="text-2xl font-bold text-vault-text">Deposit Successful!</h3>
-              <p className="text-sm text-vault-muted text-center">
-                Your deposit of <strong className="text-vault-text">{amount} USDC</strong> was successfully broadcast and confirmed on-chain.
+              <p className="text-center text-sm text-vault-muted">
+                Your deposit of <strong className="text-vault-text">{amount} USDC</strong> was
+                successfully broadcast and confirmed on-chain.
               </p>
 
               <div className="w-full divide-y divide-vault-border rounded-2xl border border-vault-border/40 bg-vault-surface/40 px-5 py-3 text-xs">
                 <div className="flex justify-between py-2">
                   <span className="text-vault-muted">Pool</span>
-                  <span className="text-vault-text font-medium">USDC Stable Pool</span>
+                  <span className="font-medium text-vault-text">
+                    {pool?.name || "USDC Stable Pool"}
+                  </span>
                 </div>
                 <div className="flex justify-between py-2">
-                  <span className="text-vault-muted">Transaction Hash</span>
-                  <span className="text-vault-text font-mono">0x7d3a95bfce31a20df949e29a...e8f9</span>
+                  <span className="text-vault-muted">Shares Received</span>
+                  <span className="font-medium text-emerald-400">
+                    {preview && !preview.error ? `${preview.sharesMintedFormatted} vUSDC` : "—"}
+                  </span>
                 </div>
                 <div className="flex justify-between py-2">
                   <span className="text-vault-muted">Status</span>
-                  <span className="text-emerald-500 font-bold">Confirmed</span>
+                  <span className="font-bold text-emerald-500">Confirmed</span>
                 </div>
               </div>
             </section>
           )}
         </div>
 
-        {/* Footer */}
         <div className="flex flex-col gap-3 border-t border-vault-border/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div className="text-sm text-vault-muted">
-            {step === "input" && "Selected gas cost is applied to the transaction execution payload before submission."}
-            {step === "confirm" && "Double check transaction payload and destination pool details before signing."}
-            {step === "loading" && "Do not close this modal or refresh the page while the transaction is broadcasting."}
-            {step === "success" && "Transaction completed successfully. You can close this modal."}
+            {step === "input" &&
+              "Selected gas cost is applied to the transaction execution payload before submission."}
+            {step === "confirm" &&
+              "Double check transaction payload and destination pool details before signing."}
+            {step === "loading" &&
+              "Do not close this modal or refresh the page while the transaction is broadcasting."}
+            {step === "success" &&
+              "Transaction completed successfully. You can close this modal."}
           </div>
           <div className="flex gap-3">
             {step === "input" && (
@@ -351,16 +482,28 @@ export default function DepositModal({ isOpen, onClose }) {
             )}
             {step === "confirm" && (
               <>
-                <button type="button" onClick={() => setStep("input")} className="vq-btn-ghost">
-                  <ArrowLeft className="h-4 w-4 mr-1 inline" /> Back
+                <button
+                  type="button"
+                  onClick={() => setStep("input")}
+                  className="vq-btn-ghost"
+                >
+                  <ArrowLeft className="mr-1 inline h-4 w-4" /> Back
                 </button>
-                <button type="button" onClick={handleConfirmDeposit} className="vq-btn-primary">
+                <button
+                  type="button"
+                  onClick={handleConfirmDeposit}
+                  className="vq-btn-primary"
+                >
                   Sign & Submit
                 </button>
               </>
             )}
             {step === "loading" && (
-              <button type="button" disabled className="vq-btn-primary opacity-50 cursor-not-allowed">
+              <button
+                type="button"
+                disabled
+                className="vq-btn-primary cursor-not-allowed opacity-50"
+              >
                 Broadcasting...
               </button>
             )}
