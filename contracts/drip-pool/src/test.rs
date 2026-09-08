@@ -2132,3 +2132,258 @@ fn vault_custody_balance_reconciles_with_internal_accounting_through_full_lifecy
     );
     assert_eq!(token_balance(&env, &asset, &alice), 400);
 }
+
+#[test]
+fn test_delayed_strategy_liquidity_lifecycle_and_queue_states() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
+
+    let alice = Address::generate(&env);
+    mint(&env, &asset, &alice, 10_000);
+    let shares = client.vault_deposit(&alice, &10_000, &client.vault_snapshot().version);
+
+    let request = client.vault_request_withdrawal(&alice, &shares, &client.vault_snapshot().version);
+
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&request),
+        shares::QueueState::Pending
+    );
+    assert_eq!(client.vault_withdrawal_position(&request), 0);
+
+    let initial_status = client.vault_withdrawal_status(&request);
+    assert_eq!(initial_status.queue_state, shares::QueueState::Pending);
+    assert_eq!(initial_status.claimable_assets, 0);
+    assert_eq!(initial_status.remaining_assets, 10_000);
+
+    client.vault_fulfill_withdrawal(&admin, &request, &4_000);
+
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&request),
+        shares::QueueState::Ready
+    );
+    let partial_status = client.vault_withdrawal_status(&request);
+    assert_eq!(partial_status.queue_state, shares::QueueState::Ready);
+    assert_eq!(partial_status.claimable_assets, 4_000);
+    assert_eq!(partial_status.remaining_assets, 6_000);
+
+    client.vault_claim_withdrawal(&alice, &request);
+    assert_eq!(token_balance(&env, &asset, &alice), 4_000);
+
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&request),
+        shares::QueueState::Pending
+    );
+
+    client.vault_fulfill_withdrawal(&admin, &request, &6_000);
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&request),
+        shares::QueueState::Ready
+    );
+
+    client.vault_claim_withdrawal(&alice, &request);
+    assert_eq!(token_balance(&env, &asset, &alice), 10_000);
+
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&request),
+        shares::QueueState::Fulfilled
+    );
+    let final_status = client.vault_withdrawal_status(&request);
+    assert_eq!(final_status.queue_state, shares::QueueState::Fulfilled);
+    assert_eq!(final_status.state, shares::WithdrawalState::Settled);
+    assert_eq!(final_status.remaining_assets, 0);
+    assert_eq!(final_status.claimable_assets, 0);
+}
+
+#[test]
+fn test_delayed_liquidity_cancellation_rules() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
+
+    let alice = Address::generate(&env);
+    mint(&env, &asset, &alice, 10_000);
+    let shares = client.vault_deposit(&alice, &10_000, &client.vault_snapshot().version);
+
+    let request = client.vault_request_withdrawal(&alice, &shares, &client.vault_snapshot().version);
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&request),
+        shares::QueueState::Pending
+    );
+
+    client.vault_cancel_withdrawal(&alice, &request);
+
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&request),
+        shares::QueueState::Failed
+    );
+    let cancelled_status = client.vault_withdrawal_status(&request);
+    assert_eq!(cancelled_status.queue_state, shares::QueueState::Failed);
+    assert_eq!(cancelled_status.state, shares::WithdrawalState::Cancelled);
+    assert_eq!(client.vault_share_balance(&alice), shares);
+
+    let request2 = client.vault_request_withdrawal(&alice, &shares, &client.vault_snapshot().version);
+    client.vault_fulfill_withdrawal(&admin, &request2, &2_000);
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&request2),
+        shares::QueueState::Ready
+    );
+
+    let cancel_res = client.try_vault_cancel_withdrawal(&alice, &request2);
+    assert_eq!(cancel_res, Err(Ok(Error::WithdrawalNotCancellable)));
+}
+
+#[test]
+fn test_delayed_liquidity_failure_and_expiry_unblocks_queue() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    mint(&env, &asset, &alice, 10_000);
+    mint(&env, &asset, &bob, 10_000);
+
+    let alice_shares = client.vault_deposit(&alice, &10_000, &client.vault_snapshot().version);
+    let bob_shares = client.vault_deposit(&bob, &10_000, &client.vault_snapshot().version);
+
+    let alice_request = client.vault_request_withdrawal_to(
+        &alice,
+        &alice,
+        &alice_shares,
+        &0,
+        &50,
+        &client.vault_snapshot().version,
+    );
+    let bob_request = client.vault_request_withdrawal_to(
+        &bob,
+        &bob,
+        &bob_shares,
+        &0,
+        &100,
+        &client.vault_snapshot().version,
+    );
+
+    assert_eq!(client.vault_withdrawal_position(&alice_request), 0);
+    assert_eq!(client.vault_withdrawal_position(&bob_request), 1);
+
+    env.ledger().with_mut(|li| li.sequence_number += 60);
+
+    client.vault_expire_withdrawal(&alice, &alice_request);
+
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&alice_request),
+        shares::QueueState::Failed
+    );
+    let expired_status = client.vault_withdrawal_status(&alice_request);
+    assert_eq!(expired_status.queue_state, shares::QueueState::Failed);
+    assert_eq!(expired_status.state, shares::WithdrawalState::Expired);
+    assert_eq!(client.vault_share_balance(&alice), alice_shares);
+
+    assert_eq!(client.vault_withdrawal_position(&bob_request), 0);
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&bob_request),
+        shares::QueueState::Pending
+    );
+
+    client.vault_fulfill_withdrawal(&admin, &bob_request, &10_000);
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&bob_request),
+        shares::QueueState::Ready
+    );
+    client.vault_claim_withdrawal(&bob, &bob_request);
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&bob_request),
+        shares::QueueState::Fulfilled
+    );
+}
+
+#[test]
+fn test_delayed_liquidity_batch_processing_and_positions() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+    let asset = deploy_asset(&env, &admin);
+    client.vault_init(&admin, &asset);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+
+    mint(&env, &asset, &alice, 5_000);
+    mint(&env, &asset, &bob, 5_000);
+    mint(&env, &asset, &carol, 5_000);
+
+    let alice_shares = client.vault_deposit(&alice, &5_000, &client.vault_snapshot().version);
+    let bob_shares = client.vault_deposit(&bob, &5_000, &client.vault_snapshot().version);
+    let carol_shares = client.vault_deposit(&carol, &5_000, &client.vault_snapshot().version);
+
+    let req_a = client.vault_request_withdrawal(&alice, &alice_shares, &client.vault_snapshot().version);
+    let req_b = client.vault_request_withdrawal(&bob, &bob_shares, &client.vault_snapshot().version);
+    let req_c = client.vault_request_withdrawal(&carol, &carol_shares, &client.vault_snapshot().version);
+
+    assert_eq!(client.vault_withdrawal_position(&req_a), 0);
+    assert_eq!(client.vault_withdrawal_position(&req_b), 1);
+    assert_eq!(client.vault_withdrawal_position(&req_c), 2);
+
+    let (settled, disbursed) = client.vault_process_withdrawal_batch(&admin, &8_000, &3);
+    assert_eq!(settled, 2);
+    assert_eq!(disbursed, 8_000);
+
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&req_a),
+        shares::QueueState::Ready
+    );
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&req_b),
+        shares::QueueState::Ready
+    );
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&req_c),
+        shares::QueueState::Pending
+    );
+
+    let status_a = client.vault_withdrawal_status(&req_a);
+    let status_b = client.vault_withdrawal_status(&req_b);
+    let status_c = client.vault_withdrawal_status(&req_c);
+
+    assert_eq!(status_a.claimable_assets, 5_000);
+    assert_eq!(status_a.remaining_assets, 0);
+    assert_eq!(status_b.claimable_assets, 3_000);
+    assert_eq!(status_b.remaining_assets, 2_000);
+    assert_eq!(status_c.claimable_assets, 0);
+    assert_eq!(status_c.remaining_assets, 5_000);
+
+    client.vault_claim_withdrawal(&alice, &req_a);
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&req_a),
+        shares::QueueState::Fulfilled
+    );
+
+    let (settled_rest, disbursed_rest) = client.vault_process_withdrawal_batch(&admin, &7_000, &3);
+    assert_eq!(settled_rest, 2);
+    assert_eq!(disbursed_rest, 7_000);
+
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&req_b),
+        shares::QueueState::Ready
+    );
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&req_c),
+        shares::QueueState::Ready
+    );
+
+    client.vault_claim_withdrawal(&bob, &req_b);
+    client.vault_claim_withdrawal(&carol, &req_c);
+
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&req_b),
+        shares::QueueState::Fulfilled
+    );
+    assert_eq!(
+        client.vault_withdrawal_queue_state(&req_c),
+        shares::QueueState::Fulfilled
+    );
+}

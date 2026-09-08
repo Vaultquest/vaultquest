@@ -40,13 +40,23 @@ pub struct WithdrawalRequest {
     pub state: WithdrawalState,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[contracttype]
 pub enum WithdrawalState {
     Active,
     Cancelled,
     Expired,
     Settled,
+}
+
+/// User-facing queue states for delayed liquidity tracking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[contracttype]
+pub enum QueueState {
+    Pending = 0,
+    Ready = 1,
+    Fulfilled = 2,
+    Failed = 3,
 }
 
 /// Numbers a caller needs to assert/emit the post-deposit invariant.
@@ -451,6 +461,27 @@ pub fn apply_emergency_haircut(
     }
     bump_version(snapshot)?;
     Ok(reduction)
+}
+
+/// Computes the delayed withdrawal queue lifecycle state for a request.
+pub fn queue_state(request: &WithdrawalRequest) -> QueueState {
+    match request.state {
+        WithdrawalState::Cancelled | WithdrawalState::Expired => QueueState::Failed,
+        WithdrawalState::Settled => {
+            if request.assets_claimed >= request.assets_owed {
+                QueueState::Fulfilled
+            } else {
+                QueueState::Ready
+            }
+        }
+        WithdrawalState::Active => {
+            if request.assets_paid > request.assets_claimed {
+                QueueState::Ready
+            } else {
+                QueueState::Pending
+            }
+        }
+    }
 }
 
 /// Pro-rata time-based fee on `net_assets`. Always advances `last_fee_time` so a rate enabled later only accrues from that point forward.
@@ -1067,6 +1098,66 @@ mod tests {
         fulfill_withdrawal(&mut snap, &mut request, 600).unwrap();
         assert_eq!(claim_withdrawal(&mut request).unwrap(), 600);
         assert_eq!(request.state, WithdrawalState::Settled);
+    }
+
+    #[test]
+    fn delayed_withdrawal_queue_state_lifecycle_transitions() {
+        let mut snap = fresh();
+        deposit(&mut snap, 1_000, 0).unwrap();
+        let version = snap.version;
+        let total_shares = snap.total_shares;
+        let mut request = request_withdrawal(&mut snap, total_shares, version).unwrap();
+
+        assert_eq!(queue_state(&request), QueueState::Pending);
+
+        fulfill_withdrawal(&mut snap, &mut request, 400).unwrap();
+        assert_eq!(queue_state(&request), QueueState::Ready);
+
+        let claimed = claim_withdrawal(&mut request).unwrap();
+        assert_eq!(claimed, 400);
+        assert_eq!(queue_state(&request), QueueState::Pending);
+
+        fulfill_withdrawal(&mut snap, &mut request, 600).unwrap();
+        assert_eq!(queue_state(&request), QueueState::Ready);
+
+        let final_claimed = claim_withdrawal(&mut request).unwrap();
+        assert_eq!(final_claimed, 600);
+        assert_eq!(queue_state(&request), QueueState::Fulfilled);
+    }
+
+    #[test]
+    fn delayed_withdrawal_cancellation_and_expiration_lead_to_failed_state() {
+        let mut snap = fresh();
+        let receipt1 = deposit(&mut snap, 1_000_000, 0).unwrap();
+        let version = snap.version;
+        let mut req1 = request_withdrawal(&mut snap, receipt1.shares_minted / 2, version).unwrap();
+        assert_eq!(queue_state(&req1), QueueState::Pending);
+
+        cancel_withdrawal(&mut snap, &mut req1).unwrap();
+        assert_eq!(queue_state(&req1), QueueState::Failed);
+
+        let version = snap.version;
+        let mut req2 = request_withdrawal(&mut snap, receipt1.shares_minted / 4, version).unwrap();
+        assert_eq!(queue_state(&req2), QueueState::Pending);
+
+        expire_withdrawal(&mut snap, &mut req2).unwrap();
+        assert_eq!(queue_state(&req2), QueueState::Failed);
+    }
+
+    #[test]
+    fn delayed_withdrawal_cannot_be_cancelled_once_ready() {
+        let mut snap = fresh();
+        let receipt = deposit(&mut snap, 1_000_000, 0).unwrap();
+        let version = snap.version;
+        let mut req = request_withdrawal(&mut snap, receipt.shares_minted, version).unwrap();
+        assert_eq!(queue_state(&req), QueueState::Pending);
+
+        fulfill_withdrawal(&mut snap, &mut req, 100).unwrap();
+        assert_eq!(queue_state(&req), QueueState::Ready);
+        assert_eq!(
+            cancel_withdrawal(&mut snap, &mut req),
+            Err(Error::WithdrawalNotCancellable)
+        );
     }
 
     #[test]

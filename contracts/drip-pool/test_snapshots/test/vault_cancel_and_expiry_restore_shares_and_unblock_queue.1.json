@@ -4288,6 +4288,14 @@
                 },
                 {
                   "key": {
+                    "symbol": "queue_state"
+                  },
+                  "val": {
+                    "u32": 3
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "remaining_assets"
                   },
                   "val": {
