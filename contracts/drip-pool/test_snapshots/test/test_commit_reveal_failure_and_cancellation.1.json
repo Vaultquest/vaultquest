@@ -360,6 +360,12 @@
                             },
                             {
                               "key": {
+                                "symbol": "snapshot_hash"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
                                 "symbol": "status"
                               },
                               "val": {

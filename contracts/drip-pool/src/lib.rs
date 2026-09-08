@@ -55,6 +55,7 @@ pub enum DataKey {
     Proposal(u32), // pending admin proposal
     ParticipantsList,
     Draw,
+    DrawSnapshot(u32),
 }
 
 #[derive(Clone)]
@@ -142,6 +143,7 @@ pub enum Error {
     /// must never be minted, nor a claim marked paid, for less custody than
     /// was recorded.
     TransferAmountMismatch = 43,
+    SnapshotNotFound = 44,
 }
 
 // ── Structs ────────────────────────────────────────────────────────────────
@@ -181,6 +183,25 @@ pub struct Draw {
     pub reveal_deadline: u32,
     pub prize_amount: i128,
     pub winner: Option<Address>,
+    pub snapshot_hash: Option<Bytes>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct EligibilityEntry {
+    pub participant: Address,
+    pub balance: i128,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct EligibilitySnapshot {
+    pub round_id: u32,
+    pub cutoff_ledger: u32,
+    pub cutoff_time: u64,
+    pub total_eligible: i128,
+    pub entries: Vec<EligibilityEntry>,
+    pub snapshot_hash: BytesN<32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1097,6 +1118,7 @@ impl DripPool {
             reveal_deadline,
             prize_amount: prize,
             winner: None,
+            snapshot_hash: None,
         };
 
         env.storage().instance().set(&DataKey::Draw, &draw);
@@ -1251,10 +1273,77 @@ impl DripPool {
             .persistent()
             .set(&DataKey::Participant(winner.clone()), &win_p);
 
-        // Update draw state
+        let mut entries: Vec<EligibilityEntry> = Vec::new(&env);
+        for i in 0..participants.len() {
+            let addr = participants.get_unchecked(i);
+            let p: Participant = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Participant(addr.clone()))
+                .unwrap();
+            if p.deposited > 0 {
+                entries.push_back(EligibilityEntry {
+                    participant: addr,
+                    balance: p.deposited,
+                });
+            }
+        }
+
+        let mut sorted_entries = entries.clone();
+        for i in 0..sorted_entries.len() {
+            for j in (i + 1)..sorted_entries.len() {
+                let a = sorted_entries.get_unchecked(i);
+                let b = sorted_entries.get_unchecked(j);
+                let a_bytes = a.participant.clone().to_xdr(&env);
+                let b_bytes = b.participant.clone().to_xdr(&env);
+                if b_bytes < a_bytes {
+                    sorted_entries.set(i, b);
+                    sorted_entries.set(j, a);
+                }
+            }
+        }
+
+        let mut snapshot_bytes = Bytes::new(&env);
+        snapshot_bytes.append(&Bytes::from_slice(&env, b"VAULTQUEST_ELIGIBILITY_V1"));
+        snapshot_bytes.append(&draw.round_id.to_xdr(&env));
+        snapshot_bytes.append(&draw.freeze_ledger.to_xdr(&env));
+        snapshot_bytes.append(&env.ledger().timestamp().to_xdr(&env));
+        snapshot_bytes.append(&pool.total_deposited.to_xdr(&env));
+        snapshot_bytes.append(&(sorted_entries.len() as u32).to_xdr(&env));
+        for i in 0..sorted_entries.len() {
+            let entry = sorted_entries.get_unchecked(i);
+            snapshot_bytes.append(&entry.participant.to_xdr(&env));
+            snapshot_bytes.append(&entry.balance.to_xdr(&env));
+        }
+        let snapshot_hash: BytesN<32> = env.crypto().sha256(&snapshot_bytes).into();
+
+        let snapshot = EligibilitySnapshot {
+            round_id: draw.round_id,
+            cutoff_ledger: draw.freeze_ledger,
+            cutoff_time: env.ledger().timestamp(),
+            total_eligible: pool.total_deposited,
+            entries: sorted_entries,
+            snapshot_hash: snapshot_hash.clone(),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::DrawSnapshot(draw.round_id), &snapshot);
+
         draw.status = DrawStatus::Finalized;
         draw.winner = Some(winner.clone());
+        draw.snapshot_hash = Some(snapshot_hash.as_ref().clone());
         env.storage().instance().set(&DataKey::Draw, &draw);
+
+        env.events().publish(
+            (symbol_short!("draw"), symbol_short!("snapshot")),
+            (
+                draw.round_id,
+                snapshot_hash.clone(),
+                draw.freeze_ledger,
+                pool.total_deposited,
+            ),
+        );
 
         // Publish proof material and payout event
         env.events().publish(
@@ -1327,6 +1416,32 @@ impl DripPool {
             .instance()
             .get(&DataKey::Admins)
             .unwrap_or(vec![&env])
+    }
+
+    /// Returns the current active or most recently processed prize draw record.
+    pub fn get_draw(env: Env) -> Result<Draw, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Draw)
+            .ok_or(Error::NoDrawActive)
+    }
+
+    /// Returns the immutable eligibility snapshot recorded at cutoff for the given round.
+    pub fn get_draw_snapshot(env: Env, round_id: u32) -> Result<EligibilitySnapshot, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::DrawSnapshot(round_id))
+            .ok_or(Error::SnapshotNotFound)
+    }
+
+    /// Returns the canonical SHA-256 eligibility snapshot hash recorded for the given round.
+    pub fn get_snapshot_hash(env: Env, round_id: u32) -> Result<BytesN<32>, Error> {
+        let snapshot: EligibilitySnapshot = env
+            .storage()
+            .persistent()
+            .get(&DataKey::DrawSnapshot(round_id))
+            .ok_or(Error::SnapshotNotFound)?;
+        Ok(snapshot.snapshot_hash)
     }
 
     // ── #72: share-based NAV vault — additive, its own storage keys ──────────

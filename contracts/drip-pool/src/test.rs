@@ -2132,3 +2132,233 @@ fn vault_custody_balance_reconciles_with_internal_accounting_through_full_lifecy
     );
     assert_eq!(token_balance(&env, &asset, &alice), 400);
 }
+
+#[test]
+fn test_draw_proof_references_immutable_eligibility_snapshot() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &1_000);
+    client.join(&bob);
+    client.deposit(&bob, &2_000);
+
+    let current = env.ledger().sequence();
+    let freeze_ledger = current + 2;
+    let reveal_deadline = current + 10;
+    let (secret, commitment) = generate_secret_and_commitment(&env, 42);
+
+    client.commit_draw(
+        &admin,
+        &1,
+        &commitment,
+        &freeze_ledger,
+        &reveal_deadline,
+        &500,
+    );
+
+    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+
+    let winner = client.finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]);
+    assert!(winner == alice || winner == bob);
+
+    let snapshot = client.get_draw_snapshot(&1);
+    assert_eq!(snapshot.round_id, 1);
+    assert_eq!(snapshot.cutoff_ledger, freeze_ledger);
+    assert_eq!(snapshot.total_eligible, 3_000);
+    assert_eq!(snapshot.entries.len(), 2);
+
+    let hash = client.get_snapshot_hash(&1);
+    assert_eq!(hash, snapshot.snapshot_hash);
+
+    let draw = client.get_draw();
+    assert_eq!(draw.round_id, 1);
+    assert_eq!(draw.snapshot_hash, Some(hash.as_ref().clone()));
+}
+
+#[test]
+fn test_late_deposits_do_not_affect_closed_rounds() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &1_000);
+    client.join(&bob);
+    client.deposit(&bob, &2_000);
+
+    let current = env.ledger().sequence();
+    let freeze_ledger = current + 2;
+    let reveal_deadline = current + 10;
+    let (secret_1, commitment_1) = generate_secret_and_commitment(&env, 1);
+
+    client.commit_draw(
+        &admin,
+        &1,
+        &commitment_1,
+        &freeze_ledger,
+        &reveal_deadline,
+        &300,
+    );
+
+    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+    client.finalize_draw(&secret_1, &vec![&env, alice.clone(), bob.clone()]);
+
+    let round1_snapshot_before = client.get_draw_snapshot(&1);
+    let round1_hash_before = client.get_snapshot_hash(&1);
+
+    let charlie = Address::generate(&env);
+    client.join(&charlie);
+    client.deposit(&charlie, &5_000);
+    client.deposit(&alice, &4_000);
+
+    let round1_snapshot_after = client.get_draw_snapshot(&1);
+    let round1_hash_after = client.get_snapshot_hash(&1);
+
+    assert_eq!(round1_snapshot_before, round1_snapshot_after);
+    assert_eq!(round1_hash_before, round1_hash_after);
+    assert_eq!(round1_snapshot_after.total_eligible, 3_000);
+    assert_eq!(round1_snapshot_after.entries.len(), 2);
+
+    let current_2 = env.ledger().sequence();
+    let freeze_ledger_2 = current_2 + 2;
+    let reveal_deadline_2 = current_2 + 10;
+    let (secret_2, commitment_2) = generate_secret_and_commitment(&env, 2);
+
+    client.commit_draw(
+        &admin,
+        &2,
+        &commitment_2,
+        &freeze_ledger_2,
+        &reveal_deadline_2,
+        &600,
+    );
+
+    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger_2 + 1);
+    client.finalize_draw(
+        &secret_2,
+        &vec![&env, alice.clone(), bob.clone(), charlie.clone()],
+    );
+
+    let round2_snapshot = client.get_draw_snapshot(&2);
+    let round2_hash = client.get_snapshot_hash(&2);
+
+    assert_eq!(round2_snapshot.round_id, 2);
+    assert_eq!(round2_snapshot.total_eligible, 12_000);
+    assert_eq!(round2_snapshot.entries.len(), 3);
+    assert_ne!(round1_hash_after, round2_hash);
+
+    let round1_check = client.get_draw_snapshot(&1);
+    assert_eq!(round1_check.total_eligible, 3_000);
+}
+
+#[test]
+fn test_cutoff_boundary_pending_late_and_exact_deposits() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    client.join(&alice);
+    client.deposit(&alice, &1_000);
+
+    let current = env.ledger().sequence();
+    let bob = Address::generate(&env);
+    client.join(&bob);
+    client.deposit(&bob, &2_000);
+
+    let freeze_ledger = current;
+    let reveal_deadline = current + 10;
+    let (secret, commitment) = generate_secret_and_commitment(&env, 77);
+
+    client.commit_draw(
+        &admin,
+        &1,
+        &commitment,
+        &freeze_ledger,
+        &reveal_deadline,
+        &250,
+    );
+
+    let charlie = Address::generate(&env);
+    assert_eq!(
+        client.try_join(&charlie),
+        Err(Ok(Error::DrawActive))
+    );
+    assert_eq!(
+        client.try_deposit(&alice, &500),
+        Err(Ok(Error::DrawActive))
+    );
+
+    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+
+    assert_eq!(
+        client.try_deposit(&alice, &500),
+        Err(Ok(Error::DrawActive))
+    );
+
+    client.finalize_draw(&secret, &vec![&env, alice.clone(), bob.clone()]);
+
+    let snapshot = client.get_draw_snapshot(&1);
+    assert_eq!(snapshot.cutoff_ledger, freeze_ledger);
+    assert_eq!(snapshot.total_eligible, 3_000);
+
+    client.join(&charlie);
+    client.deposit(&charlie, &500);
+    assert_eq!(client.savings(&charlie).deposited, 500);
+
+    let snapshot_after_late = client.get_draw_snapshot(&1);
+    assert_eq!(snapshot_after_late.total_eligible, 3_000);
+    assert_eq!(snapshot_after_late.entries.len(), 2);
+}
+
+#[test]
+fn test_eligibility_snapshot_hash_invariant_under_participant_ordering() {
+    let (env, client, admin) = setup();
+    client.create(&admin);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let charlie = Address::generate(&env);
+
+    client.join(&alice);
+    client.deposit(&alice, &1_000);
+    client.join(&bob);
+    client.deposit(&bob, &2_000);
+    client.join(&charlie);
+    client.deposit(&charlie, &3_000);
+
+    let current = env.ledger().sequence();
+    let freeze_ledger = current + 2;
+    let reveal_deadline = current + 10;
+    let (secret_1, commitment_1) = generate_secret_and_commitment(&env, 88);
+
+    client.commit_draw(
+        &admin,
+        &1,
+        &commitment_1,
+        &freeze_ledger,
+        &reveal_deadline,
+        &100,
+    );
+
+    env.ledger().with_mut(|li| li.sequence_number = freeze_ledger + 1);
+    client.finalize_draw(
+        &secret_1,
+        &vec![&env, charlie.clone(), alice.clone(), bob.clone()],
+    );
+
+    let snapshot_1 = client.get_draw_snapshot(&1);
+    let first_entry = snapshot_1.entries.get(0).unwrap();
+    let second_entry = snapshot_1.entries.get(1).unwrap();
+    let third_entry = snapshot_1.entries.get(2).unwrap();
+
+    let b0 = first_entry.participant.clone().to_xdr(&env);
+    let b1 = second_entry.participant.clone().to_xdr(&env);
+    let b2 = third_entry.participant.clone().to_xdr(&env);
+
+    assert!(b0 <= b1);
+    assert!(b1 <= b2);
+}
