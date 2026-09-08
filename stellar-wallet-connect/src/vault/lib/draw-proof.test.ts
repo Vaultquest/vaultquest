@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   attachDrawProof,
+  computeSnapshotHash,
+  createEligibilitySnapshot,
   flagDisputed,
   hasProof,
+  reproduceWinnerSelection,
   verifyDrawProof,
 } from "./draw-proof";
 import type { RewardHistoryEntry } from "../contract/types";
@@ -81,11 +84,105 @@ describe("verifyDrawProof", () => {
     expect(updated.status).toBe("disputed");
   });
 
+  it("marks a snapshot-hash mismatch as disputed", () => {
+    const entry = attachDrawProof(baseEntry, {
+      roundId: "42",
+      txHash: "txhash0001",
+      proof: "digest-1",
+      snapshotHash: "hash-stored-a",
+      verified: null,
+    });
+    const { entry: updated, verdict } = verifyDrawProof(entry, {
+      txHash: "txhash0001",
+      proof: "digest-1",
+      snapshotHash: "hash-indexer-b",
+    });
+    expect(verdict.verdict).toBe("invalid");
+    expect(verdict).toMatchObject({ reason: "snapshot_mismatch" });
+    expect(updated.status).toBe("disputed");
+    expect(updated.drawProof?.verified).toBe(false);
+  });
+
+  it("successfully verifies when snapshot hash matches", () => {
+    const entry = attachDrawProof(baseEntry, {
+      roundId: "42",
+      txHash: "txhash0001",
+      proof: "digest-1",
+      snapshotHash: "hash-matched",
+      verified: null,
+    });
+    const { entry: updated, verdict } = verifyDrawProof(entry, {
+      txHash: "txhash0001",
+      proof: "digest-1",
+      snapshotHash: "hash-matched",
+    });
+    expect(verdict.verdict).toBe("verified");
+    expect(updated.status).toBe("claimed");
+    expect(updated.drawProof?.verified).toBe(true);
+    expect(updated.drawProof?.snapshotHash).toBe("hash-matched");
+  });
+
   it("does not disturb a no_win outcome", () => {
     const entry = attachDrawProof({ ...baseEntry, status: "no_win" }, { roundId: "42", txHash: null, proof: "digest-1", verified: null });
     const { entry: updated, verdict } = verifyDrawProof(entry, { txHash: null, proof: "digest-1" });
-    expect(verdict.verdict).toBe("missing"); // no tx observed => still pending via missing branch
+    expect(verdict.verdict).toBe("missing");
     expect(updated.status).toBe("pending");
+  });
+});
+
+describe("createEligibilitySnapshot and computeSnapshotHash", () => {
+  it("produces deterministic hash invariant under participant input order", () => {
+    const entriesA = [
+      { participant: "GBALICE", balance: "1000" },
+      { participant: "GBBOB", balance: "2000" },
+    ];
+    const entriesB = [
+      { participant: "GBBOB", balance: "2000" },
+      { participant: "GBALICE", balance: "1000" },
+    ];
+
+    const snapshotA = createEligibilitySnapshot(1, 100, 1000, entriesA);
+    const snapshotB = createEligibilitySnapshot(1, 100, 1000, entriesB);
+
+    expect(snapshotA.snapshotHash).toBe(snapshotB.snapshotHash);
+    expect(computeSnapshotHash(snapshotA)).toBe(snapshotA.snapshotHash);
+    expect(snapshotA.totalEligible).toBe("3000");
+  });
+
+  it("ensures late deposits after snapshot cutoff do not alter past round snapshot", () => {
+    const originalEntries = [
+      { participant: "GBALICE", balance: "1000" },
+      { participant: "GBBOB", balance: "2000" },
+    ];
+    const snapshot = createEligibilitySnapshot(1, 100, 1000, originalEntries);
+
+    const postCutoffEntries = [
+      ...originalEntries,
+      { participant: "GBCHARLIE", balance: "5000" },
+    ];
+
+    expect(snapshot.totalEligible).toBe("3000");
+    expect(snapshot.entries.length).toBe(2);
+
+    const newSnapshot = createEligibilitySnapshot(2, 200, 2000, postCutoffEntries);
+    expect(newSnapshot.snapshotHash).not.toBe(snapshot.snapshotHash);
+    expect(newSnapshot.totalEligible).toBe("8000");
+  });
+});
+
+describe("reproduceWinnerSelection", () => {
+  it("deterministically selects winner based on proportional cumulative weights", () => {
+    const entries = [
+      { participant: "GBALICE", balance: "1000" },
+      { participant: "GBBOB", balance: "2000" },
+    ];
+    const snapshot = createEligibilitySnapshot(1, 100, 1000, entries);
+
+    const winnerAtZero = reproduceWinnerSelection(snapshot, 0n);
+    expect(winnerAtZero).toBe("GBALICE");
+
+    const winnerAt1500 = reproduceWinnerSelection(snapshot, 1500n);
+    expect(winnerAt1500).toBe("GBBOB");
   });
 });
 

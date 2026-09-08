@@ -67,6 +67,20 @@ export type RewardOutcome =
   | "failed"
   | "disputed";
 
+export interface EligibilitySnapshotEntry {
+  participant: string;
+  balance: string;
+}
+
+export interface EligibilitySnapshot {
+  roundId: number | string;
+  cutoffLedger: number;
+  cutoffTime: number;
+  totalEligible: string;
+  entries: EligibilitySnapshotEntry[];
+  snapshotHash: string;
+}
+
 /**
  * Draw-proof metadata tying a reward entry to its originating prize draw (#175).
  *
@@ -86,6 +100,10 @@ export interface DrawProof {
    * `true` matches, `false` is a confirmed mismatch, `null` is unverified.
    */
   verified: boolean | null;
+  /** Authoritative eligibility snapshot hash recorded on-chain at cutoff (#172). */
+  snapshotHash?: string | null;
+  /** Optional full snapshot payload for off-chain verification (#172). */
+  snapshot?: EligibilitySnapshot | null;
 }
 
 export interface RewardHistoryEntry {

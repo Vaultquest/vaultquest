@@ -1269,6 +1269,4326 @@
             "key": {
               "vec": [
                 {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 1
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 1
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "af01889c72693e91a7f5b18125d4ad3c4ef41e2b3295ec568a9ae9520695bd5b"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000001
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 2
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 2
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 3
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 2
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "853643cf71246e2ae2bf3c421522f952faab0f155369669529db4acb64d50921"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000003
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 3
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 3
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 5
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 3
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "6b2b9e23f8ba30561b4fa6c44707c6c43410c4deeca40dc4450b9d34bf9315c9"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000005
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 4
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 4
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 4
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "6135f4ba0a1266f39db713f9b027b6f61b00c39c34a7bcba1914f39ec006b42b"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000007
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 5
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 5
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 9
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 5
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "b9c90ebaf3fb6a20d3528c11840b1ed755859cca2dc7d39278269a951a9fb377"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000009
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 6
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 6
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 11
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 6
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "76e5191d445db9c5d0cb48f425cfdf7755ba455b8bc7d42ed600524bebcbb96e"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000011
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 7
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 7
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 13
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "137dc83172610ffbf92c381e73a2b6d0e3dd887a8c3adf42c6bb615cf09d38de"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000013
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 8
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 8
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 15
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 8
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "809368aeb2d4e42eec0d4cc4b6eaf9b9a5cb1ce052c4740c185183698ee0788d"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000015
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 9
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 9
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 17
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 9
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "b3ed636e247c044e504c322ed683fcd0a29a15ca98795fbd753383a8081117c0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000017
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 10
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 10
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 19
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 10
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "b9d185d00d2e82384fd93fa18449c44f4eb62761f0973b2d893fa65db9fb21ca"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000019
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 11
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 11
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 21
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 11
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "2bb83f2cebe1bf941e9e2be1927764ab74b3dc5abc733699d0f3bcfffcbc1d3b"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000021
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 12
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 12
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 23
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 12
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "bb77c4039393dd67a31a1a2ee3dc3b05e78a7f54823a2743392dc0b365e135f5"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000023
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 13
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 13
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 25
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 13
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "ecd49f4a6c879eba163c0570897cdfa542042e4ec3d52a84ecc28ca6385d9ed2"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000025
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 14
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 14
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 27
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 14
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "8039a86f60b45f97d145b47b18603592cb0cd9886245a4c3f61a8e90513095fa"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000027
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 15
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 15
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 29
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 15
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "74c1e21f73a59bab92cc6686982a7286b44680452d8f8a26842154b7ae74cebe"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000029
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 16
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 16
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 31
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 16
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "f00cc516ef08519261dbc6d351cfa39619efe38b08b638c15d6e4958523bee70"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000031
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 17
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 17
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 33
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 17
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "55e23c79ccd4e4887653a4ab5ac23b4aba2372db4a855fda6a8a0942d4ceb99b"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000033
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 18
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 18
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 35
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 18
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "93b77ad4f8d484ef4f6dd182fd256c3910485ea3d5274daccebbd0242588aa52"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000035
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 19
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 19
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 37
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 19
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "40d4e8da57df8c161799ccc3630819559ab7f7c7b66017354b0f099f24dead7b"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000037
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 20
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 20
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 39
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 20
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "dba6d1b555be014c9fdf13262539815d3cd886998f88d7fa259da48f6f06e47e"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000039
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 21
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 21
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 41
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 21
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "8ab3717b1417b9ad57d19b234cc2a99de7e89b5b6a4f4ad2f1cca28e6272e6ac"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000041
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 22
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 22
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 43
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 22
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "16df5424a613910a7f5ad028bcdd414b02425dcaa5faa1c7829657632e8914d9"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000043
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 23
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 23
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 45
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 23
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "9bff5a9674bef85fb2f32c0844e9808e30f1e84d2692c78b60d4493de2435aaa"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000045
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 24
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 24
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 47
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 24
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "c2fc27acc79f479fa082f488198362cb75fc3c360926a4fa1f07891e3fcb585b"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000047
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 25
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 25
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 49
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 25
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "29f018517b60fb5122080b656994d71b390d23ada917d9842fc2347b72847367"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000049
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 26
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 26
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 51
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 26
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "dc895cf8e47d04616835340b61988723525cf1fe61aeba4ad394dc7675e519d0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000051
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 27
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 27
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 53
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 27
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "f23f03406180439832e2a5bf9ac0263633ca0b18404374fa0594baa61a67d4f3"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000053
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 28
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 28
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 55
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 28
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "1572ab5943c7a3e33f5b34170dad0c88c073c230545bfb20abc85ee18860256c"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000055
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 29
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 29
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 57
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 29
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "15de00fdf1a29f0aa439c7de5843413a0b559839440ab19e5f92c4ed90d7818d"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000057
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "DrawSnapshot"
+                },
+                {
+                  "u32": 30
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "DrawSnapshot"
+                    },
+                    {
+                      "u32": 30
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "cutoff_ledger"
+                      },
+                      "val": {
+                        "u32": 59
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cutoff_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "entries"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 100
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "balance"
+                                },
+                                "val": {
+                                  "i128": {
+                                    "hi": 0,
+                                    "lo": 900
+                                  }
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "participant"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "round_id"
+                      },
+                      "val": {
+                        "u32": 30
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "snapshot_hash"
+                      },
+                      "val": {
+                        "bytes": "2dd5658ed44a650c33212ff9a521ea5875d4861b6e78c9d02a4ed76e967bded2"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_eligible"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          10000059
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
                   "symbol": "Participant"
                 },
                 {
@@ -1548,6 +5868,14 @@
                               },
                               "val": {
                                 "u32": 30
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "snapshot_hash"
+                              },
+                              "val": {
+                                "bytes": "2dd5658ed44a650c33212ff9a521ea5875d4861b6e78c9d02a4ed76e967bded2"
                               }
                             },
                             {
@@ -3434,6 +7762,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 1
+                },
+                {
+                  "bytes": "af01889c72693e91a7f5b18125d4ad3c4ef41e2b3295ec568a9ae9520695bd5b"
+                },
+                {
+                  "u32": 1
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -3663,6 +8030,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 2
+                },
+                {
+                  "bytes": "853643cf71246e2ae2bf3c421522f952faab0f155369669529db4acb64d50921"
+                },
+                {
+                  "u32": 3
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -3932,6 +8338,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 3
+                },
+                {
+                  "bytes": "6b2b9e23f8ba30561b4fa6c44707c6c43410c4deeca40dc4450b9d34bf9315c9"
+                },
+                {
+                  "u32": 5
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -4161,6 +8606,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 4
+                },
+                {
+                  "bytes": "6135f4ba0a1266f39db713f9b027b6f61b00c39c34a7bcba1914f39ec006b42b"
+                },
+                {
+                  "u32": 7
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -4430,6 +8914,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 5
+                },
+                {
+                  "bytes": "b9c90ebaf3fb6a20d3528c11840b1ed755859cca2dc7d39278269a951a9fb377"
+                },
+                {
+                  "u32": 9
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -4659,6 +9182,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 6
+                },
+                {
+                  "bytes": "76e5191d445db9c5d0cb48f425cfdf7755ba455b8bc7d42ed600524bebcbb96e"
+                },
+                {
+                  "u32": 11
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -4928,6 +9490,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 7
+                },
+                {
+                  "bytes": "137dc83172610ffbf92c381e73a2b6d0e3dd887a8c3adf42c6bb615cf09d38de"
+                },
+                {
+                  "u32": 13
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -5157,6 +9758,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 8
+                },
+                {
+                  "bytes": "809368aeb2d4e42eec0d4cc4b6eaf9b9a5cb1ce052c4740c185183698ee0788d"
+                },
+                {
+                  "u32": 15
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -5426,6 +10066,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 9
+                },
+                {
+                  "bytes": "b3ed636e247c044e504c322ed683fcd0a29a15ca98795fbd753383a8081117c0"
+                },
+                {
+                  "u32": 17
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -5655,6 +10334,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 10
+                },
+                {
+                  "bytes": "b9d185d00d2e82384fd93fa18449c44f4eb62761f0973b2d893fa65db9fb21ca"
+                },
+                {
+                  "u32": 19
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -5924,6 +10642,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 11
+                },
+                {
+                  "bytes": "2bb83f2cebe1bf941e9e2be1927764ab74b3dc5abc733699d0f3bcfffcbc1d3b"
+                },
+                {
+                  "u32": 21
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -6153,6 +10910,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 12
+                },
+                {
+                  "bytes": "bb77c4039393dd67a31a1a2ee3dc3b05e78a7f54823a2743392dc0b365e135f5"
+                },
+                {
+                  "u32": 23
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -6422,6 +11218,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 13
+                },
+                {
+                  "bytes": "ecd49f4a6c879eba163c0570897cdfa542042e4ec3d52a84ecc28ca6385d9ed2"
+                },
+                {
+                  "u32": 25
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -6651,6 +11486,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 14
+                },
+                {
+                  "bytes": "8039a86f60b45f97d145b47b18603592cb0cd9886245a4c3f61a8e90513095fa"
+                },
+                {
+                  "u32": 27
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -6920,6 +11794,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 15
+                },
+                {
+                  "bytes": "74c1e21f73a59bab92cc6686982a7286b44680452d8f8a26842154b7ae74cebe"
+                },
+                {
+                  "u32": 29
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -7149,6 +12062,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 16
+                },
+                {
+                  "bytes": "f00cc516ef08519261dbc6d351cfa39619efe38b08b638c15d6e4958523bee70"
+                },
+                {
+                  "u32": 31
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -7418,6 +12370,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 17
+                },
+                {
+                  "bytes": "55e23c79ccd4e4887653a4ab5ac23b4aba2372db4a855fda6a8a0942d4ceb99b"
+                },
+                {
+                  "u32": 33
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -7647,6 +12638,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 18
+                },
+                {
+                  "bytes": "93b77ad4f8d484ef4f6dd182fd256c3910485ea3d5274daccebbd0242588aa52"
+                },
+                {
+                  "u32": 35
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -7916,6 +12946,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 19
+                },
+                {
+                  "bytes": "40d4e8da57df8c161799ccc3630819559ab7f7c7b66017354b0f099f24dead7b"
+                },
+                {
+                  "u32": 37
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -8145,6 +13214,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 20
+                },
+                {
+                  "bytes": "dba6d1b555be014c9fdf13262539815d3cd886998f88d7fa259da48f6f06e47e"
+                },
+                {
+                  "u32": 39
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -8414,6 +13522,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 21
+                },
+                {
+                  "bytes": "8ab3717b1417b9ad57d19b234cc2a99de7e89b5b6a4f4ad2f1cca28e6272e6ac"
+                },
+                {
+                  "u32": 41
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -8643,6 +13790,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 22
+                },
+                {
+                  "bytes": "16df5424a613910a7f5ad028bcdd414b02425dcaa5faa1c7829657632e8914d9"
+                },
+                {
+                  "u32": 43
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -8912,6 +14098,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 23
+                },
+                {
+                  "bytes": "9bff5a9674bef85fb2f32c0844e9808e30f1e84d2692c78b60d4493de2435aaa"
+                },
+                {
+                  "u32": 45
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -9141,6 +14366,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 24
+                },
+                {
+                  "bytes": "c2fc27acc79f479fa082f488198362cb75fc3c360926a4fa1f07891e3fcb585b"
+                },
+                {
+                  "u32": 47
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -9410,6 +14674,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 25
+                },
+                {
+                  "bytes": "29f018517b60fb5122080b656994d71b390d23ada917d9842fc2347b72847367"
+                },
+                {
+                  "u32": 49
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -9639,6 +14942,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 26
+                },
+                {
+                  "bytes": "dc895cf8e47d04616835340b61988723525cf1fe61aeba4ad394dc7675e519d0"
+                },
+                {
+                  "u32": 51
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -9908,6 +15250,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 27
+                },
+                {
+                  "bytes": "f23f03406180439832e2a5bf9ac0263633ca0b18404374fa0594baa61a67d4f3"
+                },
+                {
+                  "u32": 53
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -10137,6 +15518,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 28
+                },
+                {
+                  "bytes": "1572ab5943c7a3e33f5b34170dad0c88c073c230545bfb20abc85ee18860256c"
+                },
+                {
+                  "u32": 55
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }
@@ -10406,6 +15826,45 @@
                 "symbol": "draw"
               },
               {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 29
+                },
+                {
+                  "bytes": "15de00fdf1a29f0aa439c7de5843413a0b559839440ab19e5f92c4ed90d7818d"
+                },
+                {
+                  "u32": 57
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
                 "symbol": "finalized"
               }
             ],
@@ -10635,6 +16094,45 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     }
                   ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "draw"
+              },
+              {
+                "symbol": "snapshot"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 30
+                },
+                {
+                  "bytes": "2dd5658ed44a650c33212ff9a521ea5875d4861b6e78c9d02a4ed76e967bded2"
+                },
+                {
+                  "u32": 59
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
                 }
               ]
             }

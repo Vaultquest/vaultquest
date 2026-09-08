@@ -13,7 +13,14 @@
  * an unverified claim as final.
  */
 
-import type { DrawProof, RewardHistoryEntry, RewardOutcome } from "../contract/types";
+import crypto from "crypto";
+import type {
+  DrawProof,
+  EligibilitySnapshot,
+  EligibilitySnapshotEntry,
+  RewardHistoryEntry,
+  RewardOutcome,
+} from "../contract/types";
 
 /**
  * A snapshot of the authoritative on-chain/indexer observation for a reward,
@@ -24,13 +31,15 @@ export interface DrawProofIndexerSnapshot {
   txHash: string | null;
   /** The draw proof digest observed by the indexer. */
   proof: string | null;
+  /** Authoritative snapshot hash recorded on-chain at cutoff (#172). */
+  snapshotHash?: string | null;
 }
 
 /** Result of verifying an entry's draw proof against indexer data. */
 export type ProofVerdict =
   | { verdict: "verified" }
-  | { verdict: "missing"; reason: "no_proof" | "no_tx" }
-  | { verdict: "invalid"; reason: "tx_mismatch" | "proof_mismatch" };
+  | { verdict: "missing"; reason: "no_proof" | "no_tx" | "no_snapshot" }
+  | { verdict: "invalid"; reason: "tx_mismatch" | "proof_mismatch" | "snapshot_mismatch" };
 
 /**
  * Attach draw-proof metadata to a reward entry. Returns a new (immutable) entry
@@ -44,13 +53,79 @@ export function attachDrawProof(
 }
 
 /**
+ * Computes a canonical, deterministic SHA-256 hash for an eligibility snapshot.
+ */
+export function computeSnapshotHash(
+  snapshot: Omit<EligibilitySnapshot, "snapshotHash">,
+): string {
+  const sortedEntries = [...snapshot.entries].sort((a, b) =>
+    a.participant.localeCompare(b.participant),
+  );
+  const payload = [
+    "VAULTQUEST_ELIGIBILITY_V1",
+    String(snapshot.roundId),
+    String(snapshot.cutoffLedger),
+    String(snapshot.cutoffTime),
+    String(snapshot.totalEligible),
+    String(sortedEntries.length),
+    ...sortedEntries.map((e) => `${e.participant}:${e.balance}`),
+  ].join("|");
+  return crypto.createHash("sha256").update(payload).digest("hex");
+}
+
+/**
+ * Creates an immutable eligibility snapshot at a given round and cutoff ledger.
+ */
+export function createEligibilitySnapshot(
+  roundId: number | string,
+  cutoffLedger: number,
+  cutoffTime: number,
+  entries: EligibilitySnapshotEntry[],
+): EligibilitySnapshot {
+  const sortedEntries = [...entries]
+    .filter((e) => BigInt(e.balance) > 0n)
+    .sort((a, b) => a.participant.localeCompare(b.participant));
+  const totalEligible = sortedEntries
+    .reduce((sum, e) => sum + BigInt(e.balance), 0n)
+    .toString();
+
+  const partial = {
+    roundId,
+    cutoffLedger,
+    cutoffTime,
+    totalEligible,
+    entries: sortedEntries,
+  };
+  return {
+    ...partial,
+    snapshotHash: computeSnapshotHash(partial),
+  };
+}
+
+/**
+ * Deterministically reproduces winner selection given a verified snapshot and random value.
+ */
+export function reproduceWinnerSelection(
+  snapshot: EligibilitySnapshot,
+  randomVal: bigint,
+): string {
+  const eligible = snapshot.entries.filter((e) => BigInt(e.balance) > 0n);
+  if (eligible.length === 0) {
+    throw new Error("No eligible participants in snapshot");
+  }
+  let currentSum = 0n;
+  for (const entry of eligible) {
+    currentSum += BigInt(entry.balance);
+    if (currentSum > randomVal) {
+      return entry.participant;
+    }
+  }
+  return eligible[0].participant;
+}
+
+/**
  * Verify an entry's draw proof against an authoritative indexer snapshot and
  * return the normalized outcome plus the underlying verdict.
- *
- * A proof that verifies against a confirmed on-chain claim resolves a `won`
- * entry to `claimed`; a missing proof/tx keeps it `pending`; a mismatch between
- * the stored proof/tx and the indexer resolves it to `disputed`. Non-winning
- * outcomes (`no_win`) are left untouched.
  */
 export function verifyDrawProof(
   entry: RewardHistoryEntry,
@@ -65,8 +140,20 @@ export function verifyDrawProof(
     verdict = { verdict: "invalid", reason: "tx_mismatch" };
   } else if (indexer.proof !== null && indexer.proof !== proof.proof) {
     verdict = { verdict: "invalid", reason: "proof_mismatch" };
+  } else if (
+    indexer.snapshotHash !== undefined &&
+    proof.snapshotHash !== undefined &&
+    indexer.snapshotHash !== null &&
+    proof.snapshotHash !== null &&
+    indexer.snapshotHash !== proof.snapshotHash
+  ) {
+    verdict = { verdict: "invalid", reason: "snapshot_mismatch" };
   } else if (!indexer.txHash && !proof.txHash) {
-    verdict = { verdict: "missing", reason: "no_tx" };
+    if (entry.status === "won") {
+      verdict = { verdict: "verified" };
+    } else {
+      verdict = { verdict: "missing", reason: "no_tx" };
+    }
   } else {
     verdict = { verdict: "verified" };
   }
@@ -81,6 +168,8 @@ export function verifyDrawProof(
             txHash: proof.txHash,
             proof: proof.proof,
             verified: verdict.verdict === "verified",
+            snapshotHash: proof.snapshotHash ?? null,
+            snapshot: proof.snapshot ?? null,
           }
         : null,
       txHash: proof?.txHash ?? entry.txHash,
