@@ -7,6 +7,10 @@ import {
   StaleIndicator,
   WalletDisconnectedState,
 } from "../../components/FallbackStates";
+import { useStore } from "@nanostores/react";
+import { connectedNetwork as connectedNetworkStore, isNetworkMismatch as isNetworkMismatchStore, networkReadiness as networkReadinessStore } from "../../core/store.js";
+import { EXPECTED_NETWORK, type NetworkType } from "../../lib/wallets";
+import NetworkMismatchBanner from "../../components/NetworkMismatchBanner";
 import type { RewardHistoryEntry, RewardOutcome } from "../contract/types";
 import { hasProof } from "../lib/draw-proof";
 import { explorerTxUrl, formatAmount, formatDate, truncateAddress, type StellarNetwork } from "../lib/format";
@@ -34,6 +38,9 @@ export interface RewardHistoryProps {
   /** When provided, renders an inline claim transaction timeline and wires claim buttons. */
   claimFlow?: TxFlowResult;
   onClaim?: (entry: RewardHistoryEntry) => void;
+  isNetworkMismatch?: boolean;
+  connectedNetwork?: NetworkType | null;
+  expectedNetwork?: NetworkType;
 }
 
 const OUTCOME_BADGE: Record<RewardOutcome, { label: string; className: string }> = {
@@ -111,7 +118,17 @@ export const RewardHistory: FC<RewardHistoryProps> = ({
   onConnect,
   claimFlow,
   onClaim,
+  isNetworkMismatch: propMismatch,
+  connectedNetwork: propNetwork,
+  expectedNetwork: propExpectedNetwork,
 }) => {
+  const storeMismatch = useStore(isNetworkMismatchStore);
+  const storeReadiness = useStore(networkReadinessStore);
+  const storeNetwork = useStore(connectedNetworkStore);
+  const actualNetwork = propNetwork !== undefined ? propNetwork : storeNetwork;
+  const isMismatch = propMismatch ?? (storeMismatch || storeReadiness === "mismatch");
+  const expectedNetwork = propExpectedNetwork || EXPECTED_NETWORK;
+
   if (!walletConnected) {
     return <WalletDisconnectedState onConnect={onConnect} />;
   }
@@ -140,6 +157,14 @@ export const RewardHistory: FC<RewardHistoryProps> = ({
         </h2>
         {stale && <StaleIndicator />}
       </header>
+
+      {isMismatch && (
+        <NetworkMismatchBanner
+          expectedNetwork={expectedNetwork}
+          connectedNetwork={actualNetwork}
+          actionName="Reward claims"
+        />
+      )}
 
       {/* Desktop: table */}
       <div className="hidden overflow-hidden rounded-2xl border border-red-900/30 bg-[#1A0505]/60 sm:block">
@@ -173,8 +198,9 @@ export const RewardHistory: FC<RewardHistoryProps> = ({
                     {entry.status === "won" && !entry.txHash && (
                       <button
                         type="button"
-                        onClick={() => onClaim(entry)}
-                        disabled={claimFlow?.busy}
+                        onClick={() => !isMismatch && onClaim(entry)}
+                        disabled={claimFlow?.busy || isMismatch}
+                        title={isMismatch ? "Claims blocked due to network mismatch" : undefined}
                         className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                       >
                         Claim
@@ -223,8 +249,9 @@ export const RewardHistory: FC<RewardHistoryProps> = ({
                 <div className="pt-1">
                   <button
                     type="button"
-                    onClick={() => onClaim(entry)}
-                    disabled={claimFlow?.busy}
+                    onClick={() => !isMismatch && onClaim(entry)}
+                    disabled={claimFlow?.busy || isMismatch}
+                    title={isMismatch ? "Claims blocked due to network mismatch" : undefined}
                     className="w-full rounded-lg bg-red-600 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                   >
                     Claim reward

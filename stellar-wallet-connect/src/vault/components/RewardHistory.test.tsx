@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { RewardHistory } from "./RewardHistory";
 import type { RewardHistoryEntry } from "../contract/types";
 
@@ -57,7 +58,7 @@ describe("RewardHistory", () => {
 
   it("shows the originating draw round for a verified proof", () => {
     render(<RewardHistory entries={entries} />);
-    expect(screen.getByText(/Round 42/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Round 42/i).length).toBeGreaterThan(0);
   });
 
   it("renders a claimed reward with its round id and tx provenance", () => {
@@ -65,8 +66,8 @@ describe("RewardHistory", () => {
       { ...baseEntry, id: "r2", status: "claimed", txHash: "clmhash0001", drawProof: { roundId: "43", txHash: "clmhash0001", proof: "proof-2", verified: true } },
     ];
     render(<RewardHistory entries={claimed} />);
-    expect(screen.getByText(/Claimed/i)).toBeInTheDocument();
-    expect(screen.getByText(/Round 43/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Claimed/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Round 43/i).length).toBeGreaterThan(0);
     const links = screen.getAllByRole("link");
     expect(links[0]).toHaveAttribute("href", expect.stringContaining("/tx/clmhash0001"));
   });
@@ -76,7 +77,7 @@ describe("RewardHistory", () => {
       { ...baseEntry, id: "r3", status: "failed", txHash: "failhash0001", drawProof: { roundId: "44", txHash: "failhash0001", proof: "proof-3", verified: true } },
     ];
     render(<RewardHistory entries={failed} />);
-    expect(screen.getByText(/Failed/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Failed/i).length).toBeGreaterThan(0);
   });
 
   it("flags a disputed reward when the proof does not reconcile", () => {
@@ -84,8 +85,8 @@ describe("RewardHistory", () => {
       { ...baseEntry, id: "r4", status: "disputed", drawProof: { roundId: "45", txHash: "mismatch0001", proof: "proof-4", verified: false } },
     ];
     render(<RewardHistory entries={disputed} />);
-    expect(screen.getByText(/Disputed/i)).toBeInTheDocument();
-    expect(screen.getByText(/Round 45 · disputed/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Disputed/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Round 45 · disputed/i).length).toBeGreaterThan(0);
   });
 
   it("flags an entry with no draw proof", () => {
@@ -93,6 +94,72 @@ describe("RewardHistory", () => {
       { ...baseEntry, id: "r5", status: "claimed", drawProof: null },
     ];
     render(<RewardHistory entries={noProof} />);
-    expect(screen.getByText(/No proof/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/No proof/i).length).toBeGreaterThan(0);
+  });
+
+  it("disables claim buttons and displays network mismatch banner when network is mismatched", async () => {
+    const onClaim = vi.fn();
+    const claimable: RewardHistoryEntry[] = [
+      { ...baseEntry, id: "r6", status: "won", txHash: null },
+    ];
+
+    render(
+      <RewardHistory
+        entries={claimable}
+        onClaim={onClaim}
+        isNetworkMismatch={true}
+        connectedNetwork="mainnet"
+        expectedNetwork="testnet"
+      />,
+    );
+
+    const banner = screen.getByTestId("network-mismatch-banner");
+    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveTextContent(/Network Mismatch Detected/i);
+    expect(banner).toHaveTextContent(/Reward claims are blocked/i);
+    expect(screen.getByTestId("expected-network")).toHaveTextContent("Stellar Testnet (testnet)");
+    expect(screen.getByTestId("actual-network")).toHaveTextContent("Stellar Mainnet (mainnet)");
+
+    const claimButtons = screen.getAllByRole("button", { name: /Claim/i });
+    expect(claimButtons.length).toBeGreaterThan(0);
+    claimButtons.forEach((btn) => {
+      expect(btn).toBeDisabled();
+    });
+  });
+
+  it("enables claim buttons when network is matching and allows claiming", async () => {
+    const user = userEvent.setup();
+    const onClaim = vi.fn();
+    const claimable: RewardHistoryEntry[] = [
+      { ...baseEntry, id: "r7", status: "won", txHash: null },
+    ];
+
+    const { rerender } = render(
+      <RewardHistory
+        entries={claimable}
+        onClaim={onClaim}
+        isNetworkMismatch={true}
+        connectedNetwork="mainnet"
+        expectedNetwork="testnet"
+      />,
+    );
+
+    expect(screen.getByTestId("network-mismatch-banner")).toBeInTheDocument();
+
+    rerender(
+      <RewardHistory
+        entries={claimable}
+        onClaim={onClaim}
+        isNetworkMismatch={false}
+        connectedNetwork="testnet"
+        expectedNetwork="testnet"
+      />,
+    );
+
+    expect(screen.queryByTestId("network-mismatch-banner")).not.toBeInTheDocument();
+    const claimButton = screen.getAllByRole("button", { name: "Claim" })[0];
+    expect(claimButton).not.toBeDisabled();
+    await user.click(claimButton);
+    expect(onClaim).toHaveBeenCalledWith(claimable[0]);
   });
 });

@@ -111,4 +111,82 @@ describe("DepositModal", () => {
       await Promise.resolve();
     });
   });
+
+  it("renders network mismatch banner and disables continue button when network is mismatched", async () => {
+    const user = userEvent.setup();
+    const onDeposit = vi.fn();
+
+    render(
+      <DepositModal
+        pool={pool}
+        walletBalance="100"
+        onDeposit={onDeposit}
+        onClose={vi.fn()}
+        isNetworkMismatch={true}
+        connectedNetwork="mainnet"
+        expectedNetwork="testnet"
+      />,
+    );
+
+    const banner = screen.getByTestId("network-mismatch-banner");
+    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveTextContent(/Network Mismatch Detected/i);
+    expect(banner).toHaveTextContent(/Deposits are blocked/i);
+    expect(screen.getByTestId("expected-network")).toHaveTextContent("Stellar Testnet (testnet)");
+    expect(screen.getByTestId("actual-network")).toHaveTextContent("Stellar Mainnet (mainnet)");
+
+    await user.type(screen.getByLabelText("Amount"), "10");
+    const continueBtn = screen.getByRole("button", { name: "Continue" });
+    expect(continueBtn).toBeDisabled();
+    expect(continueBtn).toHaveAttribute("title", "Deposits blocked due to network mismatch");
+
+    await user.click(continueBtn);
+    expect(screen.queryByText("Confirm deposit")).not.toBeInTheDocument();
+  });
+
+  it("re-enables deposit flow upon network recovery", async () => {
+    const user = userEvent.setup();
+    const onDeposit = vi.fn().mockResolvedValue({ txHash: "recovery123" });
+
+    const { rerender } = render(
+      <DepositModal
+        pool={pool}
+        walletBalance="100"
+        onDeposit={onDeposit}
+        onClose={vi.fn()}
+        isNetworkMismatch={true}
+        connectedNetwork="mainnet"
+        expectedNetwork="testnet"
+      />,
+    );
+
+    expect(screen.getByTestId("network-mismatch-banner")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Amount"), "10");
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+
+    rerender(
+      <DepositModal
+        pool={pool}
+        walletBalance="100"
+        onDeposit={onDeposit}
+        onClose={vi.fn()}
+        isNetworkMismatch={false}
+        connectedNetwork="testnet"
+        expectedNetwork="testnet"
+      />,
+    );
+
+    expect(screen.queryByTestId("network-mismatch-banner")).not.toBeInTheDocument();
+    const continueBtn = screen.getByRole("button", { name: "Continue" });
+    expect(continueBtn).not.toBeDisabled();
+
+    await user.click(continueBtn);
+    expect(screen.getByText("Confirm deposit")).toBeInTheDocument();
+    const confirmBtn = screen.getByRole("button", { name: "Confirm deposit" });
+    expect(confirmBtn).not.toBeDisabled();
+
+    await user.click(confirmBtn);
+    expect(onDeposit).toHaveBeenCalledWith("10");
+    expect(await screen.findByText("Deposit successful!")).toBeInTheDocument();
+  });
 });

@@ -1,11 +1,12 @@
 import { getAssetDisplayName } from "../../lib/assets";
-import { EXPECTED_NETWORK } from "../../lib/wallets";
+import { EXPECTED_NETWORK, type NetworkType } from "../../lib/wallets";
 import { useStore } from "@nanostores/react";
-import { connectedNetwork } from "../../core/store.js";
+import { connectedNetwork, isNetworkMismatch as isNetworkMismatchStore, networkReadiness as networkReadinessStore } from "../../core/store.js";
 import type { FC } from "react";
 import { useState, useCallback } from "react";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import Modal from "../../components/Modal";
+import NetworkMismatchBanner from "../../components/NetworkMismatchBanner";
 import type { PoolSummary } from "../contract/types";
 import { explorerTxUrl, formatAmount } from "../lib/format";
 
@@ -16,6 +17,9 @@ export interface DepositModalProps {
   walletBalance: string;
   onDeposit: (amount: string) => Promise<{ txHash: string }>;
   onClose: () => void;
+  isNetworkMismatch?: boolean;
+  connectedNetwork?: NetworkType | null;
+  expectedNetwork?: NetworkType;
 }
 
 const QUICK_AMOUNTS = [25, 50, 75] as const;
@@ -29,8 +33,21 @@ function estimateWinChanceChange(currentTvl: bigint, depositAmount: bigint, part
   return `${(Number(change) / 100).toFixed(2)}%`;
 }
 
-export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDeposit, onClose }) => {
-  const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
+export const DepositModal: FC<DepositModalProps> = ({
+  pool,
+  walletBalance,
+  onDeposit,
+  onClose,
+  isNetworkMismatch: propMismatch,
+  connectedNetwork: propNetwork,
+  expectedNetwork = EXPECTED_NETWORK,
+}) => {
+  const storeMismatch = useStore(isNetworkMismatchStore);
+  const storeReadiness = useStore(networkReadinessStore);
+  const storeNetwork = useStore(connectedNetwork);
+  const actualNetwork = propNetwork !== undefined ? propNetwork : storeNetwork;
+  const isMismatch = propMismatch ?? (storeMismatch || storeReadiness === "mismatch");
+  const network = actualNetwork || expectedNetwork;
   const assetDisplayName = pool ? getAssetDisplayName(network, pool.asset) : "";
   // stellar.expert only serves "public" and "testnet" explorers; futurenet/standalone
   // deployments fall back to the testnet path rather than a broken mainnet link.
@@ -58,15 +75,23 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
   }, [balanceNum]);
 
   const handleContinue = useCallback(() => {
+    if (isMismatch) {
+      setError("Deposits are blocked due to network mismatch");
+      return;
+    }
     if (!isValid) {
       setError(amountNum === 0 ? "Enter an amount" : "Insufficient balance (leave buffer for gas)");
       return;
     }
     setStep("review");
     setError(null);
-  }, [isValid, amountNum]);
+  }, [isMismatch, isValid, amountNum]);
 
   const handleConfirm = useCallback(async () => {
+    if (isMismatch) {
+      setError("Deposits are blocked due to network mismatch");
+      return;
+    }
     setStep("broadcasting");
     setError(null);
     try {
@@ -77,7 +102,7 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
       setError(err instanceof Error ? err.message : "Transaction failed");
       setStep("review");
     }
-  }, [amount, onDeposit]);
+  }, [isMismatch, amount, onDeposit]);
 
   return (
     <Modal
@@ -90,6 +115,14 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
         <p id="deposit-modal-desc" className="sr-only">
           Enter the amount of assets you wish to deposit into the prize pool.
         </p>
+
+        {isMismatch && (
+          <NetworkMismatchBanner
+            expectedNetwork={expectedNetwork}
+            connectedNetwork={actualNetwork}
+            actionName="Deposits"
+          />
+        )}
 
         {step === "input" && (
           <div className="space-y-4">
@@ -151,7 +184,8 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
             <button
               type="button"
               onClick={handleContinue}
-              disabled={!isValid}
+              disabled={!isValid || isMismatch}
+              title={isMismatch ? "Deposits blocked due to network mismatch" : undefined}
               className="w-full rounded-xl bg-red-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1A0505]"
             >
               Continue
@@ -201,7 +235,9 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
               <button
                 type="button"
                 onClick={handleConfirm}
-                className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1A0505]"
+                disabled={isMismatch}
+                title={isMismatch ? "Deposits blocked due to network mismatch" : undefined}
+                className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1A0505]"
               >
                 Confirm deposit
               </button>
