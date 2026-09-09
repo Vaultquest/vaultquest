@@ -1,11 +1,12 @@
 import type { FC } from "react";
 import { getAssetDisplayName } from "../../lib/assets";
-import { EXPECTED_NETWORK } from "../../lib/wallets";
+import { EXPECTED_NETWORK, type NetworkType } from "../../lib/wallets";
 import { useStore } from "@nanostores/react";
-import { connectedNetwork } from "../../core/store.js";
+import { connectedNetwork, isNetworkMismatch as isNetworkMismatchStore, networkReadiness as networkReadinessStore } from "../../core/store.js";
 import { useState, useCallback } from "react";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import Modal from "../../components/Modal";
+import NetworkMismatchBanner from "../../components/NetworkMismatchBanner";
 import type { PoolSummary, UserPosition } from "../contract/types";
 import { formatAmount } from "../lib/format";
 
@@ -16,11 +17,26 @@ export interface WithdrawalModalProps {
   position: UserPosition;
   onWithdraw: (amount: string) => Promise<void>;
   onClose: () => void;
+  isNetworkMismatch?: boolean;
+  connectedNetwork?: NetworkType | null;
+  expectedNetwork?: NetworkType;
 }
 
-export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWithdraw, onClose }) => {
-   // Get the current network and asset display name
-  const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
+export const WithdrawalModal: FC<WithdrawalModalProps> = ({
+  pool,
+  position,
+  onWithdraw,
+  onClose,
+  isNetworkMismatch: propMismatch,
+  connectedNetwork: propNetwork,
+  expectedNetwork = EXPECTED_NETWORK,
+}) => {
+  const storeMismatch = useStore(isNetworkMismatchStore);
+  const storeReadiness = useStore(networkReadinessStore);
+  const storeNetwork = useStore(connectedNetwork);
+  const actualNetwork = propNetwork !== undefined ? propNetwork : storeNetwork;
+  const isMismatch = propMismatch ?? (storeMismatch || storeReadiness === "mismatch");
+  const network = actualNetwork || expectedNetwork;
   const assetDisplayName = pool ? getAssetDisplayName(network, pool.asset) : "";
   const [step, setStep] = useState<Step>("input");
   const [amount, setAmount] = useState("");
@@ -36,15 +52,23 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
   }, [depositedNum]);
 
   const handleContinue = useCallback(() => {
+    if (isMismatch) {
+      setError("Withdrawals are blocked due to network mismatch");
+      return;
+    }
     if (!isValid) {
       setError(amountNum <= 0 ? "Enter an amount" : "Amount exceeds deposited position");
       return;
     }
     setStep("review");
     setError(null);
-  }, [isValid, amountNum]);
+  }, [isMismatch, isValid, amountNum]);
 
   const handleConfirm = useCallback(async () => {
+    if (isMismatch) {
+      setError("Withdrawals are blocked due to network mismatch");
+      return;
+    }
     setStep("broadcasting");
     setError(null);
     try {
@@ -54,7 +78,7 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
       setError(err instanceof Error ? err.message : "Transaction failed");
       setStep("review");
     }
-  }, [amount, onWithdraw]);
+  }, [isMismatch, amount, onWithdraw]);
 
   return (
     <Modal
@@ -67,6 +91,14 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
         <p id="withdraw-modal-desc" className="sr-only">
           Enter the amount of assets you wish to withdraw from the prize pool.
         </p>
+
+        {isMismatch && (
+          <NetworkMismatchBanner
+            expectedNetwork={expectedNetwork}
+            connectedNetwork={actualNetwork}
+            actionName="Withdrawals"
+          />
+        )}
 
         {step === "input" && (
           <div className="space-y-4">
@@ -115,7 +147,8 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
             <button
               type="button"
               onClick={handleContinue}
-              disabled={!isValid}
+              disabled={!isValid || isMismatch}
+              title={isMismatch ? "Withdrawals blocked due to network mismatch" : undefined}
               className="w-full rounded-xl bg-red-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1A0505]"
             >
               Continue
@@ -159,7 +192,9 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
               <button
                 type="button"
                 onClick={handleConfirm}
-                className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1A0505]"
+                disabled={isMismatch}
+                title={isMismatch ? "Withdrawals blocked due to network mismatch" : undefined}
+                className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1A0505]"
               >
                 Confirm withdrawal
               </button>

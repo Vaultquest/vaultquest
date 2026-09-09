@@ -496,7 +496,9 @@ export default function VaultDetailPage({ params }) {
                         { duration: 5000 }
                       );
                     }}
-                    className="vq-btn-ghost w-full"
+                    disabled={readiness !== "verified"}
+                    title={readiness !== "verified" ? "Waiting on wallet network verification" : undefined}
+                    className="vq-btn-ghost w-full disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Withdraw Principal
                   </button>
