@@ -120,7 +120,7 @@ describe("SorobanVaultClient — submitAction", () => {
 
     await expect(
       client.submitAction("join", { poolId: "pool-1", walletAddress: ADDRESS, amount: "10" }),
-    ).rejects.toMatchObject({ kind: "wallet_disconnected" });
+    ).rejects.toMatchObject({ kind: "network_mismatch" });
     expect(server.getAccount).not.toHaveBeenCalled();
   });
 
