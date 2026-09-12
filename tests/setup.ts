@@ -1,5 +1,8 @@
 import '@testing-library/jest-dom';
+import React from 'react';
 import { vi } from 'vitest';
+
+global.React = React;
 
 // Mock matchMedia for components that use it (like Radix UI)
 Object.defineProperty(window, 'matchMedia', {

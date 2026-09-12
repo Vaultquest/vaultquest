@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
 import { PiggyBank, RotateCcw, Trophy, TrendingUp, Wallet } from "lucide-react";
@@ -147,34 +147,46 @@ function EmptyAccount() {
 }
 
 export default function AccountPage() {
-  const { isConnected: wagmiConnected } = useAccount();
+  const { isConnected: wagmiConnected, chain } = useAccount();
   const { openConnectModal } = useConnectModal();
-  const [isMockConnected, setIsMockConnected] = useState(false);
+  const [mockConnectedOverride, setMockConnectedOverride] = useState(false);
+  const [mockMismatchOverride, setMockMismatchOverride] = useState(false);
   const [wasDisconnected, setWasDisconnected] = useState(false);
-  const [isNetworkMismatch, setIsNetworkMismatch] = useState(false);
+
+  // Derive wallet provider network mismatch
+  const isWagmiMismatch = Boolean(wagmiConnected && chain?.unsupported);
+
+  // Isolate test URL parameter overrides behind explicit non-production environment boundary
+  const isDevOrTest = process.env.NODE_ENV !== "production";
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (isDevOrTest && typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       if (params.get("mockConnected") === "true") {
-        setIsMockConnected(true);
+        setMockConnectedOverride(true);
       }
       if (params.get("networkMismatch") === "true") {
-        setIsNetworkMismatch(true);
+        setMockMismatchOverride(true);
       }
     }
+  }, [isDevOrTest]);
 
-    if (!wagmiConnected && !isMockConnected && !isNetworkMismatch) {
+  const isMockConnected = isDevOrTest && mockConnectedOverride;
+  const isNetworkMismatch = (isDevOrTest && mockMismatchOverride) || isWagmiMismatch;
+  const isConnected = wagmiConnected || isMockConnected;
+
+  useEffect(() => {
+    if (!isConnected && !isNetworkMismatch) {
       setWasDisconnected(true);
     } else {
       setWasDisconnected(false);
     }
-  }, [wagmiConnected, isMockConnected, isNetworkMismatch]);
-
-  const isConnected = wagmiConnected || isMockConnected;
+  }, [isConnected, isNetworkMismatch]);
 
   const handleRetry = () => {
-    setIsNetworkMismatch(false);
+    if (isDevOrTest) {
+      setMockMismatchOverride(false);
+    }
     setWasDisconnected(false);
     openConnectModal?.();
   };
