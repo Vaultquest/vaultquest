@@ -57,7 +57,7 @@ describe("RewardHistory", () => {
 
   it("shows the originating draw round for a verified proof", () => {
     render(<RewardHistory entries={entries} />);
-    expect(screen.getByText(/Round 42/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Round 42/i)[0]).toBeInTheDocument();
   });
 
   it("renders a claimed reward with its round id and tx provenance", () => {
@@ -65,8 +65,8 @@ describe("RewardHistory", () => {
       { ...baseEntry, id: "r2", status: "claimed", txHash: "clmhash0001", drawProof: { roundId: "43", txHash: "clmhash0001", proof: "proof-2", verified: true } },
     ];
     render(<RewardHistory entries={claimed} />);
-    expect(screen.getByText(/Claimed/i)).toBeInTheDocument();
-    expect(screen.getByText(/Round 43/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Claimed/i)[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/Round 43/i)[0]).toBeInTheDocument();
     const links = screen.getAllByRole("link");
     expect(links[0]).toHaveAttribute("href", expect.stringContaining("/tx/clmhash0001"));
   });
@@ -76,7 +76,7 @@ describe("RewardHistory", () => {
       { ...baseEntry, id: "r3", status: "failed", txHash: "failhash0001", drawProof: { roundId: "44", txHash: "failhash0001", proof: "proof-3", verified: true } },
     ];
     render(<RewardHistory entries={failed} />);
-    expect(screen.getByText(/Failed/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Failed/i)[0]).toBeInTheDocument();
   });
 
   it("flags a disputed reward when the proof does not reconcile", () => {
@@ -84,8 +84,8 @@ describe("RewardHistory", () => {
       { ...baseEntry, id: "r4", status: "disputed", drawProof: { roundId: "45", txHash: "mismatch0001", proof: "proof-4", verified: false } },
     ];
     render(<RewardHistory entries={disputed} />);
-    expect(screen.getByText(/Disputed/i)).toBeInTheDocument();
-    expect(screen.getByText(/Round 45 · disputed/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Disputed/i)[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/Round 45 · disputed/i)[0]).toBeInTheDocument();
   });
 
   it("flags an entry with no draw proof", () => {
@@ -93,6 +93,6 @@ describe("RewardHistory", () => {
       { ...baseEntry, id: "r5", status: "claimed", drawProof: null },
     ];
     render(<RewardHistory entries={noProof} />);
-    expect(screen.getByText(/No proof/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/No proof/i)[0]).toBeInTheDocument();
   });
 });

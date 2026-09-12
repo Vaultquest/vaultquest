@@ -111,4 +111,32 @@ describe("DepositModal", () => {
       await Promise.resolve();
     });
   });
+
+  it("blocks deposit and displays mismatch guidance when network is mismatched, and recovers when corrected", async () => {
+    const user = userEvent.setup();
+    const onDeposit = vi.fn();
+    const { isNetworkMismatch, connectedNetwork, networkReadiness } = await import("../../core/store");
+
+    act(() => {
+      isNetworkMismatch.set(true);
+      connectedNetwork.set("public" as any);
+      networkReadiness.set("mismatch");
+    });
+
+    renderModal(onDeposit);
+
+    await user.type(screen.getByLabelText("Amount"), "10");
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    expect(screen.getByText(/Wallet network mismatch/i)).toBeInTheDocument();
+
+    // Recover: network corrected
+    act(() => {
+      isNetworkMismatch.set(false);
+      connectedNetwork.set("testnet");
+      networkReadiness.set("verified");
+    });
+
+    expect(screen.getByRole("button", { name: "Continue" })).not.toBeDisabled();
+    expect(screen.queryByText(/Wallet network mismatch/i)).not.toBeInTheDocument();
+  });
 });

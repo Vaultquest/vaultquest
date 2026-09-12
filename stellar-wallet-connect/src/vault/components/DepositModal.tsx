@@ -1,7 +1,7 @@
 import { getAssetDisplayName } from "../../lib/assets";
 import { EXPECTED_NETWORK } from "../../lib/wallets";
 import { useStore } from "@nanostores/react";
-import { connectedNetwork } from "../../core/store.js";
+import { connectedNetwork, isNetworkMismatch, networkReadiness } from "../../core/store.js";
 import type { FC } from "react";
 import { useState, useCallback } from "react";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
@@ -30,7 +30,11 @@ function estimateWinChanceChange(currentTvl: bigint, depositAmount: bigint, part
 }
 
 export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDeposit, onClose }) => {
-  const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
+  const rawNetwork = useStore(connectedNetwork);
+  const mismatchState = useStore(isNetworkMismatch);
+  const readinessState = useStore(networkReadiness);
+  const isWrongNetwork = mismatchState || readinessState === "mismatch" || (rawNetwork !== null && rawNetwork !== EXPECTED_NETWORK);
+  const network = rawNetwork || EXPECTED_NETWORK;
   const assetDisplayName = pool ? getAssetDisplayName(network, pool.asset) : "";
   // stellar.expert only serves "public" and "testnet" explorers; futurenet/standalone
   // deployments fall back to the testnet path rather than a broken mainnet link.
@@ -43,7 +47,7 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
   const balanceNum = parseFloat(walletBalance);
   const amountNum = parseFloat(amount) || 0;
   const exceedsBalance = amountNum > balanceNum - GAS_BUFFER;
-  const isValid = amountNum > 0 && !exceedsBalance;
+  const isValid = amountNum > 0 && !exceedsBalance && !isWrongNetwork;
 
   const handleQuickAmount = useCallback((pct: number) => {
     const raw = (balanceNum - GAS_BUFFER) * (pct / 100);
@@ -58,15 +62,23 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
   }, [balanceNum]);
 
   const handleContinue = useCallback(() => {
+    if (isWrongNetwork) {
+      setError(`Wallet network mismatch: connected to ${rawNetwork || "unknown"}, expected ${EXPECTED_NETWORK}. Please switch networks to continue.`);
+      return;
+    }
     if (!isValid) {
       setError(amountNum === 0 ? "Enter an amount" : "Insufficient balance (leave buffer for gas)");
       return;
     }
     setStep("review");
     setError(null);
-  }, [isValid, amountNum]);
+  }, [isValid, amountNum, isWrongNetwork, rawNetwork]);
 
   const handleConfirm = useCallback(async () => {
+    if (isWrongNetwork) {
+      setError(`Cannot broadcast deposit on wrong network (${rawNetwork || "unknown"} vs ${EXPECTED_NETWORK}).`);
+      return;
+    }
     setStep("broadcasting");
     setError(null);
     try {
@@ -77,7 +89,7 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
       setError(err instanceof Error ? err.message : "Transaction failed");
       setStep("review");
     }
-  }, [amount, onDeposit]);
+  }, [amount, onDeposit, isWrongNetwork, rawNetwork]);
 
   return (
     <Modal
@@ -121,6 +133,13 @@ export const DepositModal: FC<DepositModalProps> = ({ pool, walletBalance, onDep
               <div className="flex items-start gap-2 rounded-lg border border-amber-900/40 bg-amber-900/10 p-3 text-sm text-amber-300">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>Amount exceeds available balance (leave ~{GAS_BUFFER} {assetDisplayName} for gas)</span>
+              </div>
+            )}
+
+            {isWrongNetwork && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-900/40 bg-amber-900/10 p-3 text-sm text-amber-300">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>Wallet network mismatch: connected to {rawNetwork || "unknown"}, but {EXPECTED_NETWORK} is required. Please switch networks.</span>
               </div>
             )}
 

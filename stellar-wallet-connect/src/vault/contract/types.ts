@@ -122,6 +122,7 @@ export interface PoolActionResult {
 /** Failure modes the UI must recover from (mirrors real wallet/RPC errors). */
 export type ContractErrorKind =
   | "wallet_disconnected"
+  | "network_mismatch"
   | "signature_rejected"
   | "rpc_failure"
   | "contract_error"

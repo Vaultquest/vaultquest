@@ -24,8 +24,8 @@ import {
 } from "@stellar/stellar-sdk";
 import { StellarWalletsKit } from "@creit.tech/stellar-wallets-kit";
 import { getAssetDecimals } from "../../lib/assets";
-import type { NetworkType } from "../../lib/wallets";
-import { connectedPublicKey, networkReadiness } from "../../core/store";
+import { EXPECTED_NETWORK, type NetworkType } from "../../lib/wallets";
+import { connectedPublicKey, connectedNetwork, isNetworkMismatch, networkReadiness } from "../../core/store";
 import { VaultApiClient } from "../data/apiClient";
 import {
   ContractInterfaceError,
@@ -71,6 +71,13 @@ export function createSorobanVaultClient(config: SorobanVaultClientConfig): Vaul
     const address = connectedPublicKey.get();
     if (!address) {
       throw new ContractInterfaceError("wallet_disconnected", "Connect a wallet to continue.");
+    }
+    if (isNetworkMismatch.get() || networkReadiness.get() === "mismatch") {
+      const actual = connectedNetwork.get() || "unknown";
+      throw new ContractInterfaceError(
+        "network_mismatch",
+        `Wallet network mismatch: connected to ${actual}, but ${EXPECTED_NETWORK} is required. Please switch networks in your wallet to continue.`,
+      );
     }
     if (networkReadiness.get() !== "verified") {
       throw new ContractInterfaceError(
