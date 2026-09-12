@@ -1,9 +1,37 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Target, Edit3, Check, X, Plus, TrendingUp, PiggyBank } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import {
+  Target,
+  Edit3,
+  Check,
+  X,
+  Plus,
+  TrendingUp,
+  PiggyBank,
+  AlertTriangle,
+  Wallet,
+} from "lucide-react";
+import { connectedPublicKey } from "@vaultquest/stellar-wallet-connect/src/core/store";
+import { readGoal, writeGoal, removeGoal } from "@/lib/vault-goals-storage";
 
-const STORAGE_KEY = "vq_goal_tracker";
+/**
+ * Savings goal tracker (#119).
+ *
+ * The goal is stored per wallet. It used to live under one browser-wide key,
+ * so switching wallets showed - and let the next user edit - the previous
+ * wallet's target, and storage failures were swallowed so a goal that never
+ * persisted still looked saved.
+ */
+
+function useNanostoreValue(store, fallback) {
+  const [value, setValue] = useState(fallback);
+  useEffect(() => {
+    setValue(store.get());
+    return store.subscribe(setValue);
+  }, [store]);
+  return value;
+}
 
 const EMPTY_STATES = {
   noGoal: {
@@ -19,36 +47,53 @@ const EMPTY_STATES = {
 };
 
 export default function VaultGoalTracker({ currentBalance = 0 }) {
+  const wallet = useNanostoreValue(connectedPublicKey, "");
   const [goal, setGoal] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [mounted, setMounted] = useState(false);
+  const [storageError, setStorageError] = useState(null);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setGoal(parsed);
-        setEditValue(String(parsed.amount));
-      }
-    } catch {
-      // storage unavailable
+    setStorageError(null);
+    setIsEditing(false);
+    setEditValue("");
+
+    if (typeof window === "undefined" || !window.localStorage) {
+      setGoal(null);
+      setMounted(true);
+      return;
+    }
+
+    const result = readGoal(window.localStorage, wallet);
+    if (result.status === "ok") {
+      setGoal(result.goal);
+      setEditValue(String(result.goal.amount));
+    } else {
+      setGoal(null);
+      if (result.status === "error") setStorageError(result.reason);
     }
     setMounted(true);
-  }, []);
+  }, [wallet]);
 
-  const saveGoal = (amount) => {
-    const newGoal = { amount, createdAt: Date.now() };
-    setGoal(newGoal);
-    setEditValue(String(amount));
-    setIsEditing(false);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newGoal));
-    } catch {
-      // storage unavailable
-    }
-  };
+  const saveGoal = useCallback(
+    (amount) => {
+      if (typeof window === "undefined" || !window.localStorage) {
+        setStorageError("Browser storage is unavailable, so the goal was not saved.");
+        return;
+      }
+      const result = writeGoal(window.localStorage, wallet, amount);
+      if (!result.ok) {
+        setStorageError(result.reason);
+        return;
+      }
+      setStorageError(null);
+      setGoal(result.goal);
+      setEditValue(String(amount));
+      setIsEditing(false);
+    },
+    [wallet]
+  );
 
   const handleSetGoal = () => {
     const amount = parseFloat(editValue);
@@ -71,14 +116,17 @@ export default function VaultGoalTracker({ currentBalance = 0 }) {
   };
 
   const handleRemoveGoal = () => {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const result = removeGoal(window.localStorage, wallet);
+      if (!result.ok) {
+        setStorageError(result.reason);
+        return;
+      }
+    }
+    setStorageError(null);
     setGoal(null);
     setEditValue("");
     setIsEditing(false);
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // storage unavailable
-    }
   };
 
   if (!mounted) {
@@ -86,6 +134,36 @@ export default function VaultGoalTracker({ currentBalance = 0 }) {
       <section className="vq-glass-hover p-5 sm:p-6 animate-pulse">
         <div className="h-4 w-24 bg-vault-border/30 rounded" />
         <div className="mt-4 h-8 w-full bg-vault-border/20 rounded" />
+      </section>
+    );
+  }
+
+  const errorBanner = storageError ? (
+    <div
+      role="alert"
+      className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400"
+    >
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" aria-hidden="true" />
+      <span>{storageError}</span>
+    </div>
+  ) : null;
+
+  // No wallet: there is no owner for a goal, so nothing is read or written.
+  if (!wallet) {
+    return (
+      <section aria-label="Vault savings goal" className="vq-glass-hover p-5 sm:p-6">
+        <div className="flex flex-col items-center text-center py-6">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full border border-vault-border bg-vault-surface text-vault-muted">
+            <Wallet className="h-6 w-6" aria-hidden="true" />
+          </span>
+          <h3 className="mt-4 text-base font-semibold text-vault-text">
+            Connect a wallet to track a goal
+          </h3>
+          <p className="mt-1 text-sm text-vault-muted max-w-sm">
+            Savings goals are stored per wallet, so you only ever see your own.
+          </p>
+        </div>
+        {errorBanner}
       </section>
     );
   }
@@ -119,11 +197,7 @@ export default function VaultGoalTracker({ currentBalance = 0 }) {
                 />
               </div>
               <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleSetGoal}
-                  className="vq-btn-primary flex-1"
-                >
+                <button type="button" onClick={handleSetGoal} className="vq-btn-primary flex-1">
                   <Plus className="h-4 w-4" aria-hidden="true" />
                   Set Goal
                 </button>
@@ -148,6 +222,7 @@ export default function VaultGoalTracker({ currentBalance = 0 }) {
             </button>
           )}
         </div>
+        {errorBanner}
       </section>
     );
   }
@@ -192,19 +267,11 @@ export default function VaultGoalTracker({ currentBalance = 0 }) {
             />
           </div>
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleSetGoal}
-              className="vq-btn-primary flex-1"
-            >
+            <button type="button" onClick={handleSetGoal} className="vq-btn-primary flex-1">
               <Check className="h-4 w-4" aria-hidden="true" />
               Save
             </button>
-            <button
-              type="button"
-              onClick={handleCancel}
-              className="vq-btn-ghost px-3"
-            >
+            <button type="button" onClick={handleCancel} className="vq-btn-ghost px-3">
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
@@ -213,27 +280,34 @@ export default function VaultGoalTracker({ currentBalance = 0 }) {
         <div className="mt-4 space-y-3">
           <div className="flex items-center justify-between text-sm">
             <span className="text-vault-muted">
-              ${currentBalance.toLocaleString()} saved
+              {"$" + currentBalance.toLocaleString() + " saved"}
             </span>
             <span className="font-semibold text-vault-text">
-              ${goal.amount.toLocaleString()}
+              {"$" + goal.amount.toLocaleString()}
             </span>
           </div>
 
-          <div className="relative h-3 w-full overflow-hidden rounded-full bg-vault-border/30" role="progressbar" aria-valuenow={percentage} aria-valuemin={0} aria-valuemax={100} aria-label={`${percentage}% of savings goal reached`}>
+          <div
+            className="relative h-3 w-full overflow-hidden rounded-full bg-vault-border/30"
+            role="progressbar"
+            aria-valuenow={percentage}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={percentage + "% of savings goal reached"}
+          >
             <div
               className="h-full rounded-full bg-gradient-to-r from-red-500 to-red-400 transition-all duration-500 ease-out"
-              style={{ width: `${percentage}%` }}
+              style={{ width: percentage + "%" }}
             />
           </div>
 
           <div className="flex items-center justify-between text-xs">
-            <span className={`font-semibold ${percentage >= 100 ? "text-emerald-500" : "text-vault-accent"}`}>
-              {percentage >= 100 ? "Goal reached!" : `${percentage}% complete`}
+            <span className={"font-semibold " + (percentage >= 100 ? "text-emerald-500" : "text-vault-accent")}>
+              {percentage >= 100 ? "Goal reached!" : percentage + "% complete"}
             </span>
             {remaining > 0 && (
               <span className="text-vault-muted">
-                ${remaining.toLocaleString()} remaining
+                {"$" + remaining.toLocaleString() + " remaining"}
               </span>
             )}
           </div>
@@ -249,6 +323,8 @@ export default function VaultGoalTracker({ currentBalance = 0 }) {
           </div>
         </div>
       )}
+
+      {errorBanner}
     </section>
   );
 }
