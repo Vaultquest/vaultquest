@@ -6,6 +6,7 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle,
+  HelpCircle,
   XCircle,
   Clock,
   RefreshCw,
@@ -16,69 +17,75 @@ import {
   Shield,
 } from "lucide-react";
 import { getStatusBadgeStyles } from "@/lib/status-badge-styles";
+import { fetchVaultHealth, REFRESH_INTERVAL_MS } from "@/lib/vault-health";
 
-const VAULT_SERVICES = [
-  {
-    id: "vault-contracts",
-    name: "Vault Smart Contracts",
-    icon: Shield,
-    check: async () => {
-      const ok = Math.random() > 0.15;
-      if (ok) return { status: "operational" };
-      return { status: "degraded", message: "Contract response latency elevated" };
-    },
-  },
-  {
-    id: "prize-oracle",
-    name: "Prize Oracle",
-    icon: Database,
-    check: async () => {
-      const ok = Math.random() > 0.1;
-      if (ok) return { status: "operational" };
-      return { status: "operational", message: "Oracle sync delayed by 2s" };
-    },
-  },
-  {
-    id: "data-indexer",
-    name: "Data Indexer",
-    icon: Server,
-    check: async () => {
-      const ok = Math.random() > 0.2;
-      if (ok) return { status: "operational" };
-      return { status: "degraded", message: "Indexer 3 blocks behind" };
-    },
-  },
-];
+/**
+ * Aggregated vault health panel (#115).
+ *
+ * Every status comes from `/api/health/vault`, which aggregates real backend
+ * signals. This component used to pick each service state with
+ * Math.random(), so "Healthy" was a coin flip; when a signal cannot be trusted
+ * the row now reports Unknown instead of falling back to green.
+ */
 
-const STATUS_CONFIG = {
-  operational: {
-    icon: CheckCircle,
-    label: "Healthy",
-  },
-  degraded: {
-    icon: AlertTriangle,
-    label: "Degraded",
-  },
-  outage: {
-    icon: XCircle,
-    label: "Outage",
-  },
+const SERVICE_ICONS = {
+  "vault-contracts": Shield,
+  "prize-oracle": Database,
+  "data-indexer": Server,
 };
 
-function ServiceRow({ service, status }) {
-  const config = STATUS_CONFIG[status] || STATUS_CONFIG.operational;
+const STATUS_CONFIG = {
+  operational: { icon: CheckCircle, label: "Healthy" },
+  degraded: { icon: AlertTriangle, label: "Degraded" },
+  outage: { icon: XCircle, label: "Outage" },
+  unknown: { icon: HelpCircle, label: "Unknown" },
+};
+
+const OVERALL_HEADLINE = {
+  operational: "All vault services operational",
+  degraded: "Some services are experiencing issues",
+  outage: "Service outage detected",
+  unknown: "Service status unknown",
+};
+
+function formatAge(ageMs) {
+  if (typeof ageMs !== "number" || !Number.isFinite(ageMs)) return null;
+  const seconds = Math.floor(ageMs / 1000);
+  if (seconds < 60) return seconds + "s ago";
+  if (seconds < 3600) return Math.floor(seconds / 60) + "m ago";
+  return Math.floor(seconds / 3600) + "h ago";
+}
+
+function ServiceRow({ service, status, latencyMs, ageMs, stale, message }) {
+  const config = STATUS_CONFIG[status] || STATUS_CONFIG.unknown;
   const badgeStyles = getStatusBadgeStyles(status);
-  const Icon = service.icon;
+  const Icon = SERVICE_ICONS[service.id] || Activity;
   const StatusIcon = config.icon;
+  const age = formatAge(ageMs);
 
   return (
-    <div className="flex items-center justify-between rounded-lg border border-vault-border/50 bg-vault-surface/30 p-3">
-      <div className="flex items-center gap-3">
-        <Icon className="h-4 w-4 text-vault-muted" aria-hidden="true" />
-        <span className="text-sm font-medium text-vault-text">{service.name}</span>
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-vault-border/50 bg-vault-surface/30 p-3">
+      <div className="flex items-start gap-3">
+        <Icon className="mt-0.5 h-4 w-4 text-vault-muted" aria-hidden="true" />
+        <div>
+          <span className="text-sm font-medium text-vault-text">{service.name}</span>
+          {(message || age) && (
+            <p className="mt-0.5 text-xs text-vault-muted">
+              {message ? message : (stale ? "Showing a stale reading, " : "Updated ") + age}
+            </p>
+          )}
+          {typeof latencyMs === "number" && (
+            <p className="mt-0.5 text-xs text-vault-muted">
+              {"Latency " + latencyMs + "ms"}
+            </p>
+          )}
+        </div>
       </div>
       <span
-        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${badgeStyles.badge}`}
+        className={
+          "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium " +
+          badgeStyles.badge
+        }
       >
         <StatusIcon className="h-3.5 w-3.5" aria-hidden="true" />
         {config.label}
@@ -88,55 +95,43 @@ function ServiceRow({ service, status }) {
 }
 
 export default function VaultHealthStatusPanel() {
-  const [services, setServices] = useState(null);
+  const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
 
   const checkHealth = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    try {
-      const results = await Promise.all(
-        VAULT_SERVICES.map(async (svc) => {
-          const result = await svc.check();
-          return { id: svc.id, ...result };
-        })
-      );
-      setServices(results);
-      setLastUpdated(new Date());
-    } catch (err) {
-      setError("Unable to check vault service health.");
-    } finally {
-      setLoading(false);
-    }
+    const result = await fetchVaultHealth();
+    setHealth(result);
+    setLastUpdated(new Date());
+    setLoading(false);
   }, []);
 
   useEffect(() => {
     checkHealth();
-    const interval = setInterval(checkHealth, 30000);
+    const interval = setInterval(checkHealth, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [checkHealth]);
 
-  const overallStatus = (() => {
-    if (!services) return "loading";
-    if (services.some((s) => s.status === "outage")) return "outage";
-    if (services.some((s) => s.status === "degraded")) return "degraded";
-    return "operational";
-  })();
-
-  const statusConfig = STATUS_CONFIG[overallStatus] || STATUS_CONFIG.operational;
+  const overallStatus = health ? health.overall : "unknown";
+  const statusConfig = STATUS_CONFIG[overallStatus] || STATUS_CONFIG.unknown;
   const StatusIcon = statusConfig.icon;
   const statusBadgeStyles = getStatusBadgeStyles(overallStatus);
+  const headline =
+    loading && !health
+      ? "Checking service health..."
+      : OVERALL_HEADLINE[overallStatus] || OVERALL_HEADLINE.unknown;
 
   const formatTime = (date) => {
-    const now = new Date();
-    const diff = Math.floor((now - date) / 1000);
+    if (!date) return null;
+    const diff = Math.floor((new Date() - date) / 1000);
     if (diff < 60) return "Just now";
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 3600) return Math.floor(diff / 60) + "m ago";
     return date.toLocaleTimeString();
   };
+
+  const updatedLabel = formatTime(lastUpdated);
 
   return (
     <section aria-label="Vault health status" className="vq-glass-hover overflow-hidden">
@@ -144,7 +139,10 @@ export default function VaultHealthStatusPanel() {
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             <span
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${statusBadgeStyles.iconAvatar}`}
+              className={
+                "flex h-10 w-10 shrink-0 items-center justify-center rounded-full " +
+                statusBadgeStyles.iconAvatar
+              }
             >
               {loading ? (
                 <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />
@@ -156,15 +154,7 @@ export default function VaultHealthStatusPanel() {
               <h3 className="text-sm font-semibold text-vault-text">
                 Vault Network Status
               </h3>
-              <p className="text-xs text-vault-muted">
-                {loading
-                  ? "Checking service health..."
-                  : overallStatus === "operational"
-                    ? "All vault services operational"
-                    : overallStatus === "degraded"
-                      ? "Some services are experiencing issues"
-                      : "Service outage detected"}
-              </p>
+              <p className="text-xs text-vault-muted">{headline}</p>
             </div>
           </div>
 
@@ -177,7 +167,7 @@ export default function VaultHealthStatusPanel() {
               aria-label="Refresh status"
             >
               <RefreshCw
-                className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+                className={"h-4 w-4 " + (loading ? "animate-spin" : "")}
                 aria-hidden="true"
               />
             </button>
@@ -197,26 +187,29 @@ export default function VaultHealthStatusPanel() {
           </div>
         </div>
 
-        {lastUpdated && (
+        {updatedLabel && (
           <div className="mt-3 flex items-center gap-1.5 text-xs text-vault-muted">
             <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-            Last updated: {formatTime(lastUpdated)}
+            Last updated: {updatedLabel}
           </div>
         )}
 
-        {error && (
+        {health && health.reason && (
           <div
             role="alert"
-            className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-500"
+            className={
+              "mt-3 flex items-start gap-2 rounded-lg border p-3 text-sm " +
+              statusBadgeStyles.banner
+            }
           >
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
-            <span>{error}</span>
+            <span>{health.reason}</span>
           </div>
         )}
       </div>
 
       <AnimatePresence>
-        {expanded && services && (
+        {expanded && health && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
@@ -225,21 +218,22 @@ export default function VaultHealthStatusPanel() {
             className="overflow-hidden border-t border-vault-border/30"
           >
             <div className="space-y-2 p-5 sm:p-6 pt-0">
-              {services.length === 0 && (
+              {health.services.length === 0 && (
                 <p className="text-sm text-vault-muted text-center py-4">
                   No services to display.
                 </p>
               )}
-              {services.map((svc) => {
-                const serviceDef = VAULT_SERVICES.find((s) => s.id === svc.id);
-                return (
-                  <ServiceRow
-                    key={svc.id}
-                    service={serviceDef}
-                    status={svc.status}
-                  />
-                );
-              })}
+              {health.services.map((svc) => (
+                <ServiceRow
+                  key={svc.id}
+                  service={svc}
+                  status={svc.status}
+                  latencyMs={svc.latencyMs}
+                  ageMs={svc.ageMs}
+                  stale={svc.stale}
+                  message={svc.message}
+                />
+              ))}
             </div>
           </motion.div>
         )}

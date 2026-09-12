@@ -7,6 +7,11 @@ import {
   probeDependencies,
   type ProbeOptions,
 } from "../services/probeService.js";
+import {
+  defaultVaultHealthOptions,
+  getVaultHealth,
+  type VaultHealthOptions,
+} from "../services/vaultHealthService.js";
 import { ok } from "../responses.js";
 
 export const healthRoutes = (
@@ -14,7 +19,8 @@ export const healthRoutes = (
   prisma: PrismaClient,
   cacheService: CacheService | undefined,
   readinessOptions: ReadinessOptions = {},
-  probeOptions: ProbeOptions = {}
+  probeOptions: ProbeOptions = {},
+  vaultHealthOptions?: VaultHealthOptions
 ): FastifyPluginAsync =>
   async (app) => {
     // Cheap liveness: no dependency checks, so an orchestrator can use it to
@@ -67,5 +73,22 @@ export const healthRoutes = (
         "dependency probe completed"
       );
       return ok(probe);
+    });
+
+    // Aggregated vault health for the dashboard status panel (#115). Each row
+    // is backed by a real signal - the indexer checkpoint or a network probe -
+    // and a dependency without a trustworthy probe is reported as `unknown`
+    // rather than guessed. The panel used to derive every state from
+    // Math.random(), so this endpoint is the source of truth it reads instead.
+    app.get("/health/vault", async (req) => {
+      const options =
+        vaultHealthOptions ??
+        defaultVaultHealthOptions(() => svc.getIndexerHealth(), probeOptions);
+      const health = await getVaultHealth(options);
+      req.log.debug(
+        { event: "health_vault_check", status: health.status },
+        "vault health aggregation completed"
+      );
+      return ok(health);
     });
   };
