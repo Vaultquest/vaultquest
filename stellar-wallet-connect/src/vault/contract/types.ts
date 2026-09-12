@@ -125,7 +125,11 @@ export type ContractErrorKind =
   | "signature_rejected"
   | "rpc_failure"
   | "contract_error"
-  | "stale_data";
+  | "stale_data"
+  // #178: a wrong-network action is its own failure, not a disconnect.
+  | "network_mismatch"
+  | "network_unverified"
+  | "network_verification_failed";
 
 export class ContractInterfaceError extends Error {
   readonly kind: ContractErrorKind;
