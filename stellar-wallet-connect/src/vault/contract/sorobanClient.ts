@@ -25,7 +25,9 @@ import {
 import { StellarWalletsKit } from "@creit.tech/stellar-wallets-kit";
 import { getAssetDecimals } from "../../lib/assets";
 import type { NetworkType } from "../../lib/wallets";
-import { connectedPublicKey, networkReadiness } from "../../core/store";
+import { connectedPublicKey, connectedNetwork, networkReadiness } from "../../core/store";
+import { evaluateNetworkGate, type NetworkReadiness } from "../../core/networkGuard";
+import { EXPECTED_NETWORK } from "../../lib/wallets";
 import { VaultApiClient } from "../data/apiClient";
 import {
   ContractInterfaceError,
@@ -67,18 +69,22 @@ export function createSorobanVaultClient(config: SorobanVaultClientConfig): Vaul
   const pollIntervalMs = config.pollIntervalMs ?? 1_500;
   const pollTimeoutMs = config.pollTimeoutMs ?? 30_000;
 
+  // Single gate for every state-changing action (#178): deposit (join/drip),
+  // withdraw and claim all pass through here, so a wrong-network wallet is
+  // stopped before a transaction is built, and the user is told which two
+  // networks disagree instead of being told to reconnect a working wallet.
   const requireConnected = (): string => {
     const address = connectedPublicKey.get();
-    if (!address) {
-      throw new ContractInterfaceError("wallet_disconnected", "Connect a wallet to continue.");
+    const gate = evaluateNetworkGate({
+      publicKey: address,
+      readiness: networkReadiness.get() as NetworkReadiness,
+      connectedNetwork: connectedNetwork.get(),
+      expectedNetwork: EXPECTED_NETWORK,
+    });
+    if (!gate.allowed) {
+      throw new ContractInterfaceError(gate.code, gate.message);
     }
-    if (networkReadiness.get() !== "verified") {
-      throw new ContractInterfaceError(
-        "wallet_disconnected",
-        "Wallet network could not be verified. Reconnect and try again.",
-      );
-    }
-    return address;
+    return address as string;
   };
 
   async function readUserBalance(depositor: string): Promise<bigint> {
