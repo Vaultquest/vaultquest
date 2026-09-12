@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowUpRight, RefreshCw, ShieldAlert } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Activity, ArrowUpRight, Clock, Database, RefreshCw, ShieldAlert } from "lucide-react";
+import { DEFAULT_RPC, getHorizonUrl, readStoredRpc } from "@/lib/customRpc";
 
-const PRIORITY_TIERS = [
+export const PRIORITY_TIERS = [
   {
     key: "low",
     label: "Low",
@@ -27,66 +28,18 @@ const PRIORITY_TIERS = [
   },
 ];
 
-const NETWORKS = {
-  avalanche: {
-    key: "avalanche",
-    label: "Avalanche C-Chain",
-    nativeToken: "AVAX",
-    usdRate: 36,
-    gasLimit: 180000n,
-    fallbackGasPrice: 25_000_000_000n,
-    fetcher: async () => {
-      const response = await fetch("https://api.avax.network/ext/bc/C/rpc", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "eth_gasPrice",
-          params: [],
-        }),
-      });
+const STELLAR_CONFIG = {
+  nativeToken: "XLM",
+  usdRate: 0.13,
+  fallbackBaseFee: 100,
+  minBaseFee: 100,
+};
 
-      if (!response.ok) {
-        throw new Error("Unable to fetch Avalanche gas price");
-      }
-
-      const data = await response.json();
-      const gasPrice = typeof data?.result === "string" ? BigInt(data.result) : null;
-
-      return {
-        gasPrice: gasPrice ?? NETWORKS.avalanche.fallbackGasPrice,
-      };
-    },
-  },
-  stellar: {
-    key: "stellar",
-    label: "Stellar Horizon",
-    nativeToken: "XLM",
-    usdRate: 0.13,
-    gasLimit: 1n,
-    fallbackGasPrice: 100n,
-    fetcher: async () => {
-      const response = await fetch("https://horizon.stellar.org/fee_stats", {
-        headers: {
-          accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error("Unable to fetch Stellar fee stats");
-      }
-
-      const data = await response.json();
-      const gasPrice = Number(data?.last_ledger_base_fee ?? 100);
-
-      return {
-        gasPrice: BigInt(gasPrice),
-      };
-    },
-  },
+const AVALANCHE_CONFIG = {
+  nativeToken: "AVAX",
+  usdRate: 36,
+  gasLimit: 180000n,
+  fallbackGasPrice: 25_000_000_000n,
 };
 
 function formatUsd(value) {
@@ -99,7 +52,7 @@ function formatUsd(value) {
 
 function formatToken(value, token) {
   const precision = token === "XLM" ? 6 : value < 1 ? 5 : 4;
-  return `${value.toFixed(precision)} ${token}`;
+  return `${Number(value || 0).toFixed(precision)} ${token}`;
 }
 
 function weiToToken(wei, token) {
@@ -107,69 +60,130 @@ function weiToToken(wei, token) {
   return Number(wei) / divisor;
 }
 
-function createPayload(network, tier, gasPrice) {
-  if (network.key === "avalanche") {
-    const tierGasPrice = BigInt(Math.max(1, Math.round(Number(gasPrice) * tier.multiplier)));
-    const maxPriorityFeePerGas = BigInt(Math.max(1, Math.round(Number(gasPrice) * 0.12 * tier.multiplier)));
-
-    return {
-      type: "evm",
-      chain: network.label,
-      priority: tier.key,
-      gasLimit: network.gasLimit.toString(),
-      maxFeePerGas: tierGasPrice.toString(),
-      maxPriorityFeePerGas: maxPriorityFeePerGas.toString(),
-    };
-  }
-
-  const feeStroops = Math.max(1, Math.round(Number(gasPrice) * tier.multiplier));
-  return {
-    type: "stellar",
-    chain: network.label,
-    priority: tier.key,
-    feeStroops,
-    feeBid: `${(feeStroops / 1e7).toFixed(6)} ${network.nativeToken}`,
-  };
-}
-
-export default function GasPrioritySelector({ nativeBalance = 0, onChange }) {
-  const [networkKey, setNetworkKey] = useState("avalanche");
+export default function GasPrioritySelector({
+  network = "stellar",
+  networkType = "testnet",
+  nativeBalance = 0,
+  customHorizonUrl,
+  isUnsupported = false,
+  simulationResourceFee = 0,
+  onChange,
+}) {
   const [priorityKey, setPriorityKey] = useState("medium");
-  const [gasPrice, setGasPrice] = useState(null);
+  const [feeData, setFeeData] = useState({
+    baseFee: STELLAR_CONFIG.fallbackBaseFee,
+    sourceLedger: null,
+    gasPrice: AVALANCHE_CONFIG.fallbackGasPrice,
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
-  const network = NETWORKS[networkKey];
+  const isStellar = network === "stellar";
   const tier = PRIORITY_TIERS.find((item) => item.key === priorityKey) ?? PRIORITY_TIERS[1];
+
+  // Resolve active Horizon endpoint for Stellar queries
+  const resolvedHorizonUrl = useMemo(() => {
+    if (!isStellar) return null;
+    if (customHorizonUrl) return customHorizonUrl.replace(/\/+$/, "");
+    try {
+      const stored = readStoredRpc()?.horizon;
+      if (stored && stored !== DEFAULT_RPC.horizon) {
+        return stored.replace(/\/+$/, "");
+      }
+    } catch {
+      // Fall through to network default
+    }
+    return networkType === "mainnet"
+      ? "https://horizon.stellar.org"
+      : "https://horizon-testnet.stellar.org";
+  }, [customHorizonUrl, isStellar, networkType]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadFees() {
+      if (isUnsupported) {
+        setIsLoading(false);
+        setError("Unsupported network");
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
 
-      try {
-        const result = await network.fetcher();
-        if (cancelled) {
-          return;
-        }
+      if (isStellar) {
+        try {
+          const endpoint = `${resolvedHorizonUrl}/fee_stats`;
+          const response = await fetch(endpoint, {
+            headers: { accept: "application/json" },
+          });
 
-        setGasPrice(result.gasPrice ?? network.fallbackGasPrice);
-        setUpdatedAt(new Date());
-      } catch (fetchError) {
-        if (cancelled) {
-          return;
-        }
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} from Horizon fee_stats`);
+          }
 
-        setGasPrice(network.fallbackGasPrice);
-        setError(fetchError instanceof Error ? fetchError.message : "Fee lookup failed");
-        setUpdatedAt(new Date());
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
+          const data = await response.json();
+          if (cancelled) return;
+
+          const rawBaseFee = Number(data?.last_ledger_base_fee);
+          const baseFee = isNaN(rawBaseFee) || rawBaseFee <= 0 ? STELLAR_CONFIG.fallbackBaseFee : rawBaseFee;
+          const sourceLedger = data?.last_ledger != null ? String(data.last_ledger) : null;
+
+          setFeeData((prev) => ({
+            ...prev,
+            baseFee,
+            sourceLedger,
+          }));
+          setUpdatedAt(new Date());
+        } catch (fetchError) {
+          if (cancelled) return;
+          setFeeData((prev) => ({
+            ...prev,
+            baseFee: STELLAR_CONFIG.fallbackBaseFee,
+            sourceLedger: null,
+          }));
+          setError(fetchError instanceof Error ? fetchError.message : "Fee stats lookup failed");
+          setUpdatedAt(new Date());
+        } finally {
+          if (!cancelled) setIsLoading(false);
+        }
+      } else {
+        // Independent Avalanche fee fetcher (EVM non-goal)
+        try {
+          const response = await fetch("https://api.avax.network/ext/bc/C/rpc", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "eth_gasPrice",
+              params: [],
+            }),
+          });
+
+          if (!response.ok) throw new Error("Unable to fetch Avalanche gas price");
+
+          const data = await response.json();
+          if (cancelled) return;
+
+          const gasPrice = typeof data?.result === "string" ? BigInt(data.result) : null;
+          setFeeData((prev) => ({
+            ...prev,
+            gasPrice: gasPrice ?? AVALANCHE_CONFIG.fallbackGasPrice,
+          }));
+          setUpdatedAt(new Date());
+        } catch (fetchError) {
+          if (cancelled) return;
+          setFeeData((prev) => ({
+            ...prev,
+            gasPrice: AVALANCHE_CONFIG.fallbackGasPrice,
+          }));
+          setError(fetchError instanceof Error ? fetchError.message : "Gas price lookup failed");
+          setUpdatedAt(new Date());
+        } finally {
+          if (!cancelled) setIsLoading(false);
         }
       }
     }
@@ -179,94 +193,184 @@ export default function GasPrioritySelector({ nativeBalance = 0, onChange }) {
     return () => {
       cancelled = true;
     };
-  }, [network, refreshTick]);
+  }, [isStellar, isUnsupported, refreshTick, resolvedHorizonUrl]);
+
+  const isStale = Boolean(error) || (isStellar && !feeData.sourceLedger);
 
   const feeSummary = useMemo(() => {
-    const currentGasPrice = gasPrice ?? network.fallbackGasPrice;
-    const adjustedGasPrice = BigInt(Math.max(1, Math.round(Number(currentGasPrice) * tier.multiplier)));
-    const estimatedNative = weiToToken(adjustedGasPrice * network.gasLimit, network.nativeToken);
-    const estimatedUsd = estimatedNative * network.usdRate;
+    if (isStellar) {
+      const baseFeeStroops = Math.max(
+        STELLAR_CONFIG.minBaseFee,
+        Math.round(feeData.baseFee * tier.multiplier)
+      );
+      const resourceFeeStroops = Math.max(0, Math.round(Number(simulationResourceFee) || 0));
+      const totalStroops = baseFeeStroops + resourceFeeStroops;
+      const estimatedNative = totalStroops / 1e7;
+      const estimatedUsd = estimatedNative * STELLAR_CONFIG.usdRate;
+
+      const payload = {
+        type: "stellar",
+        chain: "Stellar",
+        network: networkType,
+        priority: tier.key,
+        baseFeeStroops,
+        resourceFeeStroops,
+        feeStroops: totalStroops,
+        feeBid: `${(totalStroops / 1e7).toFixed(6)} XLM`,
+        sourceLedger: feeData.sourceLedger ?? "fallback",
+        freshness: updatedAt ? updatedAt.toISOString() : null,
+        isStale,
+        unsupported: isUnsupported,
+      };
+
+      return {
+        estimatedNative,
+        estimatedUsd,
+        feeStroops: totalStroops,
+        payload,
+      };
+    }
+
+    // EVM Avalanche fallback path
+    const currentGasPrice = feeData.gasPrice ?? AVALANCHE_CONFIG.fallbackGasPrice;
+    const adjustedGasPrice = BigInt(
+      Math.max(1, Math.round(Number(currentGasPrice) * tier.multiplier))
+    );
+    const estimatedNative = weiToToken(
+      adjustedGasPrice * AVALANCHE_CONFIG.gasLimit,
+      AVALANCHE_CONFIG.nativeToken
+    );
+    const estimatedUsd = estimatedNative * AVALANCHE_CONFIG.usdRate;
+
+    const maxPriorityFeePerGas = BigInt(
+      Math.max(1, Math.round(Number(currentGasPrice) * 0.12 * tier.multiplier))
+    );
+
+    const payload = {
+      type: "evm",
+      chain: "Avalanche C-Chain",
+      priority: tier.key,
+      gasLimit: AVALANCHE_CONFIG.gasLimit.toString(),
+      maxFeePerGas: adjustedGasPrice.toString(),
+      maxPriorityFeePerGas: maxPriorityFeePerGas.toString(),
+      unsupported: isUnsupported,
+    };
 
     return {
       estimatedNative,
       estimatedUsd,
-      payload: createPayload(network, tier, currentGasPrice),
+      payload,
     };
-  }, [gasPrice, network, tier]);
+  }, [
+    feeData.baseFee,
+    feeData.gasPrice,
+    feeData.sourceLedger,
+    isStellar,
+    isStale,
+    isUnsupported,
+    networkType,
+    simulationResourceFee,
+    tier,
+    updatedAt,
+  ]);
 
   useEffect(() => {
     onChange?.({
-      network,
+      network: isStellar ? "Stellar" : "Avalanche",
+      networkType,
       tier,
       estimatedNative: feeSummary.estimatedNative,
       estimatedUsd: feeSummary.estimatedUsd,
       payload: feeSummary.payload,
+      sourceLedger: isStellar ? feeData.sourceLedger : null,
+      freshness: updatedAt ? updatedAt.toISOString() : null,
+      isStale,
+      isUnsupported,
     });
-  }, [feeSummary, network, onChange, tier]);
+  }, [
+    feeData.sourceLedger,
+    feeSummary,
+    isStellar,
+    isStale,
+    isUnsupported,
+    networkType,
+    onChange,
+    tier,
+    updatedAt,
+  ]);
 
+  const nativeToken = isStellar ? STELLAR_CONFIG.nativeToken : AVALANCHE_CONFIG.nativeToken;
   const nativeBalanceValue = Number(nativeBalance) || 0;
   const hasEnoughBalance = nativeBalanceValue >= feeSummary.estimatedNative;
 
   return (
-    <section className="vq-glass-hover p-5 sm:p-6">
+    <section className="vq-glass-hover p-5 sm:p-6" data-testid="gas-priority-selector">
       <div className="flex flex-col gap-3 border-b border-vault-border/40 pb-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.24em] text-vault-muted">
-            Gas priority
+            {isStellar ? "Stellar Transaction Fee" : "Gas Priority"}
           </p>
           <h2 className="mt-1 text-xl font-semibold text-vault-text">
-            Real-time fee selector
+            {isStellar ? "Stellar fee selector" : "Real-time fee selector"}
           </h2>
         </div>
         <button
           type="button"
           onClick={() => setRefreshTick((value) => value + 1)}
-          className="vq-btn-ghost self-start sm:self-auto"
+          disabled={isLoading || isUnsupported}
+          className="vq-btn-ghost self-start sm:self-auto disabled:opacity-50"
+          data-testid="refresh-fees-btn"
         >
           <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
           Refresh rates
         </button>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        {Object.values(NETWORKS).map((item) => {
-          const selected = item.key === networkKey;
+      {isUnsupported && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="mt-5 flex items-start gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200"
+          data-testid="unsupported-network-alert"
+        >
+          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" aria-hidden="true" />
+          <div>
+            <p className="font-semibold text-vault-text">Unsupported Network</p>
+            <p className="mt-1 text-vault-muted">
+              Connected wallet is on an unsupported network. Please switch to Stellar{" "}
+              {networkType === "mainnet" ? "Mainnet" : "Testnet"} in your wallet to estimate transaction fees.
+            </p>
+          </div>
+        </div>
+      )}
 
-          return (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => setNetworkKey(item.key)}
-              className={`rounded-2xl border p-4 text-left transition-all duration-300 ${
-                selected
-                  ? "border-red-400/40 bg-red-500/10 ring-2 ring-red-400/15"
-                  : "border-vault-border/50 bg-vault-surface/25 hover:border-red-400/25 hover:bg-vault-surface/40"
-              }`}
-            >
-              <p className="text-sm font-semibold text-vault-text">{item.label}</p>
-              <p className="mt-1 text-xs text-vault-muted">
-                Native token: {item.nativeToken}
-              </p>
-            </button>
-          );
-        })}
-      </div>
-
+      {/* Priority Tiers */}
       <div className="mt-5 grid gap-3 md:grid-cols-3">
         {PRIORITY_TIERS.map((item) => {
           const selected = item.key === priorityKey;
-          const adjustedGasPrice = gasPrice ?? network.fallbackGasPrice;
-          const estimatedNative = weiToToken(
-            BigInt(Math.max(1, Math.round(Number(adjustedGasPrice) * item.multiplier))) * network.gasLimit,
-            network.nativeToken,
-          );
+          let estimatedTierNative = 0;
+
+          if (isStellar) {
+            const tierBase = Math.max(STELLAR_CONFIG.minBaseFee, Math.round(feeData.baseFee * item.multiplier));
+            const tierTotal = tierBase + Math.max(0, Math.round(Number(simulationResourceFee) || 0));
+            estimatedTierNative = tierTotal / 1e7;
+          } else {
+            const adjustedGasPrice = feeData.gasPrice ?? AVALANCHE_CONFIG.fallbackGasPrice;
+            estimatedTierNative = weiToToken(
+              BigInt(Math.max(1, Math.round(Number(adjustedGasPrice) * item.multiplier))) *
+                AVALANCHE_CONFIG.gasLimit,
+              AVALANCHE_CONFIG.nativeToken
+            );
+          }
 
           return (
             <button
               key={item.key}
               type="button"
               onClick={() => setPriorityKey(item.key)}
-              className={`rounded-2xl border p-4 text-left transition-all duration-300 ${
+              disabled={isUnsupported}
+              data-testid={`tier-btn-${item.key}`}
+              className={`rounded-2xl border p-4 text-left transition-all duration-300 disabled:opacity-50 ${
                 selected
                   ? "border-red-400/40 bg-red-500/10 shadow-glow"
                   : "border-vault-border/50 bg-vault-surface/25 hover:border-red-400/25 hover:bg-vault-surface/40"
@@ -288,7 +392,7 @@ export default function GasPrioritySelector({ nativeBalance = 0, onChange }) {
               <div className="mt-4 flex items-center justify-between text-sm">
                 <span className="text-vault-muted">Estimated fee</span>
                 <span className="font-semibold text-vault-text">
-                  {formatToken(estimatedNative, network.nativeToken)}
+                  {formatToken(estimatedTierNative, nativeToken)}
                 </span>
               </div>
             </button>
@@ -296,34 +400,60 @@ export default function GasPrioritySelector({ nativeBalance = 0, onChange }) {
         })}
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        <div className="vq-glass p-4">
+      {/* Metrics Grid */}
+      <div className="mt-5 grid gap-3 sm:grid-cols-4">
+        <div className="vq-glass p-4" data-testid="metric-base-fee">
           <p className="text-xs font-medium uppercase tracking-wide text-vault-muted">
-            Live rate
+            {isStellar ? "Base fee" : "Live rate"}
           </p>
           <p className="mt-1 text-lg font-semibold text-vault-text">
-            {isLoading ? "Updating…" : gasPrice ? `${network.nativeToken} fee data` : "Waiting…"}
+            {isLoading
+              ? "Updating…"
+              : isStellar
+              ? `${Number(feeData.baseFee).toLocaleString()} stroops`
+              : `${Number(feeData.gasPrice).toLocaleString()} wei`}
           </p>
           <p className="mt-1 text-xs text-vault-muted">
-            {network.key === "avalanche"
-              ? `${Number(gasPrice ?? network.fallbackGasPrice).toLocaleString()} wei`
-              : `${Number(gasPrice ?? network.fallbackGasPrice).toLocaleString()} stroops`}
+            {isStellar ? "Stellar network base rate" : "EVM gas price"}
           </p>
         </div>
 
-        <div className="vq-glass p-4">
+        <div className="vq-glass p-4" data-testid="metric-ledger">
           <p className="text-xs font-medium uppercase tracking-wide text-vault-muted">
-            Estimated cost
+            {isStellar ? "Source ledger" : "Chain ID"}
           </p>
-          <p className="mt-1 text-lg font-semibold text-vault-text">
-            {formatToken(feeSummary.estimatedNative, network.nativeToken)}
+          <p className="mt-1 text-lg font-semibold text-vault-text truncate">
+            {isStellar
+              ? feeData.sourceLedger
+                ? `#${feeData.sourceLedger}`
+                : "Fallback ledger"
+              : "43114"}
           </p>
           <p className="mt-1 text-xs text-vault-muted">
-            {formatUsd(feeSummary.estimatedUsd)}
+            {isStellar ? (feeData.sourceLedger ? "Verified on-chain" : "Default baseline") : "Avalanche"}
           </p>
         </div>
 
-        <div className={`vq-glass p-4 ${hasEnoughBalance ? "" : "border-amber-400/30 bg-amber-500/10"}`}>
+        <div className="vq-glass p-4" data-testid="metric-freshness">
+          <p className="text-xs font-medium uppercase tracking-wide text-vault-muted">
+            Freshness
+          </p>
+          <p className="mt-1 text-lg font-semibold text-vault-text flex items-center gap-1.5">
+            {isStale ? (
+              <span className="text-amber-500 dark:text-amber-400">Stale data</span>
+            ) : (
+              <span className="text-emerald-500 dark:text-emerald-400">Live rate</span>
+            )}
+          </p>
+          <p className="mt-1 text-xs text-vault-muted truncate">
+            {updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : "Not updated"}
+          </p>
+        </div>
+
+        <div
+          className={`vq-glass p-4 ${hasEnoughBalance ? "" : "border-amber-400/30 bg-amber-500/10"}`}
+          data-testid="metric-balance"
+        >
           <p className="text-xs font-medium uppercase tracking-wide text-vault-muted">
             Balance check
           </p>
@@ -332,53 +462,63 @@ export default function GasPrioritySelector({ nativeBalance = 0, onChange }) {
               hasEnoughBalance ? "text-emerald-500 dark:text-emerald-400" : "text-amber-500 dark:text-amber-400"
             }`}
           >
-            {hasEnoughBalance ? "Ready to send" : "Gas balance low"}
+            {hasEnoughBalance ? "Ready to send" : "Fee balance low"}
           </p>
           <p className="mt-1 text-xs text-vault-muted">
-            Wallet: {formatToken(nativeBalanceValue, network.nativeToken)}
+            Wallet: {formatToken(nativeBalanceValue, nativeToken)}
           </p>
         </div>
       </div>
 
-      {(error || !hasEnoughBalance) && (
+      {/* Warnings & Alerts */}
+      {(error || isStale || !hasEnoughBalance) && !isUnsupported && (
         <div
           role="alert"
           aria-live="assertive"
+          data-testid="fee-warning-alert"
           className={`mt-5 flex items-start gap-3 rounded-2xl border p-4 text-sm ${
-            error
+            error || isStale
               ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
               : "border-amber-400/35 bg-amber-500/10 text-amber-100"
           }`}
         >
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" aria-hidden="true" />
           <div>
-            <p className="font-semibold text-vault-text">Network warning</p>
+            <p className="font-semibold text-vault-text">
+              {error ? "Network Warning" : isStale ? "Stale Fee Notice" : "Insufficient Balance"}
+            </p>
             <p className="mt-1 text-vault-muted">
               {error
-                ? `${error}. Showing fallback fee data while the RPC request is unavailable.`
-                : `Your wallet balance is below the estimated ${network.nativeToken} gas cost for the ${tier.label.toLowerCase()} priority tier.`}
+                ? `${error}. Using fallback fee stats (${STELLAR_CONFIG.fallbackBaseFee} stroops).`
+                : isStale
+                ? "Fee stats could not be refreshed from live ledger. Using baseline fallback fee."
+                : `Your wallet balance (${formatToken(nativeBalanceValue, nativeToken)}) is below the estimated fee for the ${tier.label.toLowerCase()} priority tier.`}
             </p>
           </div>
         </div>
       )}
 
+      {/* Execution Payload Section */}
       <div className="mt-5 grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="rounded-2xl border border-vault-border/50 bg-vault-surface/25 p-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-vault-text">
             <Activity className="h-4 w-4 text-red-500" aria-hidden="true" />
             Execution payload
           </div>
-          <pre className="mt-3 overflow-auto rounded-xl bg-slate-950/80 p-4 text-xs leading-relaxed text-slate-200">
+          <pre
+            className="mt-3 overflow-auto rounded-xl bg-slate-950/80 p-4 text-xs leading-relaxed text-slate-200"
+            data-testid="execution-payload-preview"
+          >
             {JSON.stringify(
               {
-                network: network.label,
+                network: isStellar ? "Stellar" : "Avalanche",
                 priority: tier.label,
-                estimatedNative: formatToken(feeSummary.estimatedNative, network.nativeToken),
+                estimatedNative: formatToken(feeSummary.estimatedNative, nativeToken),
                 estimatedUsd: formatUsd(feeSummary.estimatedUsd),
                 payload: feeSummary.payload,
               },
               null,
-              2,
+              2
             )}
           </pre>
         </div>

@@ -192,7 +192,7 @@ export default function VaultsPage() {
           />
 
           <div className="grid gap-6 xl:grid-cols-2">
-            <GasPrioritySelector nativeBalance={0.0018} />
+            <GasPrioritySelector network="stellar" nativeBalance={50.0} />
 
             <section className="vq-glass-hover flex flex-col justify-between p-6">
               <div>

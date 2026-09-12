@@ -17,10 +17,10 @@ export default function DepositModal({ isOpen, onClose }) {
   const [feeState, setFeeState] = useState(null);
   const [error, setError] = useState(null);
   
-  const walletBalance = 0.0018; // AVAX
+  const walletBalance = 50.0; // XLM
   const usdcBalance = 1000.00; // Demo USDC balance
   
-  const gasBudget = useMemo(() => feeState?.estimatedNative ?? 0, [feeState]);
+  const gasBudget = useMemo(() => feeState?.estimatedNative ?? 0.00001, [feeState]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -87,7 +87,7 @@ export default function DepositModal({ isOpen, onClose }) {
       return;
     }
     if (isGasShort) {
-      setError("Insufficient AVAX to cover the estimated gas fee.");
+      setError("Insufficient XLM to cover the estimated network fee.");
       return;
     }
     setError(null);
@@ -102,17 +102,16 @@ export default function DepositModal({ isOpen, onClose }) {
         <div className="flex flex-col gap-1">
           <span>Deposit of {amount} USDC confirmed!</span>
           <a 
-            href={`https://etherscan.io/tx/0x7d3a95bfce31a20df949e29ae8f9`} 
+            href={`https://stellar.expert/explorer/testnet/tx/f8a3c45719bc42de7b6fa2079da6069904948a313e2f5b4cb8e5e69d7494f6bb`} 
             target="_blank" 
             rel="noreferrer" 
             className="text-xs underline text-emerald-500 hover:text-emerald-400"
           >
-            View transaction
+            View on Stellar Expert
           </a>
-        </div>,
-        { duration: 5000 }
+        </div>
       );
-    }, 1800);
+    }, 1500);
   };
 
   const getHeaderTitle = () => {
@@ -248,7 +247,7 @@ export default function DepositModal({ isOpen, onClose }) {
                 )}
               </section>
 
-              <GasPrioritySelector nativeBalance={walletBalance} onChange={setFeeState} />
+              <GasPrioritySelector network="stellar" nativeBalance={walletBalance} onChange={setFeeState} />
             </div>
           )}
 
@@ -273,13 +272,13 @@ export default function DepositModal({ isOpen, onClose }) {
                   <span className="font-medium text-vault-text">USDC Stable Pool</span>
                 </div>
                 <div className="flex justify-between py-2.5">
-                  <span className="text-vault-muted">Estimated Gas Fee</span>
-                  <span className="font-medium text-vault-text">{formatToken(gasBudget, "AVAX")}</span>
+                  <span className="text-vault-muted">Estimated Network Fee</span>
+                  <span className="font-medium text-vault-text">{formatToken(gasBudget, "XLM")}</span>
                 </div>
                 <div className="flex justify-between py-2.5 pt-4">
                   <span className="font-semibold text-vault-text">Deduction Summary</span>
                   <span className="font-bold text-red-500">
-                    {amount} USDC + {formatToken(gasBudget, "AVAX")}
+                    {amount} USDC + {formatToken(gasBudget, "XLM")}
                   </span>
                 </div>
               </div>
@@ -319,7 +318,14 @@ export default function DepositModal({ isOpen, onClose }) {
                 </div>
                 <div className="flex justify-between py-2">
                   <span className="text-vault-muted">Transaction Hash</span>
-                  <span className="text-vault-text font-mono">0x7d3a95bfce31a20df949e29a...e8f9</span>
+                  <a
+                    href="https://stellar.expert/explorer/testnet/tx/f8a3c45719bc42de7b6fa2079da6069904948a313e2f5b4cb8e5e69d7494f6bb"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-500 font-mono underline hover:text-emerald-400"
+                  >
+                    f8a3c457...494f6bb
+                  </a>
                 </div>
                 <div className="flex justify-between py-2">
                   <span className="text-vault-muted">Status</span>
