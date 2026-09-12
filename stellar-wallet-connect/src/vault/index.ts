@@ -9,6 +9,21 @@ export { createMockVaultClient, SAMPLE_ADDRESS, type MockVaultConfig } from "./c
 export { createSorobanVaultClient, type SorobanVaultClientConfig } from "./contract/sorobanClient";
 export * from "./lib/format";
 export { attachDrawProof, flagDisputed, hasProof, verifyDrawProof, type DrawProofIndexerSnapshot, type ProofVerdict } from "./lib/draw-proof";
+export {
+  canCancelWithdrawal,
+  describeWithdrawalState,
+  isTerminalWithdrawal,
+  nextWithdrawalState,
+  orderQueue,
+  projectLiquidity,
+  queuePosition,
+  TERMINAL_WITHDRAWAL_STATES,
+  type WithdrawalEvent,
+  type WithdrawalRequest,
+  type WithdrawalState,
+  type WithdrawalStatus,
+  type WithdrawalTransition,
+} from "./lib/withdrawalQueue";
 export { useAccountView, usePoolAction, usePoolDetail, usePoolDiscovery, usePrizeViews, useRewardHistory, useSavedPools, useTransactionStatus, invalidatePoolActionQueries, useActivityExport, type AccountView, type AsyncResource, type PoolActionFlow, type PoolDetailResource, type PoolDiscoveryOptions, type PrizeViewsOptions, type SavedPoolsResource, type TransactionStatusResource, type ExportFormat, type ExportState, type ActivityExportOptions, type ActivityExportResult } from "./hooks";
 export { VaultApiClient, isTerminalTransaction, type TransactionStatus, type TransactionStatusView } from "./data/apiClient";
 export { createVaultDataConfig, defaultVaultDataConfig, type VaultDataConfig, type VaultFeatureFlags, type VaultNetworkConfig } from "./data/config";
