@@ -12,6 +12,7 @@ This document provides a detailed explanation of how yield is calculated and dis
 6. [Precision and Rounding](#precision-and-rounding)
 7. [Examples](#examples)
 8. [Edge Cases](#edge-cases)
+9. [Withdrawal Queue](#withdrawal-queue)
 
 ## Overview
 
@@ -563,6 +564,86 @@ Error: 0.0001 USDC (0.1%)
 
 **Mitigation:** Accumulate dust in protocol reserve for future rounds.
 
+## Withdrawal Queue
+
+A withdrawal can be delayed when a strategy cannot return liquidity
+immediately. The protocol models that wait explicitly so a user can tell
+"queued" apart from "stuck", and so an unsettled request can be cancelled
+before it is served.
+
+Code: `stellar-wallet-connect/src/vault/lib/withdrawalQueue.ts`
+Tests: `stellar-wallet-connect/src/vault/lib/withdrawalQueue.test.ts`
+
+### States
+
+| State | Meaning | Terminal | Cancellable |
+|---|---|---|---|
+| `requested` | The user asked; the request is being recorded. | no | yes |
+| `queued` | Waiting on liquidity; has a queue position. | no | yes |
+| `ready` | Liquidity is available and the request can be served. | no | yes |
+| `fulfilled` | Funds moved on-chain; carries the transaction hash. | **yes** | no |
+| `failed` | Nothing moved; carries the failure reason. | **yes** | no |
+| `cancelled` | The user withdrew the request before it was served. | **yes** | no |
+
+### Transitions
+
+```
+requested --queue---------------> queued
+requested --liquidity_available--> ready
+queued    --liquidity_available--> ready
+queued    --fulfill(txHash)------> fulfilled
+ready     --fulfill(txHash)------> fulfilled
+any open  --fail(reason)---------> failed
+any open  --cancel---------------> cancelled
+```
+
+Three rules matter more than the diagram:
+
+1. **A terminal state never changes again.** A late callback cannot resurrect a
+   cancelled request or fulfil one twice; the transition is rejected with
+   `already_terminal`.
+2. **Liquidity may arrive before the queue step.** A request that is still
+   `requested` when liquidity appears goes straight to `ready` rather than being
+   forced through `queued`.
+3. **Cancellation stops at fulfilment.** It is allowed while `requested`,
+   `queued` or `ready`, and never after, because the funds may already be moving.
+
+### Queue order and liquidity projection
+
+The queue is FIFO: earliest `requestedAt` first, ties broken by request id so
+the order is stable across renders. `projectLiquidity(requests, available)`
+walks that order and marks requests that fit within the available liquidity as
+`ready`, leaving the rest waiting. A request that does not fit does not stop later
+smaller requests from being classified correctly, and terminal requests never
+consume liquidity.
+
+Amounts are decimal strings at stroop precision and are compared as `BigInt`,
+so a queue worth `0.1 + 0.2` is `0.3000000` and not a floating-point
+approximation.
+
+### What the user sees
+
+`describeWithdrawalState` maps a request to a label, a tone, a sentence and
+whether there is anything to do:
+
+| State | Label | Told |
+|---|---|---|
+| `queued` | Queued | their position in the queue |
+| `ready` | Ready to withdraw | that they can complete it now |
+| `fulfilled` | Withdrawn | the transaction hash |
+| `failed` | Failed | why it failed |
+| `cancelled` | Cancelled | that nothing moved on-chain |
+
+An unrecognised state renders as **Unknown** rather than being mapped onto the
+nearest known label: guessing here would tell a user their funds are somewhere
+they are not.
+
+### Not covered here
+
+The contract-side queue implementation, and the timing policy for how long a
+strategy may hold liquidity before a request is escalated. This section and the
+module define the vocabulary and rules a UI can rely on; both are deliberately
+free of network and React state so they can be tested directly.
 ## Summary
 
 The VaultQuest yield distribution mechanism is mathematically sound and economically fair:
