@@ -1,44 +1,39 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { AlertCircle, RefreshCw, Trash2, XCircle, CheckCircle2, Clock, Wallet } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  RefreshCw,
+  Trash2,
+  Wallet,
+  XCircle,
+  ShieldAlert,
+} from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { connectedPublicKey } from "@vaultquest/stellar-wallet-connect/src/core/store";
+import { useAccount } from "wagmi";
+import {
+  cancelLedgerAction,
+  checkActionLateConfirmation,
+  fetchAuthoritativeQueueActions,
+  getActionErrorMessage,
+  isActionRetryable,
+  saveLocalQueueActions,
+} from "@/lib/actionRetryQueue";
 
-const MOCK_FAILED_ACTIONS = [
-  {
-    id: "act-001",
-    type: "deposit",
-    pool: "USDC Yield Pool",
-    amount: "500",
-    status: "failed",
-    errorCode: "WALLET_REJECTED",
-    errorDetail: "User rejected the transaction in wallet",
-    createdAt: new Date(Date.now() - 600000).toISOString(),
-    retryCount: 0,
-  },
-  {
-    id: "act-002",
-    type: "withdraw",
-    pool: "ETH Staking Vault",
-    amount: "250",
-    status: "failed",
-    errorCode: "NETWORK_ERROR",
-    errorDetail: "Network timeout, please try again",
-    createdAt: new Date(Date.now() - 1800000).toISOString(),
-    retryCount: 1,
-  },
-  {
-    id: "act-003",
-    type: "deposit",
-    pool: "BTC Synthetic Pool",
-    amount: "1000",
-    status: "pending",
-    errorCode: null,
-    errorDetail: null,
-    createdAt: new Date(Date.now() - 300000).toISOString(),
-    retryCount: 0,
-  },
-];
+function useNanostoreValue(store, fallback) {
+  const [value, setValue] = useState(fallback);
+
+  useEffect(() => {
+    if (!store || typeof store.get !== "function") return;
+    setValue(store.get());
+    return store.subscribe(setValue);
+  }, [store]);
+
+  return value;
+}
 
 function StatusBadge({ status }) {
   if (status === "failed") {
@@ -46,6 +41,22 @@ function StatusBadge({ status }) {
       <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2.5 py-0.5 text-xs font-medium text-red-600 dark:text-red-400">
         <AlertCircle className="h-3 w-3" aria-hidden="true" />
         Failed
+      </span>
+    );
+  }
+  if (status === "confirmed") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+        Confirmed
+      </span>
+    );
+  }
+  if (status === "submitted") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">
+        <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" />
+        Submitted
       </span>
     );
   }
@@ -58,7 +69,7 @@ function StatusBadge({ status }) {
 }
 
 function ActionIcon({ type }) {
-  if (type === "deposit") {
+  if (type === "deposit" || type === "join" || type === "drip") {
     return (
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-vault-border bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
         <Wallet className="h-5 w-5" aria-hidden="true" />
@@ -73,21 +84,17 @@ function ActionIcon({ type }) {
 }
 
 function ErrorMessage({ errorCode, errorDetail }) {
-  const messages = {
-    WALLET_REJECTED: "Transaction was rejected in your wallet. Click retry to try again.",
-    NETWORK_ERROR: "A network error occurred. Check your connection and retry.",
-    INSUFFICIENT_FEES: "Not enough XLM for transaction fees. Fund your wallet and retry.",
-    TIMEOUT: "The transaction timed out. Please retry.",
-  };
+  const message = getActionErrorMessage(errorCode, errorDetail);
 
   return (
     <p className="mt-1 text-xs text-red-500 dark:text-red-400">
-      {messages[errorCode] || errorDetail || "An unknown error occurred."}
+      {message}
     </p>
   );
 }
 
 function formatTimeAgo(dateStr) {
+  if (!dateStr) return "recently";
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";
@@ -97,32 +104,14 @@ function formatTimeAgo(dateStr) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function QueuedAction({ action, onRetry, onCancel, onDismiss }) {
-  const [isProcessing, setIsProcessing] = useState(false);
-
-  const handleRetry = useCallback(async () => {
-    setIsProcessing(true);
-    try {
-      await onRetry(action);
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [action, onRetry]);
-
-  const handleCancel = useCallback(async () => {
-    setIsProcessing(true);
-    try {
-      await onCancel(action);
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [action, onCancel]);
-
-  const isPending = action.status === "pending";
+function QueuedAction({ action, isProcessing, onRetry, onCancel, onDismiss }) {
+  const isPending = action.status === "pending" || action.status === "submitted";
+  const retryable = isActionRetryable(action);
 
   return (
     <motion.li
       layout
+      data-testid={`action-row-${action.id}`}
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0, marginBottom: 0 }}
@@ -132,14 +121,23 @@ function QueuedAction({ action, onRetry, onCancel, onDismiss }) {
       <ActionIcon type={action.type} />
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <p className="font-medium capitalize text-vault-text">
             {action.type}
           </p>
           <StatusBadge status={action.status} />
           {action.retryCount > 0 && (
-            <span className="text-xs text-vault-muted">
+            <span className="text-xs text-vault-muted font-mono">
               Retry #{action.retryCount}
+            </span>
+          )}
+          {!retryable && action.status === "failed" && (
+            <span
+              data-testid="non-retryable-badge"
+              className="inline-flex items-center gap-1 rounded bg-vault-border px-1.5 py-0.5 text-[10px] text-vault-muted"
+            >
+              <ShieldAlert className="h-3 w-3" />
+              Non-retryable
             </span>
           )}
         </div>
@@ -149,33 +147,32 @@ function QueuedAction({ action, onRetry, onCancel, onDismiss }) {
         <p className="text-xs text-vault-muted">
           {formatTimeAgo(action.createdAt)}
         </p>
-        {action.errorCode && (
+        {(action.errorCode || action.errorDetail) && (
           <ErrorMessage errorCode={action.errorCode} errorDetail={action.errorDetail} />
         )}
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        {!isPending && (
+        {retryable && (
           <button
             type="button"
-            onClick={handleRetry}
+            onClick={() => onRetry(action)}
             disabled={isProcessing}
-            className="vq-btn-primary px-3 py-1.5 text-xs"
+            className="vq-btn-primary px-3 py-1.5 text-xs transition-all disabled:opacity-50"
             aria-label={`Retry ${action.type}`}
           >
-            {isProcessing ? (
-              <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${isProcessing ? "animate-spin" : ""}`}
+              aria-hidden="true"
+            />
             Retry
           </button>
         )}
         <button
           type="button"
-          onClick={isPending ? handleCancel : handleDismiss}
+          onClick={() => (isPending ? onCancel(action) : onDismiss(action))}
           disabled={isProcessing}
-          className="vq-btn-ghost px-2 py-1.5 text-xs"
+          className="vq-btn-ghost px-2 py-1.5 text-xs transition-all disabled:opacity-50"
           aria-label={isPending ? "Cancel pending action" : "Dismiss"}
         >
           {isPending ? (
@@ -190,48 +187,207 @@ function QueuedAction({ action, onRetry, onCancel, onDismiss }) {
   );
 }
 
-export default function VaultRetryQueue() {
-  const [actions, setActions] = useState(MOCK_FAILED_ACTIONS);
-  const [collapsed, setCollapsed] = useState(false);
+export default function VaultRetryQueue({
+  walletAddress: propWalletAddress,
+  initialActions,
+  onRetryAction,
+  onCancelAction,
+} = {}) {
+  const stellarAddress = useNanostoreValue(connectedPublicKey, "");
+  const { address: wagmiAddress } = useAccount();
 
-  const failedCount = actions.filter((a) => a.status === "failed").length;
-  const pendingCount = actions.filter((a) => a.status === "pending").length;
+  const activeWallet = propWalletAddress || stellarAddress || wagmiAddress || "";
+
+  const [actions, setActions] = useState(() => initialActions || []);
+  const [processingMap, setProcessingMap] = useState({});
+  const [collapsed, setCollapsed] = useState(false);
+  const [notification, setNotification] = useState(null);
+
+  // Sync actions when active wallet changes or initialActions provided
+  useEffect(() => {
+    if (initialActions) {
+      setActions(initialActions);
+      return;
+    }
+
+    if (!activeWallet) {
+      setActions([]);
+      return;
+    }
+
+    let cancelled = false;
+    fetchAuthoritativeQueueActions(activeWallet).then((loaded) => {
+      if (!cancelled) {
+        setActions(loaded);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWallet, initialActions]);
+
+  const failedCount = useMemo(
+    () => actions.filter((a) => a.status === "failed").length,
+    [actions]
+  );
+  const pendingCount = useMemo(
+    () => actions.filter((a) => a.status === "pending" || a.status === "submitted").length,
+    [actions]
+  );
   const totalCount = actions.length;
 
-  const handleRetry = useCallback(async (action) => {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setActions((prev) =>
-      prev.map((a) =>
-        a.id === action.id
-          ? { ...a, status: "pending", errorCode: null, errorDetail: null, retryCount: a.retryCount + 1 }
-          : a
-      )
-    );
-  }, []);
+  const handleRetry = useCallback(
+    async (action) => {
+      if (!action?.id) return;
 
-  const handleCancel = useCallback(async (action) => {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    setActions((prev) =>
-      prev.map((a) =>
-        a.id === action.id
-          ? { ...a, status: "failed", errorCode: "WALLET_REJECTED", errorDetail: "Action was cancelled by user" }
-          : a
-      )
-    );
-  }, []);
+      // Duplicate click prevention: check if already processing this action
+      if (processingMap[action.id]) return;
 
-  const handleDismiss = useCallback((action) => {
-    setActions((prev) => prev.filter((a) => a.id !== action.id));
-  }, []);
+      // Lock the action immediately
+      setProcessingMap((prev) => ({ ...prev, [action.id]: true }));
+
+      try {
+        // Late confirmation check: verify against authoritative ledger first
+        const latestOnChain = await checkActionLateConfirmation(action.id);
+        if (latestOnChain && latestOnChain.status === "confirmed") {
+          setActions((prev) =>
+            prev.map((a) =>
+              a.id === action.id ? { ...a, status: "confirmed", errorCode: null, errorDetail: null } : a
+            )
+          );
+          setNotification({
+            type: "success",
+            message: `Action ${action.id} was already confirmed on-chain. Replay prevented.`,
+          });
+          return;
+        }
+
+        // Enforce retry policy: do not replay non-retryable actions
+        if (!isActionRetryable(action)) {
+          setNotification({
+            type: "error",
+            message: "This action cannot be replayed.",
+          });
+          return;
+        }
+
+        // Execute retry handler or fallback attempt
+        if (onRetryAction) {
+          const result = await onRetryAction(action);
+          if (result) {
+            setActions((prev) =>
+              prev.map((a) => (a.id === action.id ? { ...a, ...result } : a))
+            );
+          }
+        } else {
+          // Stateful retry attempt: transition to pending with incremented retry count
+          setActions((prev) =>
+            prev.map((a) =>
+              a.id === action.id
+                ? {
+                    ...a,
+                    status: "pending",
+                    errorCode: null,
+                    errorDetail: null,
+                    retryCount: (a.retryCount || 0) + 1,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : a
+            )
+          );
+        }
+      } catch (err) {
+        // Capture failure in action record statefully
+        const code = err?.code || "NETWORK_ERROR";
+        const message = err?.message || "Retry attempt failed";
+        setActions((prev) =>
+          prev.map((a) =>
+            a.id === action.id
+              ? {
+                  ...a,
+                  status: "failed",
+                  errorCode: code,
+                  errorDetail: message,
+                  retryCount: (a.retryCount || 0) + 1,
+                  updatedAt: new Date().toISOString(),
+                }
+              : a
+          )
+        );
+      } finally {
+        setProcessingMap((prev) => ({ ...prev, [action.id]: false }));
+      }
+    },
+    [onRetryAction, processingMap]
+  );
+
+  const handleCancel = useCallback(
+    async (action) => {
+      if (!action?.id) return;
+      if (processingMap[action.id]) return;
+
+      setProcessingMap((prev) => ({ ...prev, [action.id]: true }));
+
+      try {
+        if (onCancelAction) {
+          await onCancelAction(action);
+        } else {
+          await cancelLedgerAction(action.id, activeWallet);
+        }
+
+        // Update statefully and idempotently: cancelled action is marked or removed
+        setActions((prev) =>
+          prev.map((a) =>
+            a.id === action.id
+              ? {
+                  ...a,
+                  status: "failed",
+                  errorCode: "USER_CANCELLED",
+                  errorDetail: "Action was cancelled by user",
+                  updatedAt: new Date().toISOString(),
+                }
+              : a
+          )
+        );
+      } catch (err) {
+        console.warn("Cancellation failed:", err);
+      } finally {
+        setProcessingMap((prev) => ({ ...prev, [action.id]: false }));
+      }
+    },
+    [activeWallet, onCancelAction, processingMap]
+  );
+
+  const handleDismiss = useCallback(
+    (action) => {
+      setActions((prev) => {
+        const next = prev.filter((a) => a.id !== action.id);
+        if (activeWallet) {
+          saveLocalQueueActions(activeWallet, next);
+        }
+        return next;
+      });
+    },
+    [activeWallet]
+  );
 
   const handleClearAll = useCallback(() => {
     setActions([]);
-  }, []);
+    if (activeWallet) {
+      saveLocalQueueActions(activeWallet, []);
+    }
+  }, [activeWallet]);
 
+  // Hide the retry queue completely if there are no pending or failed actions
   if (totalCount === 0) return null;
 
   return (
-    <section className="vq-glass p-4 sm:p-6" role="region" aria-label="Transaction retry queue">
+    <section
+      className="vq-glass p-4 sm:p-6 rounded-2xl border border-vault-border"
+      role="region"
+      aria-label="Transaction retry queue"
+    >
       <div className="flex items-center justify-between">
         <button
           type="button"
@@ -262,7 +418,11 @@ export default function VaultRetryQueue() {
 
         <div className="flex items-center gap-2">
           {totalCount > 1 && (
-            <button type="button" onClick={handleClearAll} className="vq-btn-ghost px-3 py-1.5 text-xs">
+            <button
+              type="button"
+              onClick={handleClearAll}
+              className="vq-btn-ghost px-3 py-1.5 text-xs"
+            >
               <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
               Clear all
             </button>
@@ -277,6 +437,24 @@ export default function VaultRetryQueue() {
           </button>
         </div>
       </div>
+
+      {notification && (
+        <div
+          role="alert"
+          className={`mt-3 flex items-center gap-2 text-xs rounded-lg p-2.5 border ${
+            notification.type === "success"
+              ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+              : "text-rose-400 bg-rose-500/10 border-rose-500/20"
+          }`}
+        >
+          {notification.type === "success" ? (
+            <CheckCircle2 size={14} className="shrink-0" />
+          ) : (
+            <AlertCircle size={14} className="shrink-0" />
+          )}
+          <span>{notification.message}</span>
+        </div>
+      )}
 
       <AnimatePresence>
         {!collapsed && (
@@ -299,6 +477,7 @@ export default function VaultRetryQueue() {
                   <QueuedAction
                     key={action.id}
                     action={action}
+                    isProcessing={Boolean(processingMap[action.id])}
                     onRetry={handleRetry}
                     onCancel={handleCancel}
                     onDismiss={handleDismiss}
