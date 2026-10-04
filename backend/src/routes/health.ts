@@ -8,13 +8,21 @@ import {
   type ProbeOptions,
 } from "../services/probeService.js";
 import { ok } from "../responses.js";
+import type { IndexerHealthMeta } from "../services/indexerConfig.js";
+
+const EMPTY_INDEXER_META: IndexerHealthMeta = {
+  configured: false,
+  contract_ids: [],
+  network: null
+};
 
 export const healthRoutes = (
   svc: LedgerService,
   prisma: PrismaClient,
   cacheService: CacheService | undefined,
   readinessOptions: ReadinessOptions = {},
-  probeOptions: ProbeOptions = {}
+  probeOptions: ProbeOptions = {},
+  indexerMeta: IndexerHealthMeta = EMPTY_INDEXER_META
 ): FastifyPluginAsync =>
   async (app) => {
     // Cheap liveness: no dependency checks, so an orchestrator can use it to
@@ -31,11 +39,17 @@ export const healthRoutes = (
 
     app.get("/health/indexer", async (req) => {
       const health = await svc.getIndexerHealth();
+      const payload = {
+        ...health,
+        configured: indexerMeta.configured,
+        contract_ids: indexerMeta.contract_ids,
+        network: indexerMeta.network
+      };
       req.log.debug(
-        { event: "health_indexer_check", status: health.status },
+        { event: "health_indexer_check", status: payload.status, configured: payload.configured },
         "indexer health checked"
       );
-      return ok(health);
+      return ok(payload);
     });
 
     // Readiness: gates whether this instance should receive traffic. Checks

@@ -43,6 +43,18 @@ The backend uses `backend/.env.example` as its canonical example. These values a
 
 `INTERNAL_SERVICE_SECRET` is now validated to reject placeholder text and must be a custom, strong secret at runtime.
 
+## Backend indexer configuration (issue #133)
+
+Optional in-process Stellar indexer. When `SOROBAN_RPC_URL` and `INDEXER_CONTRACT_IDS` are both set, startup StrKey-validates every contract ID and requires `SOROBAN_NETWORK_PASSPHRASE` to match Soroban RPC `getNetwork`. Invalid config exits before the worker starts.
+
+| Variable | Required when indexer enabled? | Description |
+|----------|--------------------------------|-------------|
+| `SOROBAN_RPC_URL` | Yes | Soroban RPC endpoint polled by the indexer daemon. |
+| `INDEXER_CONTRACT_IDS` | Yes | Comma-separated contract (`C…`) IDs. Malformed, account (`G…`), duplicate, or empty values fail startup. |
+| `SOROBAN_NETWORK_PASSPHRASE` | Yes | Expected network passphrase; must equal the RPC `getNetwork` passphrase. |
+
+Validated `contract_ids` and `network` appear on `GET /health/indexer`.
+
 ## Indexer integration
 
 The backend and any external indexer share the same authentication boundary:

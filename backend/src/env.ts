@@ -21,6 +21,13 @@ const schema = z.object({
   SOROBAN_RPC_URL: z.string().url().optional(),
   INDEXER_CONTRACT_IDS: z.string().optional(),
   /**
+   * Expected Stellar network passphrase for the configured Soroban RPC
+   * (issue #133). Required whenever the indexer is enabled; startup compares
+   * this value to `getNetwork` from SOROBAN_RPC_URL and refuses to start the
+   * worker on mismatch.
+   */
+  SOROBAN_NETWORK_PASSPHRASE: z.string().min(1).optional(),
+  /**
    * API key for external/third-party service endpoints (issue #273).
    * When set, all `/api/*` routes require `X-Api-Key: <value>`.
    * Leave unset in local development to skip enforcement.
@@ -171,6 +178,7 @@ export function getEnv(): Env {
       NODE_ENV: (process.env.NODE_ENV ?? "development") as Env["NODE_ENV"],
       SOROBAN_RPC_URL: process.env.SOROBAN_RPC_URL || undefined,
       INDEXER_CONTRACT_IDS: process.env.INDEXER_CONTRACT_IDS || undefined,
+      SOROBAN_NETWORK_PASSPHRASE: process.env.SOROBAN_NETWORK_PASSPHRASE || undefined,
       API_KEY: process.env.API_KEY || undefined,
       ALLOW_UNAUTHENTICATED_DEV_API:
         process.env.ALLOW_UNAUTHENTICATED_DEV_API === "true" ||

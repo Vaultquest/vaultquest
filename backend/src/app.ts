@@ -23,6 +23,7 @@ import { requestLogContext } from "./utils/logRedaction.js";
 import corsSecurity from "./middleware/corsSecurity.js";
 import type { Logger } from "pino";
 import type { CacheService } from "./services/cacheService.js";
+import type { IndexerHealthMeta } from "./services/indexerConfig.js";
 
 import { privacyRoutes } from "./routes/privacy.js";
 import { PrivacyEncryptionService } from "./services/privacy/privacyEncryptionService.js";
@@ -50,6 +51,11 @@ export type AppDeps = {
   privacyMasterKey?: string;
   /** Freshness window for signed export challenges (#10). Defaults to 5 minutes. */
   exportSignatureTtlMs?: number;
+  /**
+   * Validated indexer contract set + network identity (issue #133). Surfaced on
+   * `/health/indexer` so operators can confirm startup config without reading logs.
+   */
+  indexerMeta?: IndexerHealthMeta;
 };
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -148,7 +154,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.register(actionsRoutes(svc, apiKeyGuard, walletAuthGuard, serviceAuthGuard));
-  app.register(healthRoutes(svc, deps.prisma, deps.cacheService));
+  app.register(healthRoutes(svc, deps.prisma, deps.cacheService, {}, {}, deps.indexerMeta));
   app.register(savedPoolsRoutes(savedPoolsSvc, walletAuthGuard));
   app.register(profileRoutes(profileSvc, walletAuthGuard));
   app.register(internalRoutes(svc, deps.internalSecret));
