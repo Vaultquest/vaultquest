@@ -145,3 +145,11 @@ VaultQuest deployments are boundary-driven by configuration:
   boundaries.
 - [`backend/docs/ARCHITECTURE.md`](../backend/docs/ARCHITECTURE.md) — backend service layout
   and reconciliation details.
+
+## Chain fee adapters
+
+Stellar vault transaction paths use the Stellar fee adapter only (Horizon
+`fee_stats`, stroops, optional Soroban simulation resource fee). Avalanche wei
+and C-Chain RPC controls live on a separate adapter for a future independently
+routed product and must not appear in Stellar deposit/withdraw UI. See
+[`CHAIN_FEE_ADAPTERS.md`](./CHAIN_FEE_ADAPTERS.md).

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Check, Loader2, Server, X } from "lucide-react";
 import { avalanche, avalancheFuji } from "wagmi/chains";
 import {
@@ -12,14 +12,22 @@ import {
   writeStoredRpc,
 } from "@/lib/customRpc";
 
-const FIELDS = [
+/** Stellar Horizon overrides — validated/saved independently of Avalanche. */
+export const STELLAR_FIELDS = [
   {
     key: "horizon",
     label: "Stellar Horizon URL",
     placeholder: DEFAULT_RPC.horizon,
     hint: "Validated via Horizon root endpoint and must match the configured network passphrase.",
-    ping: pingHorizon,
+    ping: (url) => pingHorizon(url),
   },
+];
+
+/**
+ * Avalanche C-Chain / Fuji overrides — kept for a future independently routed
+ * Avalanche product. Never required to save Stellar Horizon settings (#123).
+ */
+export const AVALANCHE_FIELDS = [
   {
     key: "avalanche",
     label: "Avalanche C-Chain RPC",
@@ -36,8 +44,14 @@ const FIELDS = [
   },
 ];
 
+const TABS = [
+  { key: "stellar", label: "Stellar Horizon", fields: STELLAR_FIELDS },
+  { key: "avalanche", label: "Avalanche (separate)", fields: AVALANCHE_FIELDS },
+];
+
 /** @param {{ open: boolean, onClose: () => void }} props */
 export default function CustomRpcModal({ open, onClose }) {
+  const [activeTab, setActiveTab] = useState("stellar");
   const [values, setValues] = useState({ ...DEFAULT_RPC });
   const [status, setStatus] = useState(
     /** @type {Record<string, 'idle' | 'testing' | 'ok' | 'error'>} */ ({}),
@@ -52,6 +66,7 @@ export default function CustomRpcModal({ open, onClose }) {
     setStatus({});
     setErrors({});
     setDiagnostics("");
+    setActiveTab("stellar");
   }, [open]);
 
   const setField = useCallback((key, value) => {
@@ -64,48 +79,78 @@ export default function CustomRpcModal({ open, onClose }) {
     });
   }, []);
 
-  const testField = useCallback(async (field) => {
-    const url = values[field.key]?.trim();
-    if (!url) {
+  const testField = useCallback(
+    async (field) => {
+      const url = values[field.key]?.trim();
+      if (!url) {
+        setStatus((s) => ({ ...s, [field.key]: "error" }));
+        setErrors((e) => ({ ...e, [field.key]: "URL is required" }));
+        return false;
+      }
+      setStatus((s) => ({ ...s, [field.key]: "testing" }));
+      const result = await field.ping(url);
+      if (result.ok) {
+        setStatus((s) => ({ ...s, [field.key]: "ok" }));
+        setErrors((e) => {
+          const next = { ...e };
+          delete next[field.key];
+          return next;
+        });
+        return true;
+      }
       setStatus((s) => ({ ...s, [field.key]: "error" }));
-      setErrors((e) => ({ ...e, [field.key]: "URL is required" }));
+      setErrors((e) => ({ ...e, [field.key]: result.error ?? "Validation failed" }));
       return false;
-    }
-    setStatus((s) => ({ ...s, [field.key]: "testing" }));
-    const result = await field.ping(url);
-    if (result.ok) {
-      setStatus((s) => ({ ...s, [field.key]: "ok" }));
-      setErrors((e) => {
-        const next = { ...e };
-        delete next[field.key];
-        return next;
-      });
-      return true;
-    }
-    setStatus((s) => ({ ...s, [field.key]: "error" }));
-    setErrors((e) => ({ ...e, [field.key]: result.error ?? "Validation failed" }));
-    return false;
-  }, [values]);
+    },
+    [values],
+  );
+
+  const activeFields = TABS.find((tab) => tab.key === activeTab)?.fields ?? STELLAR_FIELDS;
 
   const handleSave = useCallback(async () => {
-    setDiagnostics("Running connection tests…");
-    const results = await Promise.all(FIELDS.map((f) => testField(f)));
+    setDiagnostics(
+      activeTab === "stellar"
+        ? "Validating Horizon…"
+        : "Validating Avalanche endpoints…",
+    );
+    const results = await Promise.all(activeFields.map((f) => testField(f)));
     if (!results.every(Boolean)) {
-      setDiagnostics("Fix failed endpoints before saving. Invalid URLs are rejected.");
+      setDiagnostics(
+        activeTab === "stellar"
+          ? "Fix the Horizon URL before saving. Avalanche endpoints are not required for Stellar."
+          : "Fix failed Avalanche endpoints before saving. Stellar Horizon settings are unchanged.",
+      );
       return;
     }
-    const stored = writeStoredRpc(values);
-    setDiagnostics("All endpoints validated. Custom RPC settings saved.");
+
+    const payload = {};
+    for (const field of activeFields) {
+      payload[field.key] = values[field.key];
+    }
+    const stored = writeStoredRpc(payload);
+    setDiagnostics(
+      activeTab === "stellar"
+        ? "Horizon validated and saved. Avalanche RPC settings were not modified."
+        : "Avalanche endpoints validated and saved. Stellar Horizon settings were not modified.",
+    );
     window.dispatchEvent(new CustomEvent(RPC_UPDATED_EVENT, { detail: stored }));
     onClose();
-  }, [onClose, testField, values]);
+  }, [activeFields, activeTab, onClose, testField, values]);
 
   const handleReset = useCallback(() => {
-    setValues({ ...DEFAULT_RPC });
+    const next = { ...values };
+    for (const field of activeFields) {
+      next[field.key] = DEFAULT_RPC[field.key];
+    }
+    setValues(next);
     setStatus({});
     setErrors({});
-    setDiagnostics("Reset to public defaults. Save to apply.");
-  }, []);
+    setDiagnostics(
+      activeTab === "stellar"
+        ? "Horizon reset to the public default. Save to apply. Avalanche settings unchanged."
+        : "Avalanche endpoints reset to public defaults. Save to apply. Horizon unchanged.",
+    );
+  }, [activeFields, activeTab, values]);
 
   if (!open) return null;
 
@@ -115,6 +160,7 @@ export default function CustomRpcModal({ open, onClose }) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="rpc-modal-title"
+      data-testid="custom-rpc-modal"
     >
       <button
         type="button"
@@ -125,19 +171,22 @@ export default function CustomRpcModal({ open, onClose }) {
       <div className="relative z-10 w-full max-w-lg rounded-2xl border border-vault-border bg-vault-bg p-6 shadow-glass">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 id="rpc-modal-title" className="flex items-center gap-2 text-lg font-semibold text-vault-text">
+            <h2
+              id="rpc-modal-title"
+              className="flex items-center gap-2 text-lg font-semibold text-vault-text"
+            >
               <Server className="h-5 w-5 text-red-500" aria-hidden="true" />
               Custom RPC settings
             </h2>
             <p className="mt-1 text-sm text-vault-muted">
-              Advanced: override Horizon and Avalanche nodes. Invalid endpoints fall back to defaults on
-              failure.
+              Chain adapters are separate: save Stellar Horizon without touching Avalanche
+              nodes (and the reverse).
             </p>
             <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-vault-muted">
-              A custom node can see every account address you look up and every transaction you submit
-              through it. Only use nodes you trust. Endpoints must use HTTPS (except localhost), cannot
-              embed credentials or point at private network addresses, and must report the expected
-              network before they are saved.
+              A custom node can see every account address you look up and every transaction you
+              submit through it. Only use nodes you trust. Endpoints must use HTTPS (except
+              localhost), cannot embed credentials or point at private network addresses, and
+              must report the expected network before they are saved.
             </p>
           </div>
           <button
@@ -150,8 +199,38 @@ export default function CustomRpcModal({ open, onClose }) {
           </button>
         </div>
 
-        <div className="mt-5 space-y-4">
-          {FIELDS.map((field) => (
+        <div
+          className="mt-5 flex gap-2 rounded-xl border border-vault-border bg-vault-surface/40 p-1"
+          role="tablist"
+          aria-label="RPC chain adapter"
+        >
+          {TABS.map((tab) => {
+            const selected = tab.key === activeTab;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                data-testid={`rpc-tab-${tab.key}`}
+                onClick={() => {
+                  setActiveTab(tab.key);
+                  setDiagnostics("");
+                }}
+                className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  selected
+                    ? "bg-red-500/15 text-red-500"
+                    : "text-vault-muted hover:text-vault-text"
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-5 space-y-4" role="tabpanel" data-testid={`rpc-panel-${activeTab}`}>
+          {activeFields.map((field) => (
             <div key={field.key}>
               <label htmlFor={`rpc-${field.key}`} className="text-sm font-medium text-vault-text">
                 {field.label}
@@ -167,6 +246,7 @@ export default function CustomRpcModal({ open, onClose }) {
                     className="w-full rounded-xl border border-vault-border bg-vault-surface py-2.5 pl-3 pr-10 text-sm text-vault-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
                     autoComplete="off"
                     spellCheck={false}
+                    data-testid={`rpc-input-${field.key}`}
                   />
                   <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
                     {status[field.key] === "testing" && (
@@ -181,6 +261,7 @@ export default function CustomRpcModal({ open, onClose }) {
                   type="button"
                   onClick={() => testField(field)}
                   disabled={status[field.key] === "testing"}
+                  data-testid={`rpc-test-${field.key}`}
                   className="shrink-0 rounded-xl border border-vault-border bg-vault-surface px-3 py-2 text-xs font-medium text-vault-text hover:border-red-400/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:opacity-50"
                 >
                   Test
@@ -201,17 +282,23 @@ export default function CustomRpcModal({ open, onClose }) {
             className="mt-4 rounded-lg border border-vault-border bg-vault-surface/80 px-3 py-2 text-xs text-vault-muted"
             role="status"
             aria-live="polite"
+            data-testid="rpc-diagnostics"
           >
             {diagnostics}
           </p>
         )}
 
         <div className="mt-6 flex flex-wrap gap-2">
-          <button type="button" onClick={handleSave} className="vq-btn-primary">
-            Save & apply
+          <button
+            type="button"
+            onClick={handleSave}
+            className="vq-btn-primary"
+            data-testid="rpc-save-btn"
+          >
+            Save {activeTab === "stellar" ? "Horizon" : "Avalanche"} settings
           </button>
           <button type="button" onClick={handleReset} className="vq-btn-ghost">
-            Reset defaults
+            Reset tab defaults
           </button>
           <button type="button" onClick={onClose} className="vq-btn-ghost">
             Cancel

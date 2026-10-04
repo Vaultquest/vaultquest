@@ -17,7 +17,7 @@ export default function DepositModal({ isOpen, onClose }) {
   const [feeState, setFeeState] = useState(null);
   const [error, setError] = useState(null);
   
-  const walletBalance = 0.0018; // AVAX
+  const walletBalance = 25.0; // XLM for Stellar fee coverage
   const usdcBalance = 1000.00; // Demo USDC balance
   
   const gasBudget = useMemo(() => feeState?.estimatedNative ?? 0, [feeState]);
@@ -87,7 +87,7 @@ export default function DepositModal({ isOpen, onClose }) {
       return;
     }
     if (isGasShort) {
-      setError("Insufficient AVAX to cover the estimated gas fee.");
+      setError("Insufficient XLM to cover the estimated network fee.");
       return;
     }
     setError(null);
@@ -102,12 +102,12 @@ export default function DepositModal({ isOpen, onClose }) {
         <div className="flex flex-col gap-1">
           <span>Deposit of {amount} USDC confirmed!</span>
           <a 
-            href={`https://etherscan.io/tx/0x7d3a95bfce31a20df949e29ae8f9`} 
+            href="https://stellar.expert/explorer/testnet/tx/f8a3c45719bc42de7b6fa2079da6069904948a313e2f5b4cb8e5e69d7494f6bb" 
             target="_blank" 
             rel="noreferrer" 
             className="text-xs underline text-emerald-500 hover:text-emerald-400"
           >
-            View transaction
+            View on Stellar Expert
           </a>
         </div>,
         { duration: 5000 }
@@ -125,7 +125,7 @@ export default function DepositModal({ isOpen, onClose }) {
         return "Transaction confirmed";
       case "input":
       default:
-        return "Review gas before signing";
+        return "Review network fee before signing";
     }
   };
 
@@ -194,7 +194,7 @@ export default function DepositModal({ isOpen, onClose }) {
                   )}
                   <div className="mt-2 flex justify-between text-xs text-vault-muted">
                     <span>Demo USDC balance: {usdcBalance.toFixed(2)} USDC</span>
-                    <span>Demo AVAX balance: {formatToken(walletBalance, "AVAX")}</span>
+                    <span>Demo XLM balance: {formatToken(walletBalance, "XLM")}</span>
                   </div>
                 </div>
 
@@ -212,7 +212,7 @@ export default function DepositModal({ isOpen, onClose }) {
                       Native balance
                     </p>
                     <p className="mt-1 text-lg font-semibold text-vault-text">
-                      {formatToken(walletBalance, "AVAX")}
+                      {formatToken(walletBalance, "XLM")}
                     </p>
                   </div>
                 </div>
@@ -225,8 +225,8 @@ export default function DepositModal({ isOpen, onClose }) {
                     {JSON.stringify(
                       {
                         amount,
-                        gasBudget: formatToken(gasBudget, "AVAX"),
-                        balance: formatToken(walletBalance, "AVAX"),
+                        gasBudget: formatToken(gasBudget, "XLM"),
+                        balance: formatToken(walletBalance, "XLM"),
                       },
                       null,
                       2,
@@ -242,13 +242,13 @@ export default function DepositModal({ isOpen, onClose }) {
                   >
                     <p className="font-semibold text-vault-text">Network warning</p>
                     <p className="mt-1 text-vault-muted">
-                      The connected wallet does not have enough native token to cover the selected gas fee.
+                      The connected wallet does not have enough XLM to cover the selected Stellar network fee.
                     </p>
                   </div>
                 )}
               </section>
 
-              <GasPrioritySelector nativeBalance={walletBalance} onChange={setFeeState} />
+              <GasPrioritySelector network="stellar" networkType="testnet" nativeBalance={walletBalance} onChange={setFeeState} />
             </div>
           )}
 
@@ -273,13 +273,13 @@ export default function DepositModal({ isOpen, onClose }) {
                   <span className="font-medium text-vault-text">USDC Stable Pool</span>
                 </div>
                 <div className="flex justify-between py-2.5">
-                  <span className="text-vault-muted">Estimated Gas Fee</span>
-                  <span className="font-medium text-vault-text">{formatToken(gasBudget, "AVAX")}</span>
+                  <span className="text-vault-muted">Estimated Network Fee</span>
+                  <span className="font-medium text-vault-text">{formatToken(gasBudget, "XLM")}</span>
                 </div>
                 <div className="flex justify-between py-2.5 pt-4">
                   <span className="font-semibold text-vault-text">Deduction Summary</span>
                   <span className="font-bold text-red-500">
-                    {amount} USDC + {formatToken(gasBudget, "AVAX")}
+                    {amount} USDC + {formatToken(gasBudget, "XLM")}
                   </span>
                 </div>
               </div>
@@ -319,7 +319,14 @@ export default function DepositModal({ isOpen, onClose }) {
                 </div>
                 <div className="flex justify-between py-2">
                   <span className="text-vault-muted">Transaction Hash</span>
-                  <span className="text-vault-text font-mono">0x7d3a95bfce31a20df949e29a...e8f9</span>
+                  <a
+                    href="https://stellar.expert/explorer/testnet/tx/f8a3c45719bc42de7b6fa2079da6069904948a313e2f5b4cb8e5e69d7494f6bb"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-500 font-mono underline hover:text-emerald-400"
+                  >
+                    f8a3c457...494f6bb
+                  </a>
                 </div>
                 <div className="flex justify-between py-2">
                   <span className="text-vault-muted">Status</span>
@@ -333,7 +340,7 @@ export default function DepositModal({ isOpen, onClose }) {
         {/* Footer */}
         <div className="flex flex-col gap-3 border-t border-vault-border/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div className="text-sm text-vault-muted">
-            {step === "input" && "Selected gas cost is applied to the transaction execution payload before submission."}
+            {step === "input" && "Selected Stellar fee (stroops) is applied to the transaction execution payload before submission."}
             {step === "confirm" && "Double check transaction payload and destination pool details before signing."}
             {step === "loading" && "Do not close this modal or refresh the page while the transaction is broadcasting."}
             {step === "success" && "Transaction completed successfully. You can close this modal."}
