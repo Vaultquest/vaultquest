@@ -6,15 +6,15 @@ vi.mock("./kit.js", () => ({
   kit: {
     getNetwork: vi.fn(),
     setWallet: vi.fn(),
-    getAddress: vi.fn(),
+    fetchAddress: vi.fn(),
     disconnect: vi.fn(),
-    getSupportedWallets: vi.fn(async () => []),
+    refreshSupportedWallets: vi.fn(async () => []),
   },
 }));
 
 import { kit } from "./kit.js";
 import { networkReadiness, isNetworkMismatch, connectedNetwork } from "./store.js";
-import { setConnection, disconnect } from "./walletService.js";
+import { connectWallet, loadedPublicKey, setConnection, disconnect } from "./walletService.js";
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -25,6 +25,59 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+describe("walletService connection with the wallet kit v2 API", () => {
+  const address = "GALICE00000000000000000000000000000000000000000000000";
+
+  beforeEach(() => {
+    disconnect();
+    localStorage.clear();
+    vi.mocked(kit.setWallet).mockReset();
+    vi.mocked(kit.fetchAddress).mockReset();
+    vi.mocked(kit.getNetwork).mockResolvedValue({
+      network: "testnet",
+      networkPassphrase: "Test SDF Network ; September 2015",
+    });
+    vi.mocked(kit.refreshSupportedWallets).mockResolvedValue([{
+      id: "freighter",
+      name: "Freighter",
+      type: "HOT_WALLET",
+      isAvailable: true,
+      isPlatformWrapper: false,
+      icon: "",
+      url: "https://freighter.app",
+    }]);
+  });
+
+  afterEach(() => {
+    disconnect();
+  });
+
+  it("connects an available wallet without requiring an address already cached by the kit", async () => {
+    vi.mocked(kit.fetchAddress).mockResolvedValue({ address });
+
+    const result = await connectWallet("freighter");
+
+    expect(result).toEqual({
+      address,
+      publicKey: address,
+      network: "testnet",
+      provider: "freighter",
+      kitWalletId: "freighter",
+    });
+    expect(loadedPublicKey()).toBe(address);
+    expect(localStorage.getItem("publicKey")).toBe(address);
+  });
+
+  it("leaves the app disconnected when the wallet rejects the address request", async () => {
+    vi.mocked(kit.fetchAddress).mockRejectedValue(new Error("Wallet access rejected"));
+
+    await expect(connectWallet("freighter")).rejects.toThrow("Wallet access rejected");
+
+    expect(loadedPublicKey()).toBeUndefined();
+    expect(localStorage.getItem("publicKey")).toBeNull();
+  });
+});
 
 describe("walletService network verification gating (issue #101)", () => {
   beforeEach(() => {

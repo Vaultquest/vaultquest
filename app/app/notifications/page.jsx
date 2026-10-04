@@ -1,75 +1,71 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { connectedPublicKey } from "@/stellar-wallet-connect/src/core/store";
+import { requestWalletNotification } from "@/lib/notification-prefs-client";
 import Link from "next/link";
 import { Bell, Check, CheckCircle2, Clock, Inbox, MailOpen } from "lucide-react";
 
-const NOTIFICATIONS = [
-  {
-    id: "notif-001",
-    title: "Weekly draw completed",
-    vault: "USDC Stable Pool",
-    date: "2026-06-24T18:30:00.000Z",
-    status: "unread",
-    type: "Prize draw",
-    message: "Prize winners were selected and the next round is now open.",
-  },
-  {
-    id: "notif-002",
-    title: "Deposit confirmed",
-    vault: "ETH Growth Pool",
-    date: "2026-06-24T15:10:00.000Z",
-    status: "read",
-    type: "Deposit",
-    message: "Your 0.42 ETH deposit was confirmed and tickets were updated.",
-  },
-  {
-    id: "notif-003",
-    title: "Vault APY updated",
-    vault: "XLM Drip Vault",
-    date: "2026-06-21T09:20:00.000Z",
-    status: "unread",
-    type: "Vault update",
-    message: "Projected APY changed after the latest strategy rebalance.",
-  },
-  {
-    id: "notif-004",
-    title: "Withdrawal window opened",
-    vault: "BTC Reserve",
-    date: "2026-06-18T12:00:00.000Z",
-    status: "read",
-    type: "Account",
-    message: "Your lockup period ended and principal is available to withdraw.",
-  },
-];
 
-function formatDateLabel(dateValue) {
-  return new Date(dateValue).toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-function formatTime(dateValue) {
-  return new Date(dateValue).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+function formatNotificationDate(dateValue, formatter) {
+  const date = new Date(dateValue);
+  // Intl.format throws for invalid dates; keep the previous display behavior.
+  return Number.isNaN(date.getTime()) ? "Invalid Date" : formatter.format(date);
 }
 
 export default function VaultNotificationsPage() {
-  const [readIds, setReadIds] = useState(() =>
-    new Set(NOTIFICATIONS.filter((notification) => notification.status === "read").map((notification) => notification.id))
-  );
+  const [wallet, setWallet] = useState(() => connectedPublicKey.get() || "");
+  const [items, setItems] = useState([]);
+  const [itemsWallet, setItemsWallet] = useState("");
+  const [readIds, setReadIds] = useState(new Set());
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
+  const request = useRef(null);
 
-  const notifications = useMemo(() => {
-    return NOTIFICATIONS.map((notification) => ({
-      ...notification,
-      status: readIds.has(notification.id) ? "read" : "unread",
-    }));
-  }, [readIds]);
+  useEffect(() => connectedPublicKey.subscribe(value => setWallet(value || "")), []);
+  useEffect(() => {
+    request.current?.abort();
+    setItems([]);
+    setItemsWallet("");
+    setReadIds(new Set());
+    setLoaded(false);
+    setLoading(false);
+    setError("");
+    return () => request.current?.abort();
+  }, [wallet]);
+
+  const loadNotifications = async () => {
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    const requestedWallet = wallet;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await requestWalletNotification(
+        `/api/notifications?wallet=${encodeURIComponent(requestedWallet)}`,
+        { wallet: requestedWallet, signal: controller.signal },
+      );
+      if (controller.signal.aborted || connectedPublicKey.get() !== requestedWallet) return;
+      if (!Array.isArray(result.data)) throw new Error("Invalid notification history response.");
+      setItems(result.data);
+      setItemsWallet(requestedWallet);
+      setLoaded(true);
+    } catch (err) {
+      if (!controller.signal.aborted && connectedPublicKey.get() === requestedWallet) {
+        setError(err.message || "Notifications could not be loaded.");
+      }
+    } finally {
+      if (!controller.signal.aborted && connectedPublicKey.get() === requestedWallet) setLoading(false);
+    }
+  };
+
+  const notifications = useMemo(() => (itemsWallet === wallet ? items : []).map(notification => ({
+    ...notification,
+    status: readIds.has(notification.id) ? "read" : "unread",
+  })), [items, itemsWallet, wallet, readIds]);
 
   const visibleNotifications = useMemo(() => {
     if (!showUnreadOnly) return notifications;
@@ -77,13 +73,25 @@ export default function VaultNotificationsPage() {
   }, [notifications, showUnreadOnly]);
 
   const groupedNotifications = useMemo(() => {
+    if (visibleNotifications.length === 0) return {};
+    const dateFormatter = new Intl.DateTimeFormat("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
     return visibleNotifications.reduce((groups, notification) => {
-      const label = formatDateLabel(notification.date);
+      const label = formatNotificationDate(notification.date, dateFormatter);
       if (!groups[label]) groups[label] = [];
       groups[label].push(notification);
       return groups;
     }, {});
   }, [visibleNotifications]);
+
+  // Share a formatter for this render, not across wallets or time-zone changes.
+  const timeFormatter = visibleNotifications.length === 0 ? null : new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 
   const unreadCount = notifications.filter((notification) => notification.status === "unread").length;
 
@@ -104,13 +112,23 @@ export default function VaultNotificationsPage() {
             <h1 className="text-3xl font-bold text-vault-text">Vault Notifications</h1>
           </div>
           <p className="mt-2 max-w-2xl text-vault-muted">
-            Review past vault notices, status changes, deposits, draw updates, and account reminders.
+            Review vault action updates, deposit confirmations, draw actions, and prize claims.
           </p>
         </div>
         <Link href="/app/activity" className="vq-btn-ghost self-start sm:self-auto">
           View activity
         </Link>
       </header>
+
+      <div className="space-y-2">
+        <p className="text-sm text-vault-muted">
+          {wallet ? "Load notifications for your connected wallet. Your saved preferences filter this history." : "Connect a Stellar wallet to view its notifications."}
+        </p>
+        <button type="button" onClick={loadNotifications} disabled={!wallet || loading} className="vq-btn-primary disabled:opacity-60">
+          {loading ? "Loading…" : loaded ? "Refresh notifications" : "Load notifications"}
+        </button>
+        {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
+      </div>
 
       <section className="grid gap-4 sm:grid-cols-3" aria-label="Notification summary">
         <div className="vq-glass-hover p-5">
@@ -152,7 +170,7 @@ export default function VaultNotificationsPage() {
             <CheckCircle2 className="h-10 w-10 text-vault-muted" aria-hidden="true" />
             <h3 className="mt-4 text-lg font-semibold text-vault-text">No notifications to show</h3>
             <p className="mt-2 max-w-md text-sm text-vault-muted">
-              Empty states will appear when a user has no history or when filters hide every notification.
+              {loaded ? "No notifications match your saved preferences and current filter." : "Load notifications to see recorded activity for the connected wallet."}
             </p>
           </div>
         ) : (
@@ -180,11 +198,9 @@ export default function VaultNotificationsPage() {
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-vault-muted">
                               <span>{notification.type}</span>
                               <span aria-hidden="true">·</span>
-                              <span>{notification.vault}</span>
-                              <span aria-hidden="true">·</span>
                               <span className="inline-flex items-center gap-1">
                                 <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-                                {formatTime(notification.date)}
+                                {formatNotificationDate(notification.date, timeFormatter)}
                               </span>
                             </div>
                           </div>

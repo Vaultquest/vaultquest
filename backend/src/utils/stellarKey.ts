@@ -1,4 +1,4 @@
-import { createPublicKey, verify as cryptoVerify } from "node:crypto";
+import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
 
 /**
  * Minimal StrKey decoding and ed25519 signature verification.
@@ -92,6 +92,9 @@ export function verifySignature(address: string, message: string, signatureBase6
   const rawKey = decodeEd25519PublicKey(address);
   if (rawKey === null) return false;
 
+  // Reject non-canonical base64 rather than allowing Node to discard arbitrary
+  // characters. The wire contract is a base64-encoded 64-byte Ed25519 signature.
+  if (typeof signatureBase64 !== "string" || !/^[A-Za-z0-9+/]{86}==$/.test(signatureBase64)) return false;
   let signature: Buffer;
   try {
     signature = Buffer.from(signatureBase64, "base64");
@@ -101,6 +104,7 @@ export function verifySignature(address: string, message: string, signatureBase6
   // An ed25519 signature is always 64 bytes; Buffer.from silently accepts
   // garbage base64, so this is what actually rejects it.
   if (signature.length !== 64) return false;
+  if (signature.toString("base64") !== signatureBase64) return false;
 
   try {
     const publicKey = createPublicKey({
@@ -108,7 +112,16 @@ export function verifySignature(address: string, message: string, signatureBase6
       format: "der",
       type: "spki"
     });
-    return cryptoVerify(null, Buffer.from(message, "utf8"), publicKey, signature);
+    const messageBytes = Buffer.from(message, "utf8");
+    // SEP-53 wallet message signing (Final 2026-06-18). Keep the existing raw
+    // challenge form valid for established service clients and export tests.
+    // https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0053.md
+    const messageHash = createHash("sha256")
+      .update("Stellar Signed Message:\n", "utf8")
+      .update(messageBytes)
+      .digest();
+    return cryptoVerify(null, messageHash, publicKey, signature) ||
+      cryptoVerify(null, messageBytes, publicKey, signature);
   } catch {
     return false;
   }

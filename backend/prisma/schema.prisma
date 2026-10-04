@@ -136,7 +136,6 @@ model SavedPool {
   @@map("saved_pools")
 }
 
-<<<<<<< HEAD
 model UserProfile {
   id            String    @id @default(uuid()) @db.Uuid
   walletAddress String    @map("wallet_address")
@@ -151,15 +150,6 @@ model UserProfile {
   @@index([walletAddress])
   @@map("user_profiles")
 }
-
-model UserNotificationPref {
-  id            String   @id @default(uuid()) @db.Uuid
-  walletAddress String   @map("wallet_address")
-  category      String
-  encryptedPref Json     @map("encrypted_pref")
-  keyVersion    Int      @default(1) @map("key_version")
-  createdAt     DateTime @default(now()) @map("created_at")
-=======
 
 model Product {
   id         String   @id @default(uuid()) @db.Uuid
@@ -222,11 +212,15 @@ model Notification {
   @@unique([walletAddress, positionId, type])
   @@index([walletAddress, dismissedAt])
   @@map("notifications")
+}
+
 model UserNotificationPref {
   id            String   @id @default(uuid()) @db.Uuid
   walletAddress String   @map("wallet_address")
   category      String
-  enabled       Boolean  @default(true)
+  encryptedPref Json     @map("encrypted_pref")
+  keyVersion    Int      @default(1) @map("key_version")
+  revision      Int      @default(1)
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -312,4 +306,3 @@ model PrivacyAuditLog {
   @@index([targetWalletHash])
   @@map("privacy_audit_logs")
 }
-

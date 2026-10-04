@@ -7,7 +7,7 @@ import {
   type WalletType,
   normalizeStellarNetwork,
 } from "../lib/wallets.js";
-import { HorizonPool } from "./horizonPool.js";
+import { HorizonPool, resolveHorizonNodes } from "./horizonPool.js";
 import { assetAmountFrom, zeroAssetAmount, type AssetAmount } from "./amount.js";
 import { getAssetIssuer, isValidCanonicalAsset } from "../lib/assets.js";
 
@@ -175,7 +175,7 @@ async function getWalletAvailability(provider: WalletType): Promise<{
   }
 
   const kitWalletId = toKitWalletId(provider);
-  const supportedWallets = await kit.getSupportedWallets();
+  const supportedWallets = await kit.refreshSupportedWallets();
   const wallet = supportedWallets.find((option) => option.id === kitWalletId);
 
   return {
@@ -198,9 +198,7 @@ async function connectWallet(provider: WalletType): Promise<WalletConnectionResu
 
   kit.setWallet(kitWalletId);
 
-  const { address } = await kit.getAddress(
-    provider === "freighter" ? { skipRequestAccess: false } : undefined,
-  );
+  const { address } = await kit.fetchAddress();
 
   const network = await getConnectedNetwork();
 

@@ -8,6 +8,8 @@ import { ProfileService } from "./services/profile.js";
 import { actionsRoutes } from "./routes/actions.js";
 import { savedPoolsRoutes } from "./routes/savedPools.js";
 import { profileRoutes } from "./routes/profile.js";
+import { notificationPreferencesRoutes } from "./routes/notificationPreferences.js";
+import { NotificationPreferencesService } from "./services/notificationPreferences.js";
 import { internalRoutes } from "./routes/internal.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { prometheusRoutes } from "./routes/prometheus.js";
@@ -119,6 +121,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // Privacy Services (issue #76)
   const encryptionSvc = new PrivacyEncryptionService(deps.privacyMasterKey);
+  const notificationPrefsSvc = new NotificationPreferencesService(deps.prisma, encryptionSvc);
   const auditSvc = new PrivacyAuditService(deps.prisma);
   const exportSvc = new PrivacyExportService(deps.prisma, encryptionSvc, auditSvc);
   const deletionSvc = new PrivacyDeletionService(deps.prisma, deps.cacheService, auditSvc);
@@ -151,6 +154,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.register(healthRoutes(svc, deps.prisma, deps.cacheService));
   app.register(savedPoolsRoutes(savedPoolsSvc, walletAuthGuard));
   app.register(profileRoutes(profileSvc, walletAuthGuard));
+  app.register(notificationPreferencesRoutes(notificationPrefsSvc, walletAuthGuard));
   app.register(internalRoutes(svc, deps.internalSecret));
   app.register(metricsRoutes(metricsSvc, apiKeyGuard));
   app.register(prometheusRoutes(prometheusScrapeGuard));

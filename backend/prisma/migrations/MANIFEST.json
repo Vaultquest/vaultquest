@@ -72,6 +72,14 @@
           "tables": ["user_profiles"],
           "breaking": false,
           "relatedIssues": ["#134"]
+        },
+        {
+          "id": "20261003000000_feature_notification_preferences",
+          "timestamp": "2026-10-03T00:00:00Z",
+          "description": "Encrypted wallet notification preferences with optimistic revision checks",
+          "tables": ["user_notification_prefs"],
+          "breaking": false,
+          "relatedIssues": ["#118"]
         }
       ]
     },
@@ -125,6 +133,11 @@
       "phase": "features",
       "createdIn": "20260531000001_feature_vault_settlements",
       "description": "Vault settlement state machine"
+    },
+    "user_notification_prefs": {
+      "phase": "features",
+      "createdIn": "20261003000000_feature_notification_preferences",
+      "description": "Versioned wallet preferences encrypted through the existing privacy service"
     },
     "user_profiles": {
       "phase": "features",

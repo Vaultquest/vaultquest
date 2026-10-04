@@ -43,6 +43,7 @@ Additional feature tables added after core infrastructure is stable.
 | `20260530000000_feature_indexer_checkpoint` | Blockchain indexer state tracking    |
 | `20260531000000_feature_user_quests`        | Quest progress tracking system       |
 | `20260531000001_feature_vault_settlements`  | Vault settlement and escrow pipeline |
+| `20261003000000_feature_notification_preferences` | Encrypted per-wallet preferences and save revision |
 
 **Key Tables:**
 
@@ -50,6 +51,7 @@ Additional feature tables added after core infrastructure is stable.
 - `indexer_checkpoints` - Blockchain indexer state
 - `user_quests` - User quest progress
 - `vault_settlements` - Settlement state machine
+- `user_notification_prefs` - Encrypted, versioned preferences with an atomic revision check
 
 ### Phase 3: Optimization (`optimize_*`)
 
@@ -108,6 +110,10 @@ Never reorder or delete migrations from the migrations directory. Prisma tracks 
    <TIMESTAMP>_<PHASE>_<description>
    ```
 4. Update this README with details about the new migration
+
+## Notification preference migration (#118)
+
+Apply `20261003000000_feature_notification_preferences` before deploying the signed preference routes. It creates the existing privacy model’s encrypted preference storage with a unique wallet/category key and a positive `revision`. New wallets use version-1 defaults without a write; the first save creates revision 1, and later saves must provide the revision they loaded. A stale device receives HTTP 409 and cannot overwrite the current record. The migration adds no notification channel or scheduled job.
 
 ## Common Issues
 

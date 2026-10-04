@@ -7,9 +7,9 @@ vi.mock("./kit.js", () => ({
   kit: {
     getNetwork: vi.fn(async () => ({ network: "testnet" })),
     setWallet: vi.fn(),
-    getAddress: vi.fn(),
+    fetchAddress: vi.fn(),
     disconnect: vi.fn(),
-    getSupportedWallets: vi.fn(async () => []),
+    refreshSupportedWallets: vi.fn(async () => []),
   },
 }));
 

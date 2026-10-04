@@ -1,13 +1,13 @@
 import {
   StellarWalletsKit,
-  FreighterModule,
-  AlbedoModule,
-  xBullModule,
-  HanaModule,
-  RabetModule,
-  LobstrModule,
-  WalletNetwork,
+  Networks as WalletNetwork,
 } from "@creit.tech/stellar-wallets-kit";
+import { FreighterModule } from "@creit.tech/stellar-wallets-kit/modules/freighter";
+import { AlbedoModule } from "@creit.tech/stellar-wallets-kit/modules/albedo";
+import { xBullModule } from "@creit.tech/stellar-wallets-kit/modules/xbull";
+import { HanaModule } from "@creit.tech/stellar-wallets-kit/modules/hana";
+import { RabetModule } from "@creit.tech/stellar-wallets-kit/modules/rabet";
+import { LobstrModule } from "@creit.tech/stellar-wallets-kit/modules/lobstr";
 import { LedgerModule } from "@creit.tech/stellar-wallets-kit/modules/ledger";
 import { getFrontendEnv } from "./env.js";
 
@@ -37,7 +37,7 @@ const resolveWalletNetwork = (networkPassphrase?: string): WalletNetwork => {
 };
 
 export const createKit = (networkPassphrase?: string) => {
-  return new StellarWalletsKit({
+  StellarWalletsKit.init({
     modules: [
       new FreighterModule(),
       new AlbedoModule(),
@@ -45,24 +45,25 @@ export const createKit = (networkPassphrase?: string) => {
       new HanaModule(),
       new RabetModule(),
       new LobstrModule(),
-      new LedgerModule()
+      new LedgerModule(),
     ],
     network: resolveWalletNetwork(networkPassphrase),
   });
+  return StellarWalletsKit;
 };
 
-// Lazy-initialized kit instance to avoid SSR "window is not defined" errors
-let _kit: StellarWalletsKit;
+// Lazily initialize the kit's static API only when accessed in the browser.
+let _kit: typeof StellarWalletsKit | undefined;
 
-export const kit = new Proxy({} as StellarWalletsKit, {
+export const kit = new Proxy({} as typeof StellarWalletsKit, {
   get(_, prop) {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       return undefined;
     }
     if (!_kit) {
       _kit = createKit();
     }
-    const value = (_kit as any)[prop];
-    return typeof value === 'function' ? value.bind(_kit) : value;
+    const value = Reflect.get(_kit, prop);
+    return typeof value === "function" ? value.bind(_kit) : value;
   },
 });

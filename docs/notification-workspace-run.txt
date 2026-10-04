@@ -1,0 +1,32 @@
+Native run: 37199954184
+Native job: 111429423796
+Controller: 9630f546f0d8a35128fe66865c3ff5d07df6b396
+Feature source: 256715910fac87e919b60e2b1f834f52e791605c
+Dependency donor: 08915ce6cf89fcbc238319599d77ff41ff30bc7b
+
+Selected output from the downloaded artifact. Terminal color escapes removed;
+no failed or skipped test records omitted. Full output is in artifact 11302632983.
+
+Scope: all 3 workspace projects
+Lockfile is up to date, resolution step is skipped
+Done in 15.9s using pnpm v10.28.2
+
+Node v22.23.3
+Vitest 3.2.7
+Vite 6.4.3
+jsdom 25.0.1
+
+lib/notification-prefs.test.js              11 passed
+lib/notification-prefs-client.test.js        6 passed
+lib/notification-producers.test.js           7 passed
+lib/notification-proxy.test.js              10 passed
+components/app/VaultNotificationSettings.test.jsx 5 passed
+app/app/notifications/page.test.jsx          3 passed
+
+Test Files  6 passed (6)
+Tests       42 passed (42)
+Duration    3.91s
+
+JSON report: success=true; numTotalTests=42; numPassedTests=42;
+numFailedTests=0; numPendingTests=0; numTodoTests=0;
+snapshot.added=0; snapshot.filesUpdated=0; snapshot.unmatched=0.
