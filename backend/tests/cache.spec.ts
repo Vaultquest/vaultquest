@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CacheService } from "../src/services/cacheService.js";
+import { LedgerService } from "../src/services/ledger.js";
 
 // Mock ioredis
 const mockRedisInstance = {
@@ -13,7 +14,7 @@ const mockRedisInstance = {
 
 vi.mock("ioredis", () => {
   return {
-    Redis: vi.fn().mockImplementation(() => mockRedisInstance)
+    Redis: vi.fn().mockImplementation(function () { return mockRedisInstance; })
   };
 });
 
@@ -214,5 +215,89 @@ describe("CacheService Fallback & Caching Logic Tests", () => {
       const remaining = await service.getPendingEvent("0xbbb");
       expect(remaining?.txHash).toBe("0xbbb");
     });
+  });
+
+  describe("never-successful indexer checkpoints", () => {
+    it.each(["database", "cache fallback", "Redis round trip"])(
+      "keeps the first failed sync degraded through %s",
+      async (storage) => {
+        // Model the existing non-null Date column's default and Prisma's
+        // omission of undefined update fields, so a missing timestamp fails.
+        let row: any = null;
+        mockPrisma.indexerCheckpoint.findUnique.mockImplementation(async () => row);
+        mockPrisma.indexerCheckpoint.upsert.mockImplementation(async (args: any) => {
+          const data = row ? args.update : args.create;
+          const defined = Object.fromEntries(
+            Object.entries(data).filter(([, value]) => value !== undefined)
+          );
+          row = { ...(row ?? { lastSuccessSyncTime: new Date() }), ...defined };
+          return row;
+        });
+
+        const cache = storage === "database"
+          ? undefined
+          : new CacheService(mockPrisma, mockLogger, "redis://127.0.0.1:6379");
+        if (storage === "Redis round trip") {
+          const values = new Map<string, string>();
+          mockRedisInstance.get.mockImplementation(async (key: string) => values.get(key) ?? null);
+          mockRedisInstance.set.mockImplementation(async (key: string, value: string) => {
+            values.set(key, value);
+            return "OK";
+          });
+          mockRedisInstance.del.mockImplementation(async (key: string) => Number(values.delete(key)));
+          mockRedisInstance.on.mock.calls.find((c) => c[0] === "connect")?.[1]();
+        }
+
+        const ledger = new LedgerService(mockPrisma, cache);
+        await ledger.updateIndexerCheckpoint({
+          latestLedger: 0,
+          lastProcessedEventId: null,
+          lastError: null,
+          success: false
+        });
+        let health = await ledger.getIndexerHealth();
+        expect(health.status).toBe("degraded");
+        expect(health.last_success_sync_time).toBeNull();
+        expect(health.sync_lag).toBe(0);
+
+        if (storage === "Redis round trip") {
+          // Execute the real cache serializer, flush and fallback reader.
+          await cache!.syncCheckpointToDb();
+          expect(row.lastSuccessSyncTime.getTime()).toBe(0);
+          mockRedisInstance.on.mock.calls.find((c) => c[0] === "error")?.[1](new Error("offline"));
+          health = await ledger.getIndexerHealth();
+          expect(health.status).toBe("degraded");
+          expect(health.last_success_sync_time).toBeNull();
+        }
+
+        await ledger.updateIndexerCheckpoint({ latestLedger: 10, success: true });
+        health = await ledger.getIndexerHealth();
+        expect(health.status).toBe("healthy");
+        const succeededAt = health.last_success_sync_time.getTime();
+        expect(succeededAt).toBeGreaterThan(0);
+
+        await ledger.updateIndexerCheckpoint({
+          latestLedger: 10,
+          lastProcessedEventId: "event-10",
+          lastError: "retry failed",
+          success: false
+        });
+        health = await ledger.getIndexerHealth();
+        expect(health.status).toBe("degraded");
+        expect(health.last_success_sync_time.getTime()).toBe(succeededAt);
+
+        await ledger.updateIndexerCheckpoint({
+          latestLedger: 10,
+          lastProcessedEventId: "event-10",
+          lastError: null,
+          success: false
+        });
+        health = await ledger.getIndexerHealth({
+          now: new Date(succeededAt + 6 * 60 * 1000)
+        });
+        expect(health.status).toBe("lagging");
+        expect(health.last_success_sync_time.getTime()).toBe(succeededAt);
+      }
+    );
   });
 });

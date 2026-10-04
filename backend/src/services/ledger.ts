@@ -526,7 +526,8 @@ export class LedgerService {
   }): Promise<any> {
     const now = new Date();
     const needsExisting =
-      input.lastProcessedEventId === undefined || (!input.success && input.lastError === undefined);
+      input.lastProcessedEventId === undefined ||
+      (!input.success && (this.cacheService !== undefined || input.lastError === undefined));
     const existing = needsExisting ? await this.getIndexerCheckpoint() : null;
     const lastProcessedEventId =
       input.lastProcessedEventId !== undefined
@@ -538,7 +539,8 @@ export class LedgerService {
         ? input.lastError
         : existing?.lastError ?? null;
     if (this.cacheService) {
-      const lastSuccessSyncTime = input.success ? now : (existing?.lastSuccessSyncTime ?? now);
+      // The required Date column uses epoch as the absence of any successful sync.
+      const lastSuccessSyncTime = input.success ? now : (existing?.lastSuccessSyncTime ?? new Date(0));
       await this.cacheService.setCheckpoint({
         latestLedger: input.latestLedger,
         lastProcessedEventId,
@@ -557,7 +559,7 @@ export class LedgerService {
         lastProcessedEventId,
         lastSyncTime: now,
         lastError,
-        lastSuccessSyncTime: input.success ? now : undefined
+        lastSuccessSyncTime: input.success ? now : new Date(0)
       },
       update: {
         latestLedger: input.latestLedger,
@@ -592,17 +594,29 @@ export class LedgerService {
       };
     }
 
-    const lastSuccessSyncTime = checkpoint.lastSuccessSyncTime || now;
-    const elapsedSinceLastSuccess = now.getTime() - lastSuccessSyncTime.getTime();
-    const estimatedLedgerLag = Math.max(0, Math.floor(elapsedSinceLastSuccess / 5000));
+    const recordedSuccess = checkpoint.lastSuccessSyncTime;
+    const lastSuccessSyncTime = recordedSuccess && Number.isFinite(recordedSuccess.getTime())
+      && recordedSuccess.getTime() !== 0
+      ? recordedSuccess
+      : null;
+    const elapsedSinceLastSuccess = lastSuccessSyncTime
+      ? now.getTime() - lastSuccessSyncTime.getTime()
+      : null;
+    // Zero remains the unknown-lag placeholder used by the no-checkpoint case;
+    // it is not evidence of freshness without a recorded successful sync.
+    const estimatedLedgerLag = elapsedSinceLastSuccess === null
+      ? 0
+      : Math.max(0, Math.floor(elapsedSinceLastSuccess / 5000));
 
-    let status = "healthy";
-    let message = "Indexer is healthy and syncing";
+    let status = lastSuccessSyncTime ? "healthy" : "degraded";
+    let message = lastSuccessSyncTime
+      ? "Indexer is healthy and syncing"
+      : "No successful indexer sync recorded";
 
     if (checkpoint.lastError) {
       status = "degraded";
       message = `Indexer reported error: ${checkpoint.lastError}`;
-    } else if (elapsedSinceLastSuccess > staleAfterMs) {
+    } else if (elapsedSinceLastSuccess !== null && elapsedSinceLastSuccess > staleAfterMs) {
       status = "lagging";
       message = `Indexer is lagging. Last successful sync was ${Math.round(elapsedSinceLastSuccess / 1000)}s ago`;
     }

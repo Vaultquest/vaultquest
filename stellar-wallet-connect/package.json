@@ -16,7 +16,8 @@
     "./src/vault/components/DepositModal": "./src/vault/components/DepositModal.tsx",
     "./src/vault/contract/sorobanClient": "./src/vault/contract/sorobanClient.ts",
     "./src/vault/data/config": "./src/vault/data/config.ts",
-    "./src/lib/wallets": "./src/lib/wallets.ts"
+    "./src/lib/wallets": "./src/lib/wallets.ts",
+    "./admin-provenance": "./src/lib/adminProvenance.ts"
   },
   "scripts": {
     "test": "vitest run",

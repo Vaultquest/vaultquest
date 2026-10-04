@@ -1,18 +1,22 @@
 "use client";
 
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
   Clock3,
+  ExternalLink,
   Gauge,
+  RefreshCw,
   Server,
   Shield,
   Settings,
   SquareStack,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { getStatusBadgeStyles } from "@/lib/status-badge-styles";
 
 const PROTOCOL_PARAMETERS = [
   {
@@ -77,29 +81,6 @@ const ACTIVE_ROUNDS = [
   },
 ];
 
-const SERVICE_STATUS = [
-  {
-    name: "Smart contract",
-    status: "operational",
-    detail: "Latest contract hash matches the published release.",
-  },
-  {
-    name: "Backend API",
-    status: "operational",
-    detail: "All critical routes responding under target latency.",
-  },
-  {
-    name: "Indexer",
-    status: "degraded",
-    detail: "Lagging by 2 ledgers. Background catch-up is running.",
-  },
-  {
-    name: "Notification relay",
-    status: "watch",
-    detail: "Healthy but queue depth is above the normal threshold.",
-  },
-];
-
 const OPERATIONAL_NOTES = [
   {
     title: "Settlement window",
@@ -119,53 +100,57 @@ const OPERATIONAL_NOTES = [
   },
 ];
 
-const STATUS_STYLE = {
-  operational: {
-    label: "Operational",
-    className: "bg-emerald-500/15 text-emerald-300 ring-emerald-400/30",
-    dot: "bg-emerald-400",
-    icon: CheckCircle2,
-  },
-  degraded: {
-    label: "Degraded",
-    className: "bg-amber-500/15 text-amber-300 ring-amber-400/30",
-    dot: "bg-amber-400",
-    icon: AlertTriangle,
-  },
-  watch: {
-    label: "Watch",
-    className: "bg-sky-500/15 text-sky-300 ring-sky-400/30",
-    dot: "bg-sky-400",
-    icon: Clock3,
-  },
+const ROUND_STATUS_STYLE = {
   drawing: {
     label: "Drawing",
     className: "bg-fuchsia-500/15 text-fuchsia-300 ring-fuchsia-400/30",
-    dot: "bg-fuchsia-400",
     icon: Gauge,
   },
   open: {
     label: "Open",
     className: "bg-emerald-500/15 text-emerald-300 ring-emerald-400/30",
-    dot: "bg-emerald-400",
     icon: CheckCircle2,
   },
   locking: {
     label: "Locking",
     className: "bg-amber-500/15 text-amber-300 ring-amber-400/30",
-    dot: "bg-amber-400",
     icon: Clock3,
   },
 };
 
-function StatusBadge({ status }) {
-  const style = STATUS_STYLE[status] ?? STATUS_STYLE.watch;
-  const Icon = style.icon;
+const HEALTH_LABEL = {
+  healthy: "Healthy",
+  stale: "Stale",
+  degraded: "Degraded",
+};
 
+const HEALTH_ICON = {
+  healthy: CheckCircle2,
+  stale: Clock3,
+  degraded: AlertTriangle,
+};
+
+const HEALTH_POLL_MS = 30_000;
+
+function RoundStatusBadge({ status }) {
+  const style = ROUND_STATUS_STYLE[status] ?? ROUND_STATUS_STYLE.open;
+  const Icon = style.icon;
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${style.className}`}>
       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
       {style.label}
+    </span>
+  );
+}
+
+function HealthBadge({ status }) {
+  const normalized = HEALTH_LABEL[status] ? status : "degraded";
+  const styles = getStatusBadgeStyles(normalized);
+  const Icon = HEALTH_ICON[normalized] ?? AlertTriangle;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${styles.badge}`}>
+      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+      {HEALTH_LABEL[normalized]}
     </span>
   );
 }
@@ -189,11 +174,75 @@ function MetricCard({ label, value, detail, icon: Icon }) {
   );
 }
 
+function formatCheckedAt(iso) {
+  if (!iso) return "Not checked yet";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Not checked yet";
+  return date.toLocaleTimeString();
+}
+
 export default function AdminSettingsPage() {
+  const [health, setHealth] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const activeRequest = useRef(null);
+
+  const loadHealth = useCallback(async () => {
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const isCurrent = () => activeRequest.current === controller && !controller.signal.aborted;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/admin/health", {
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new Error("Admin health endpoint returned invalid JSON");
+      }
+      if (!payload || typeof payload !== "object" || !Array.isArray(payload.dependencies)) {
+        throw new Error("Admin health endpoint returned an invalid payload");
+      }
+      // A prior request may finish parsing even after its fetch was aborted.
+      if (isCurrent()) setHealth(payload);
+    } catch (err) {
+      if (!isCurrent()) return;
+      setHealth(null);
+      setError(err instanceof Error ? err.message : "Unable to load live dependency health");
+    } finally {
+      if (isCurrent()) {
+        activeRequest.current = null;
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHealth();
+    const interval = setInterval(loadHealth, HEALTH_POLL_MS);
+    return () => {
+      clearInterval(interval);
+      activeRequest.current?.abort();
+      activeRequest.current = null;
+    };
+  }, [loadHealth]);
+
+  const dependencies = health?.dependencies ?? [];
+  const healthyCount = health?.summary?.healthy ?? 0;
+  const totalDeps = health?.summary?.total ?? dependencies.length;
+  const overallStatus = error ? "degraded" : health?.status;
+  const drift = health?.configDrift;
+
   const totals = {
     parameters: PROTOCOL_PARAMETERS.length,
     rounds: ACTIVE_ROUNDS.length,
-    services: SERVICE_STATUS.length,
+    services: totalDeps || 4,
     notes: OPERATIONAL_NOTES.length,
   };
 
@@ -211,12 +260,12 @@ export default function AdminSettingsPage() {
           </p>
           <h1 className="text-3xl font-bold text-vault-text">Settings Overview</h1>
           <p className="max-w-2xl text-sm text-vault-muted">
-            Review protocol parameters, active rounds, service status, and the
+            Review protocol parameters, active rounds, live dependency health, and the
             current operating notes before making a governance change.
           </p>
           <div className="flex flex-wrap gap-2 pt-1 text-xs text-vault-muted">
             <span className="rounded-full border border-vault-border bg-vault-surface px-3 py-1.5">
-              Read-only overview
+              Live dependency probes
             </span>
             <span className="rounded-full border border-vault-border bg-vault-surface px-3 py-1.5">
               Changes flow through governance proposals
@@ -249,9 +298,9 @@ export default function AdminSettingsPage() {
           icon={SquareStack}
         />
         <MetricCard
-          label="Service status"
-          value={`${SERVICE_STATUS.filter((s) => s.status === "operational").length}/${totals.services}`}
-          detail="Services currently in an operational state."
+          label="Live health"
+          value={error ? "Unavailable" : loading && !health ? "…" : `${healthyCount}/${totals.services}`}
+          detail="Dependencies currently reporting healthy."
           icon={Server}
         />
         <MetricCard
@@ -261,6 +310,142 @@ export default function AdminSettingsPage() {
           icon={Shield}
         />
       </div>
+
+      <section className="vq-glass p-5 sm:p-6" aria-label="Live dependency health">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-vault-text">Live dependency health</h2>
+            <p className="mt-1 text-sm text-vault-muted">
+              RPC, indexer, contract WASM hash, and config drift — refreshed every 30s.
+            </p>
+            <p className="mt-2 text-xs text-vault-muted">
+              Last checked: {formatCheckedAt(health?.checkedAt)} · Overall{" "}
+              <span className="font-medium text-vault-text">{HEALTH_LABEL[overallStatus] ?? "Checking"}</span>
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {overallStatus ? (
+              <HealthBadge status={overallStatus} />
+            ) : (
+              <span className="text-sm text-vault-muted">Checking</span>
+            )}
+            <button
+              type="button"
+              onClick={loadHealth}
+              disabled={loading}
+              className="vq-btn-ghost inline-flex h-9 items-center gap-2 px-3 disabled:opacity-60"
+              aria-label="Refresh health"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div
+            role="alert"
+            className="mt-4 flex items-start gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="mt-5 space-y-3">
+          {loading && !dependencies.length && (
+            <p className="text-sm text-vault-muted">Probing live dependencies…</p>
+          )}
+          {dependencies.map((dep) => {
+            const styles = getStatusBadgeStyles(dep.status);
+            return (
+              <div
+                key={dep.id}
+                className="flex flex-col gap-3 rounded-2xl border border-vault-border bg-vault-surface/40 p-4 sm:flex-row sm:items-start sm:justify-between"
+                data-testid={`health-dep-${dep.id}`}
+                data-status={dep.status}
+              >
+                <div className="flex items-start gap-3">
+                  <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${styles.iconAvatar}`}>
+                    <Server className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <div>
+                    <p className="font-medium text-vault-text">{dep.name}</p>
+                    <p className="mt-1 text-sm text-vault-muted">{dep.detail}</p>
+                    {typeof dep.latencyMs === "number" && (
+                      <p className="mt-1 text-xs text-vault-muted">{dep.latencyMs}ms</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                  <HealthBadge status={dep.status} />
+                  {dep.remediationUrl && (
+                    <a
+                      href={dep.remediationUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-red-300 hover:underline"
+                    >
+                      Remediation
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {drift?.hasDrift && (
+          <div
+            className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4"
+            data-testid="config-drift-panel"
+            role="region"
+            aria-label="Configuration drift"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-vault-text">Configuration drift</h3>
+              <HealthBadge status={drift.status} />
+            </div>
+            <p className="mt-1 text-sm text-vault-muted">
+              Runtime values diverge from canonical deployment provenance.
+            </p>
+            <ul className="mt-4 space-y-3">
+              {drift.drifts.map((item) => (
+                <li
+                  key={item.parameter}
+                  className="rounded-xl border border-vault-border bg-vault-bg/40 p-3 text-sm"
+                  data-testid={`drift-${item.parameter}`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium text-vault-text">{item.parameter}</p>
+                    <span className="text-xs uppercase tracking-wide text-vault-muted">
+                      {item.severity}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-vault-muted">
+                    expected <span className="text-vault-text">{item.expected}</span>
+                    {" · "}
+                    actual <span className="text-vault-text">{item.actual}</span>
+                  </p>
+                  <p className="mt-1 text-xs text-vault-muted">{item.impact}</p>
+                </li>
+              ))}
+            </ul>
+            {drift.remediationUrl && (
+              <a
+                href={drift.remediationUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-red-300 hover:underline"
+              >
+                Open config-drift remediation
+                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              </a>
+            )}
+          </div>
+        )}
+      </section>
 
       <section className="vq-glass p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -322,7 +507,7 @@ export default function AdminSettingsPage() {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-base font-semibold text-vault-text">{round.name}</h3>
-                      <StatusBadge status={round.status} />
+                      <RoundStatusBadge status={round.status} />
                     </div>
                     <p className="mt-1 text-sm text-vault-muted">{round.deadline}</p>
                   </div>
@@ -366,66 +551,34 @@ export default function AdminSettingsPage() {
           </div>
         </section>
 
-        <div className="space-y-6">
-          <section className="vq-glass p-5 sm:p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-vault-text">Service status</h2>
-                <p className="mt-1 text-sm text-vault-muted">
-                  Monitored services that affect protocol visibility and execution.
-                </p>
-              </div>
-              <Server className="h-5 w-5 text-red-400" aria-hidden="true" />
+        <section className="vq-glass p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-vault-text">Operational notes</h2>
+              <p className="mt-1 text-sm text-vault-muted">
+                A lightweight runbook for the current protocol cycle.
+              </p>
             </div>
+            <CheckCircle2 className="h-5 w-5 text-emerald-400" aria-hidden="true" />
+          </div>
 
-            <div className="mt-5 space-y-3">
-              {SERVICE_STATUS.map((service) => (
-                <div
-                  key={service.name}
-                  className="flex items-start justify-between gap-3 rounded-2xl border border-vault-border bg-vault-surface/40 p-4"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className={`mt-1 h-2.5 w-2.5 rounded-full ${STATUS_STYLE[service.status].dot}`} />
-                    <div>
-                      <p className="font-medium text-vault-text">{service.name}</p>
-                      <p className="mt-1 text-sm text-vault-muted">{service.detail}</p>
-                    </div>
-                  </div>
-                  <StatusBadge status={service.status} />
+          <div className="mt-5 space-y-3">
+            {OPERATIONAL_NOTES.map((note, index) => (
+              <div
+                key={note.title}
+                className="flex items-start gap-3 rounded-2xl border border-vault-border bg-vault-surface/40 p-4"
+              >
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-xs font-semibold text-red-300">
+                  {index + 1}
+                </span>
+                <div>
+                  <p className="font-medium text-vault-text">{note.title}</p>
+                  <p className="mt-1 text-sm text-vault-muted">{note.body}</p>
                 </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="vq-glass p-5 sm:p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-vault-text">Operational notes</h2>
-                <p className="mt-1 text-sm text-vault-muted">
-                  A lightweight runbook for the current protocol cycle.
-                </p>
               </div>
-              <CheckCircle2 className="h-5 w-5 text-emerald-400" aria-hidden="true" />
-            </div>
-
-            <div className="mt-5 space-y-3">
-              {OPERATIONAL_NOTES.map((note, index) => (
-                <div
-                  key={note.title}
-                  className="flex items-start gap-3 rounded-2xl border border-vault-border bg-vault-surface/40 p-4"
-                >
-                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-xs font-semibold text-red-300">
-                    {index + 1}
-                  </span>
-                  <div>
-                    <p className="font-medium text-vault-text">{note.title}</p>
-                    <p className="mt-1 text-sm text-vault-muted">{note.body}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
+            ))}
+          </div>
+        </section>
       </div>
     </div>
   );
