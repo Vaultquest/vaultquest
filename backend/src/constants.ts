@@ -21,6 +21,7 @@ export function canTransition(from: ActionStatus, to: ActionStatus): boolean {
 
 export const ERROR_CODES = {
   WALLET_REJECTED: "WALLET_REJECTED",
+  USER_CANCELLED: "USER_CANCELLED",
   WALLET_TIMEOUT: "WALLET_TIMEOUT",
   INVALID_PAYLOAD: "INVALID_PAYLOAD",
   NETWORK_ERROR: "NETWORK_ERROR",

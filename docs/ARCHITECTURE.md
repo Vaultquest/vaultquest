@@ -27,6 +27,15 @@ flowchart TD
   end
 
   subgraph BACKEND[Backend action ledger]
+
+
+## Retry queue (#121)
+
+Failed and pending wallet actions surface in `VaultRetryQueue`, which loads
+authoritative rows from the action ledger (never fixtures). Retry creates a
+fresh linked intent under an error-code policy; cancel is ledger-backed and
+idempotent. See [RETRY_QUEUE.md](./RETRY_QUEUE.md).
+
     API[Fastify API\nPOST /actions\nPATCH /actions/:id/submitted\nGET /actions]
     Reconcile[Internal reconcile\nPOST /internal/reconcile]
     DB[(Postgres ledger)]

@@ -182,21 +182,26 @@ export class LedgerService {
   }
 
   async cancelAction(id: string, errorCode: string, errorDetail?: string): Promise<ActionRecord> {
+    // Check and mutate in the same database statement. A prior read can become
+    // stale while submission or reconciliation commits a terminal state (#121).
+    const changed = await this.prisma.actionLedger.updateMany({
+      where: { id, status: "pending" },
+      data: { status: "failed", errorCode, errorDetail: errorDetail ?? null }
+    });
     const row = await this.prisma.actionLedger.findUnique({ where: { id } });
     if (!row) throw AppError.notFound(`action ${id} not found`);
 
-    if (row.status !== "pending") {
-      throw AppError.conflict(
-        ERROR_CODES.ILLEGAL_TRANSITION,
-        `cannot cancel action in status ${row.status}`
-      );
+    const CANCEL_CODES = new Set(["USER_CANCELLED", "CANCELLED_BY_USER"]);
+    // A competing cancellation retains the first caller's reason and detail.
+    if (changed.count === 1 ||
+        (row.status === "failed" && row.errorCode && CANCEL_CODES.has(row.errorCode))) {
+      return row as unknown as ActionRecord;
     }
 
-    const updated = await this.prisma.actionLedger.update({
-      where: { id },
-      data: { status: "failed", errorCode, errorDetail: errorDetail ?? null }
-    });
-    return updated as unknown as ActionRecord;
+    throw AppError.conflict(
+      ERROR_CODES.ILLEGAL_TRANSITION,
+      `cannot cancel action in status ${row.status}`
+    );
   }
 
   async getAction(id: string): Promise<ActionRecord | null> {

@@ -1,0 +1,161 @@
+{
+  "receipt": "VQ216-CURRENT-PAGINATION-EXECUTION-20261005",
+  "upstream_pr": "https://github.com/Vaultquest/vaultquest/pull/216",
+  "executed_product_commit": "06c2fa835e6b782c099d0af6d29a0d3a98d0d285",
+  "publication_scope": "Two new test files, retry guide and this receipt only; runtime/dependencies/configuration unchanged.",
+  "runtime": {
+    "node": "22.22.0",
+    "pnpm": "10.28.2",
+    "vitest": "3.2.7",
+    "vite": "6.4.3",
+    "jsdom": "25.0.1",
+    "react": "18.3.1",
+    "testing_library_react": "14.3.1",
+    "framer_motion": "11.18.2",
+    "eslint": "8.57.1",
+    "eslint_config_next": "14.2.35",
+    "installed_next": "16.3.3"
+  },
+  "installation": {
+    "command": "pnpm install --frozen-lockfile",
+    "exit_code": 0,
+    "workspace_projects": 3,
+    "packages_added": 1451,
+    "lock_resolution": "skipped, already current",
+    "duration_reported": "5m 56.4s",
+    "build_policy": "Existing allowBuilds policy preserved; no approval or peer override."
+  },
+  "source_blobs": {
+    "lib/retry-queue-client.js": "4a77a1e69ca36e49a5be3e6bc55a8ade61dbb765",
+    "lib/retry-queue-policy.js": "f2dd11c733e28f4e752aebbe1244d961d3ca76c4",
+    "components/app/VaultRetryQueue.jsx": "080ba6439df325171daaf32a45a6922f1f5bbf33",
+    "lib/retry-queue-pagination.test.js": "bec2e7d7f6683058cf580bec83c3441e41ccc4d3",
+    "components/app/VaultRetryQueue.pagination.test.jsx": "b5f5621af9d85ba27a0d3cb43c74d07bb79a69d0",
+    "lib/retry-queue-policy.test.js": "8951a99344ae8b768b062d06075113659b1c669f",
+    "lib/retry-queue-client.test.js": "8c2aea061be4d9cb1b2e9bf5370dfd3b756008a2",
+    "components/app/VaultRetryQueue.test.jsx": "33fd0d126546af8c0761d6c32eb3bb2100189966",
+    "vitest.config.mjs": "5b048f9f66f22ada91958af53d6525c91cc8296e",
+    "tests/setup.ts": "13a1f5dcba739fd8da7055982116975f1eaf85be"
+  },
+  "dependency_files": {
+    "pnpm-lock.yaml": {
+      "git_blob": "8c60c191836213cf9024f4c65616fbf59537e756",
+      "sha256": "b13a172806e7b49f420b66b3854f535b269b33010abfdb662261fc429ad70bd9",
+      "unchanged_after_install_and_tests": true
+    },
+    "pnpm-workspace.yaml": {
+      "git_blob": "24b0f88d509b3fb6d4b62ce0918366697aacaf7f",
+      "sha256": "b5d8284c88dedfe27d4c30fe510f0f1a430cccdd5e3ad9d6b94e39a7f2836671",
+      "unchanged_after_install_and_tests": true
+    }
+  },
+  "final_execution": {
+    "success": true,
+    "total": 78,
+    "passed": 78,
+    "failed": 0,
+    "skipped_or_pending": 0,
+    "start_time_unix_ms": 1791232327304,
+    "files": [
+      {
+        "path": "lib/retry-queue-client.test.js",
+        "cases": 12,
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "path": "lib/retry-queue-pagination.test.js",
+        "cases": 20,
+        "passed": 20,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "path": "lib/retry-queue-policy.test.js",
+        "cases": 13,
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "path": "components/app/VaultRetryQueue.pagination.test.jsx",
+        "cases": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "path": "components/app/VaultRetryQueue.test.jsx",
+        "cases": 29,
+        "passed": 29,
+        "failed": 0,
+        "skipped": 0
+      }
+    ]
+  },
+  "final_command": "pnpm exec vitest run lib/retry-queue-policy.test.js lib/retry-queue-client.test.js lib/retry-queue-pagination.test.js components/app/VaultRetryQueue.test.jsx components/app/VaultRetryQueue.pagination.test.jsx --maxWorkers=1 --no-file-parallelism --reporter=default --reporter=json --outputFile=/tmp/vq216-current.json",
+  "baseline": {
+    "predecessor_commit": "bc22d31fb3bd03162b24cca11e379532f2310f31",
+    "changed_only_for_check": "lib/retry-queue-client.js",
+    "predecessor_client_blob": "7a20fcb12cc904e61503ec8e6225ab39e1402e5a",
+    "restored_client_blob": "4a77a1e69ca36e49a5be3e6bc55a8ade61dbb765",
+    "command": "pnpm exec vitest run lib/retry-queue-pagination.test.js components/app/VaultRetryQueue.pagination.test.jsx --maxWorkers=1 --no-file-parallelism -t 'older.*confirmed' --reporter=default --reporter=json --outputFile=/tmp/vq216-before.json",
+    "execution": {
+      "success": false,
+      "total": 24,
+      "passed": 0,
+      "failed": 2,
+      "skipped_or_pending": 22,
+      "start_time_unix_ms": 1791232346495,
+      "files": [
+        {
+          "path": "lib/retry-queue-pagination.test.js",
+          "cases": 20,
+          "passed": 0,
+          "failed": 1,
+          "skipped": 19
+        },
+        {
+          "path": "components/app/VaultRetryQueue.pagination.test.jsx",
+          "cases": 4,
+          "passed": 0,
+          "failed": 1,
+          "skipped": 3
+        }
+      ]
+    },
+    "observed_failures": [
+      {
+        "case": "retry queue ledger pagination finds older queue actions beyond a full confirmed first page",
+        "first_diagnostic": "AssertionError: expected [] to deeply equal [ 'older-pending', 'older-failed' ]"
+      },
+      {
+        "case": "VaultRetryQueue with the real paginated client renders older pending and failed actions beyond 50 confirmed records",
+        "first_diagnostic": "AssertionError: expected \"spy\" to be called 2 times, but got 1 times"
+      }
+    ]
+  },
+  "other_checks": [
+    {
+      "command": "pnpm exec eslint lib/retry-queue-pagination.test.js components/app/VaultRetryQueue.pagination.test.jsx --max-warnings=0",
+      "exit_code": 0
+    },
+    {
+      "command": "pnpm run check:terms",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --cached --check",
+      "exit_code": 0
+    }
+  ],
+  "limits": [
+    "Local Vitest/jsdom with production modules and real workspace wallet store, controlled ledger transport and synthetic auth headers.",
+    "No real browser/device, full Next build, whole-repository tests, route-smoke/E2E, Postgres, authenticated backend, signing provider or chain.",
+    "Default dashboard wallet-address-only auth does not satisfy backend signed challenge/service credential policy; preexisting integration not repaired.",
+    "Signed auth renewal assertions do not verify cryptographic signatures.",
+    "Not a Node20 matrix, hosted-CI pass, database-snapshot, maintainer acceptance or payment claim.",
+    "Existing React act warnings and jsdom scrollTo diagnostics visible."
+  ]
+}
