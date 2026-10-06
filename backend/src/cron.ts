@@ -10,21 +10,57 @@ import {
 } from "./services/backupService.js";
 import type { StellarIndexer } from "./services/stellarIndexer.js";
 import { pingDatabase } from "./db.js";
+import type { JobLeaseContext, JobLeaseService } from "./services/jobLeaseService.js";
+
+export const JOB_RECONCILER = "cron:reconciler";
+export const JOB_QUEST = "cron:quest";
+export const JOB_INDEXER = "cron:indexer";
+export const JOB_BACKUP = "cron:backup";
+export const JOB_RESTORE_DRILL = "cron:restore-drill";
+
+type LeaseOpts = {
+  /** When provided, each tick acquires a distributed lease before running. */
+  leases?: JobLeaseService;
+};
+
+async function withOptionalLease(
+  leases: JobLeaseService | undefined,
+  jobName: string,
+  logger: Logger,
+  work: (lease?: JobLeaseContext) => Promise<void>
+): Promise<void> {
+  if (!leases) {
+    await work();
+    return;
+  }
+  const result = await leases.runWithLease(jobName, async (lease) => {
+    lease.signal.throwIfAborted();
+    await work(lease);
+  });
+  if (result.status === "skipped") {
+    logger.info({ jobName, reason: result.reason }, "cron tick skipped: lease not held");
+  } else if (result.status === "fence_lost") {
+    logger.warn({ jobName }, "cron tick aborted: lease fence lost");
+  }
+}
 
 export function startReconcilerCron(opts: {
   prisma: PrismaClient;
   ttlMinutes: number;
   logger: Logger;
   schedule?: string;
-}): cron.ScheduledTask {
+} & LeaseOpts): cron.ScheduledTask {
   const schedule = opts.schedule ?? "*/1 * * * *";
   const task = cron.schedule(schedule, async () => {
-    try {
-      const result = await sweepOrphans(opts.prisma, { ttlMinutes: opts.ttlMinutes });
-      opts.logger.info({ result }, "reconciler sweep complete");
-    } catch (err) {
-      opts.logger.error({ err }, "reconciler sweep failed");
-    }
+    await withOptionalLease(opts.leases, JOB_RECONCILER, opts.logger, async (lease) => {
+      try {
+        const result = await sweepOrphans(opts.prisma, { ttlMinutes: opts.ttlMinutes }, lease);
+        opts.logger.info({ result }, "reconciler sweep complete");
+      } catch (err) {
+        lease?.signal.throwIfAborted();
+        opts.logger.error({ err }, "reconciler sweep failed");
+      }
+    });
   });
   return task;
 }
@@ -39,19 +75,22 @@ export function startQuestCron(opts: {
   logger: Logger;
   schedule?: string;
   lookbackMinutes?: number;
-}): cron.ScheduledTask {
+} & LeaseOpts): cron.ScheduledTask {
   const schedule = opts.schedule ?? "*/2 * * * *";
   const lookbackMinutes = opts.lookbackMinutes ?? 10;
   const questService = new QuestService(opts.prisma);
 
   const task = cron.schedule(schedule, async () => {
-    const since = new Date(Date.now() - lookbackMinutes * 60 * 1000);
-    try {
-      const result = await questService.evaluateRecent(since);
-      opts.logger.info({ result }, "quest evaluation sweep complete");
-    } catch (err) {
-      opts.logger.error({ err }, "quest evaluation sweep failed");
-    }
+    await withOptionalLease(opts.leases, JOB_QUEST, opts.logger, async (lease) => {
+      const since = new Date(Date.now() - lookbackMinutes * 60 * 1000);
+      try {
+        const result = await questService.evaluateRecent(since, 500, lease);
+        opts.logger.info({ result }, "quest evaluation sweep complete");
+      } catch (err) {
+        lease?.signal.throwIfAborted();
+        opts.logger.error({ err }, "quest evaluation sweep failed");
+      }
+    });
   });
   return task;
 }
@@ -67,19 +106,22 @@ export function startIndexerCron(opts: {
   indexer: StellarIndexer;
   logger: Logger;
   schedule?: string;
-}): cron.ScheduledTask {
+} & LeaseOpts): cron.ScheduledTask {
   const schedule = opts.schedule ?? "*/1 * * * *";
   const task = cron.schedule(schedule, async () => {
-    try {
-      if (!(await pingDatabase(opts.prisma))) {
-        opts.logger.warn({}, "indexer tick skipped: database unreachable");
-        return;
+    await withOptionalLease(opts.leases, JOB_INDEXER, opts.logger, async (lease) => {
+      try {
+        if (!(await pingDatabase(opts.prisma))) {
+          opts.logger.warn({}, "indexer tick skipped: database unreachable");
+          return;
+        }
+        const result = await opts.indexer.tick(lease);
+        opts.logger.info({ result }, "indexer tick complete");
+      } catch (err) {
+        lease?.signal.throwIfAborted();
+        opts.logger.error({ err }, "indexer tick failed");
       }
-      const result = await opts.indexer.tick();
-      opts.logger.info({ result }, "indexer tick complete");
-    } catch (err) {
-      opts.logger.error({ err }, "indexer tick failed");
-    }
+    });
   });
   return task;
 }
@@ -101,7 +143,7 @@ export function startBackupCron(opts: {
   remoteStorage?: RemoteStorageAdapter;
   logger: Logger;
   schedule?: string;
-}): cron.ScheduledTask {
+} & LeaseOpts): cron.ScheduledTask {
   const schedule = opts.schedule ?? "0 2 * * *"; // default: daily at 02:00
   const svc = new BackupService({
     backupDir: opts.backupDir,
@@ -115,12 +157,15 @@ export function startBackupCron(opts: {
   });
 
   const task = cron.schedule(schedule, async () => {
-    try {
-      const result = await svc.run();
-      opts.logger.info({ result }, "backup: completed");
-    } catch (err) {
-      opts.logger.error({ err }, "backup: failed");
-    }
+    await withOptionalLease(opts.leases, JOB_BACKUP, opts.logger, async (lease) => {
+      try {
+        const result = await svc.run(lease);
+        opts.logger.info({ result }, "backup: completed");
+      } catch (err) {
+        lease?.signal.throwIfAborted();
+        opts.logger.error({ err }, "backup: failed");
+      }
+    });
   });
   return task;
 }
@@ -137,7 +182,7 @@ export function startRestoreDrillCron(opts: {
   restoreRunner?: DbRestoreRunner;
   logger: Logger;
   schedule?: string;
-}): cron.ScheduledTask {
+} & LeaseOpts): cron.ScheduledTask {
   const schedule = opts.schedule ?? "0 4 * * 0"; // default: weekly at 04:00 on Sunday
   const svc = new BackupService({
     backupDir: opts.backupDir,
@@ -150,16 +195,19 @@ export function startRestoreDrillCron(opts: {
   });
 
   const task = cron.schedule(schedule, async () => {
-    try {
-      const result = await svc.runRestoreDrill();
-      if (!result.success) {
-        opts.logger.error({ result }, "restore verification drill failed");
-      } else {
-        opts.logger.info({ result }, "restore verification drill completed successfully");
+    await withOptionalLease(opts.leases, JOB_RESTORE_DRILL, opts.logger, async (lease) => {
+      try {
+        const result = await svc.runRestoreDrill({}, lease);
+        if (!result.success) {
+          opts.logger.error({ result }, "restore verification drill failed");
+        } else {
+          opts.logger.info({ result }, "restore verification drill completed successfully");
+        }
+      } catch (err) {
+        lease?.signal.throwIfAborted();
+        opts.logger.error({ err }, "restore verification drill errored out");
       }
-    } catch (err) {
-      opts.logger.error({ err }, "restore verification drill errored out");
-    }
+    });
   });
   return task;
 }

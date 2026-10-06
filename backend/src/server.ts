@@ -13,10 +13,13 @@ import {
   defaultXdrDecoder
 } from "./services/stellarIndexer.js";
 import type { ScheduledTask } from "node-cron";
+import { JobLeaseService } from "./services/jobLeaseService.js";
 
 const env = getEnv();
 const logger = createLogger(env.LOG_LEVEL);
 const prisma = getPrisma(env.DATABASE_URL);
+
+const leases = new JobLeaseService({ prisma, logger });
 
 // Initialize Cache Service (pointing to REDIS_URL if set, otherwise defaults to local Redis)
 const cacheService = new CacheService(prisma, logger, process.env.REDIS_URL, undefined, new PrometheusCacheSink(register));
@@ -31,23 +34,17 @@ const app = buildApp({
   cacheService
 });
 
-// Periodic write-behind sync task: sync checkpoint from cache to PostgreSQL database every 15 seconds
-const cacheSyncInterval = setInterval(async () => {
-  try {
-    await cacheService.syncCheckpointToDb();
-  } catch (err) {
-    logger.error({ err }, "failed to sync indexer checkpoint from cache");
-  }
-}, 15000);
-cacheSyncInterval.unref();
+// Indexer checkpoints commit in the lease-fenced database transaction. There
+// must be no later, unleased Redis write-behind that can overwrite a new owner.
 
 const cronTask = startReconcilerCron({
   prisma,
   ttlMinutes: env.ORPHAN_TTL_MINUTES,
-  logger
+  logger,
+  leases
 });
 
-const questCronTask = startQuestCron({ prisma, logger });
+const questCronTask = startQuestCron({ prisma, logger, leases });
 
 // Stellar indexer daemon (#indexer). Only started when a Soroban RPC endpoint
 // and at least one contract id are configured.
@@ -60,7 +57,7 @@ if (env.SOROBAN_RPC_URL && env.INDEXER_CONTRACT_IDS) {
     decoder: defaultXdrDecoder,
     logger
   });
-  indexerCronTask = startIndexerCron({ prisma, indexer, logger });
+  indexerCronTask = startIndexerCron({ prisma, indexer, logger, leases });
   logger.info({ contractIds }, "stellar indexer daemon started");
 }
 
@@ -72,7 +69,8 @@ if (env.BACKUP_DIR) {
     databaseUrl: env.DATABASE_URL,
     retainDays: env.BACKUP_RETAIN_DAYS,
     schedule: env.BACKUP_SCHEDULE,
-    logger
+    logger,
+    leases
   });
   logger.info(
     { backupDir: env.BACKUP_DIR, schedule: env.BACKUP_SCHEDULE },
@@ -82,11 +80,11 @@ if (env.BACKUP_DIR) {
 
 async function shutdown(signal: string) {
   logger.info({ signal }, "shutting down");
-  clearInterval(cacheSyncInterval);
   cronTask.stop();
   questCronTask.stop();
   indexerCronTask?.stop();
   backupCronTask?.stop();
+  await leases.shutdown();
   await app.close();
   await cacheService.disconnect();
   await prisma.$disconnect();

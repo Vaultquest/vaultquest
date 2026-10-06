@@ -8,8 +8,9 @@
  *      arrived from the indexer but whose matching intent was never attached).
  */
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { ERROR_CODES } from "../constants.js";
+import type { JobLeaseContext } from "./jobLeaseService.js";
 
 export interface SweepResult {
   /** Number of submitted actions promoted to orphaned. */
@@ -25,9 +26,11 @@ export interface SweepResult {
  * @param opts.ttlMinutes - Submitted actions older than this are orphaned.
  */
 export async function sweepOrphans(
-  prisma: PrismaClient,
-  opts: { ttlMinutes: number }
+  prisma: PrismaClient | Prisma.TransactionClient,
+  opts: { ttlMinutes: number },
+  lease?: JobLeaseContext
 ): Promise<SweepResult> {
+  if (lease) return lease.transaction((tx) => sweepOrphans(tx, opts));
   const cutoff = new Date(Date.now() - opts.ttlMinutes * 60 * 1000);
   const eventCutoff = new Date(Date.now() - 60 * 60 * 1000); // 1 hour
 

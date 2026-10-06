@@ -13,13 +13,18 @@ export type TestDb = {
 export async function startTestDb(): Promise<TestDb> {
   const backendDir = fileURLToPath(new URL("../../", import.meta.url));
   const prismaCliPath = resolve(backendDir, "node_modules/prisma/build/index.js");
-  const container: StartedPostgreSqlContainer = await new PostgreSqlContainer("postgres:16-alpine")
-    .withDatabase("vaultquest_test")
-    .withUsername("test")
-    .withPassword("test")
-    .start();
-
-  const databaseUrl = container.getConnectionUri();
+  // A caller may supply an isolated, disposable PostgreSQL test database when
+  // Docker is unavailable. Never point this at application/production data.
+  let databaseUrl = process.env.VAULTQUEST_TEST_DATABASE_URL;
+  let container: StartedPostgreSqlContainer | undefined;
+  if (!databaseUrl) {
+    container = await new PostgreSqlContainer("postgres:16-alpine")
+      .withDatabase("vaultquest_test")
+      .withUsername("test")
+      .withPassword("test")
+      .start();
+    databaseUrl = container.getConnectionUri();
+  }
 
   execFileSync(process.execPath, [prismaCliPath, "db", "push", "--accept-data-loss"], {
     cwd: backendDir,
@@ -34,7 +39,7 @@ export async function startTestDb(): Promise<TestDb> {
     databaseUrl,
     stop: async () => {
       await prisma.$disconnect();
-      await container.stop();
+      await container?.stop();
     }
   };
 }
@@ -56,12 +61,14 @@ async function safeDelete(deleteFn: () => Promise<any>) {
 }
 
 export async function resetDb(prisma: PrismaClient): Promise<void> {
+  await safeDelete(() => prisma.jobLease.deleteMany({}));
+  await safeDelete(() => prisma.actionLedger.deleteMany({}));
   await safeDelete(() => prisma.pendingEvent.deleteMany({}));
+  await safeDelete(() => prisma.indexerCheckpoint.deleteMany({}));
+  await safeDelete(() => prisma.vaultSettlement.deleteMany({}));
+  await safeDelete(() => prisma.userQuest.deleteMany({}));
   await safeDelete(() => prisma.savedPool.deleteMany({}));
   await safeDelete(() => prisma.userProfile.deleteMany({}));
-  await safeDelete(() => prisma.userQuest.deleteMany({}));
-  await safeDelete(() => prisma.actionLedger.deleteMany({}));
-  await safeDelete(() => prisma.indexerCheckpoint.deleteMany({}));
   await safeDelete(() => prisma.userNotificationPref.deleteMany({}));
   await safeDelete(() => prisma.userSupportEvidence.deleteMany({}));
   await safeDelete(() => prisma.userActivityLog.deleteMany({}));

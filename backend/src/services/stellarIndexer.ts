@@ -8,6 +8,7 @@
  */
 
 import type { LedgerService } from "./ledger.js";
+import type { JobLeaseContext } from "./jobLeaseService.js";
 import { withRetry, type RetryOptions } from "../utils/retry.js";
 import type { Logger } from "pino";
 import { decodeDripPoolEvent } from "../generated/drip-pool-events.js";
@@ -49,7 +50,7 @@ export interface IndexResult {
 }
 
 export interface HorizonEventSource {
-  fetchEvents(opts: { cursor: string | null; limit: number }): Promise<RawHorizonEvent[]>;
+  fetchEvents(opts: { cursor: string | null; limit: number; signal?: AbortSignal }): Promise<RawHorizonEvent[]>;
 }
 
 export interface XdrDecoder {
@@ -146,39 +147,26 @@ export class StellarIndexer {
     this.checkpointLoaded = this.loadCheckpoint();
   }
 
-  private async loadCheckpoint(): Promise<void> {
+  private async loadCheckpoint(strict = false): Promise<void> {
     if (this.opts.skipCheckpointLoad) return;
 
     try {
       const checkpoint = await this.opts.ledger.getIndexerCheckpoint();
       if (checkpoint?.lastProcessedEventId) {
         this.cursor = checkpoint.lastProcessedEventId;
-        this.latestLedger = checkpoint.latestLedger;
+        this.latestLedger = checkpoint.latestLedger ?? 0;
         this.opts.logger?.info(
           { cursor: this.cursor, latestLedger: this.latestLedger },
           "indexer: loaded checkpoint from database"
         );
       } else {
+        this.cursor = null;
+        this.latestLedger = 0;
         this.opts.logger?.info("indexer: no checkpoint found, starting from beginning");
       }
     } catch (err) {
       this.opts.logger?.error({ err }, "indexer: failed to load checkpoint from database");
-    }
-  }
-
-  private async ensureCheckpointLoaded(): Promise<void> {
-    if (this.checkpointLoaded) return;
-    this.checkpointLoaded = true;
-    try {
-      const checkpoint = await this.opts.ledger.getIndexerCheckpoint();
-      if (checkpoint?.lastProcessedEventId) {
-        this.cursor = checkpoint.lastProcessedEventId;
-      }
-      if (checkpoint?.latestLedger) {
-        this.latestLedger = checkpoint.latestLedger;
-      }
-    } catch (err) {
-      this.opts.logger?.warn({ err }, "indexer: failed to load checkpoint, starting from scratch");
+      if (strict) throw err;
     }
   }
 
@@ -198,15 +186,20 @@ export class StellarIndexer {
    * skipped without blocking subsequent events in the batch. The cursor
    * always advances to the last fetched event ID to prevent reprocessing.
    */
-  async tick(): Promise<IndexResult> {
-    await this.ensureCheckpointLoaded();
+  async tick(lease?: JobLeaseContext): Promise<IndexResult> {
+    lease?.signal.throwIfAborted();
+    await this.checkpointLoaded;
+    // A different replica may have advanced the durable cursor while this
+    // process did not own the job. Reload after every lease acquisition.
+    if (lease) await this.loadCheckpoint(true);
+    lease?.signal.throwIfAborted();
     const { ledger, source, decoder } = this.opts;
     const batchSize = this.opts.batchSize;
 
     // ── Fetch with retry ──────────────────────────────────────────────────
     const rawEvents = await withRetry(
-      () => source.fetchEvents({ cursor: this.cursor, limit: batchSize }),
-      this.opts.retryOptions
+      () => source.fetchEvents({ cursor: this.cursor, limit: batchSize, ...(lease && { signal: lease.signal }) }),
+      { ...this.opts.retryOptions, ...(lease && { signal: lease.signal }) }
     );
 
     let imported = 0;
@@ -220,6 +213,7 @@ export class StellarIndexer {
 
     // ── Process each event ────────────────────────────────────────────────
     for (const raw of rawEvents) {
+      lease?.signal.throwIfAborted();
       // Intra-batch duplicate: same txHash appeared earlier in this tick.
       if (seenInBatch.has(raw.txHash)) {
         duplicates += 1;
@@ -254,14 +248,17 @@ export class StellarIndexer {
       const statusHint: "confirmed" | "reverted" = raw.successful ? "confirmed" : "reverted";
 
       try {
-        await ledger.reconcileEvent({
+        const event = {
           txHash: raw.txHash,
           sorobanEventId: raw.id,
           eventPayload: payload,
           statusHint
-        });
+        };
+        if (lease) await ledger.reconcileEvent(event, lease);
+        else await ledger.reconcileEvent(event);
         imported += 1;
       } catch (err: unknown) {
+        lease?.signal.throwIfAborted();
         // Unique constraint violation on pending_events.tx_hash means we already
         // have this event from a previous tick — safe to skip (idempotency).
         const isDuplicate =
@@ -273,29 +270,33 @@ export class StellarIndexer {
         if (isDuplicate) {
           duplicates += 1;
         } else {
+          // Advancing a leased checkpoint after a failed commit would lose the
+          // event permanently. Leave it for this or the replacement owner.
+          if (lease) throw err;
           this.opts.logger?.warn({ err, txHash: raw.txHash }, "indexer: skipping event due to error");
         }
       }
     }
 
-    // Advance cursor and ledger to the last event in this batch.
+    // Publish the durable checkpoint before advancing local state. Each write
+    // rechecks the same fence, so stale workers cannot publish progress.
     if (rawEvents.length > 0) {
       const lastEvent = rawEvents[rawEvents.length - 1]!;
-      this.cursor = lastEvent.id;
-      this.latestLedger = lastEvent.ledger;
-    }
-
-    // Persist checkpoint to database after successful processing.
-    if (rawEvents.length > 0) {
+      const checkpoint = {
+        latestLedger: lastEvent.ledger,
+        lastProcessedEventId: lastEvent.id,
+        success: true
+      };
       try {
-        await this.opts.ledger.updateIndexerCheckpoint({
-          latestLedger: this.latestLedger,
-          lastProcessedEventId: this.cursor,
-          success: true
-        });
+        if (lease) await ledger.updateIndexerCheckpoint(checkpoint, lease);
+        else await ledger.updateIndexerCheckpoint(checkpoint);
       } catch (err) {
+        if (lease) throw err;
         this.opts.logger?.warn({ err }, "indexer: failed to persist checkpoint");
       }
+      lease?.signal.throwIfAborted();
+      this.cursor = lastEvent.id;
+      this.latestLedger = lastEvent.ledger;
     }
 
     return {
@@ -318,7 +319,7 @@ export class StellarIndexer {
 export class SorobanRpcEventSource implements HorizonEventSource {
   constructor(private options: SorobanRpcEventSourceOptions) {}
 
-  async fetchEvents(opts: { cursor: string | null; limit: number }): Promise<RawHorizonEvent[]> {
+  async fetchEvents(opts: { cursor: string | null; limit: number; signal?: AbortSignal }): Promise<RawHorizonEvent[]> {
     // TODO: replace with real Soroban RPC call via @stellar/stellar-sdk
     // e.g. await server.getEvents({ startLedger, filters, limit })
     return [];

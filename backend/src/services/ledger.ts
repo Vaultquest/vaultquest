@@ -6,6 +6,7 @@ import type { IntentInput, ActionRecord } from "../types.js";
 import type { ActionStatus } from "../constants.js";
 import type { CacheService } from "./cacheService.js";
 import { toActionPayloadView } from "../schemas/actionPayloads.js";
+import type { JobLeaseContext } from "./jobLeaseService.js";
 
 export type ListActionsParams = {
   walletAddress: string;
@@ -90,10 +91,8 @@ export class LedgerService {
   }
 
   async getIndexerCheckpoint(): Promise<Partial<IndexerCheckpoint> | null> {
-    if (this.cacheService) {
-      return this.cacheService.getCheckpoint();
-    }
-
+    // Checkpoints are the durable ownership boundary. An old Redis write-behind
+    // value must never move a replacement worker's cursor backwards.
     return this.prisma.indexerCheckpoint.findUnique({
       where: { id: "singleton" }
     });
@@ -233,8 +232,8 @@ export class LedgerService {
     sorobanEventId: string;
     eventPayload: unknown;
     statusHint: "confirmed" | "reverted";
-  }): Promise<{ matched: boolean }> {
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+  }, lease?: JobLeaseContext): Promise<{ matched: boolean }> {
+    const reconcile = async (tx: Prisma.TransactionClient) => {
       const row = await tx.actionLedger.findFirst({ where: { txHash: input.txHash } });
 
       if (!row) {
@@ -248,7 +247,7 @@ export class LedgerService {
           },
           update: {}
         });
-        if (this.cacheService) {
+        if (this.cacheService && !lease) {
           await this.cacheService.setPendingEvent({
             txHash: input.txHash,
             sorobanEventId: input.sorobanEventId,
@@ -275,7 +274,8 @@ export class LedgerService {
         }
       });
       return { matched: true };
-    });
+    };
+    return lease ? lease.transaction(reconcile) : this.prisma.$transaction(reconcile);
   }
 
   async findByIdempotencyKey(key: string): Promise<ActionRecord | null> {
@@ -523,11 +523,23 @@ export class LedgerService {
     lastProcessedEventId?: string | null;
     lastError?: string | null;
     success: boolean;
-  }): Promise<any> {
+  }, lease?: JobLeaseContext): Promise<any> {
+    if (lease) {
+      return lease.transaction((tx) => this.writeIndexerCheckpoint(tx, input));
+    }
+    return this.writeIndexerCheckpoint(this.prisma, input);
+  }
+
+  private async writeIndexerCheckpoint(db: Prisma.TransactionClient, input: {
+    latestLedger: number;
+    lastProcessedEventId?: string | null;
+    lastError?: string | null;
+    success: boolean;
+  }): Promise<IndexerCheckpoint> {
     const now = new Date();
     const needsExisting =
       input.lastProcessedEventId === undefined || (!input.success && input.lastError === undefined);
-    const existing = needsExisting ? await this.getIndexerCheckpoint() : null;
+    const existing = needsExisting ? await db.indexerCheckpoint.findUnique({ where: { id: "singleton" } }) : null;
     const lastProcessedEventId =
       input.lastProcessedEventId !== undefined
         ? input.lastProcessedEventId
@@ -537,19 +549,7 @@ export class LedgerService {
       : input.lastError !== undefined
         ? input.lastError
         : existing?.lastError ?? null;
-    if (this.cacheService) {
-      const lastSuccessSyncTime = input.success ? now : (existing?.lastSuccessSyncTime ?? now);
-      await this.cacheService.setCheckpoint({
-        latestLedger: input.latestLedger,
-        lastProcessedEventId,
-        lastSyncTime: now,
-        lastSuccessSyncTime,
-        lastError
-      });
-      return { id: "singleton" };
-    }
-
-    return this.prisma.indexerCheckpoint.upsert({
+    return db.indexerCheckpoint.upsert({
       where: { id: "singleton" },
       create: {
         id: "singleton",
@@ -573,11 +573,7 @@ export class LedgerService {
     const staleAfterMs = options.staleAfterMs ?? 5 * 60 * 1000;
     const now = options.now ?? new Date();
 
-    const checkpoint = this.cacheService
-      ? await this.cacheService.getCheckpoint()
-      : await this.prisma.indexerCheckpoint.findUnique({
-          where: { id: "singleton" }
-        });
+    const checkpoint = await this.getIndexerCheckpoint();
 
     if (!checkpoint) {
       return {

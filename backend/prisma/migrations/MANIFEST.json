@@ -10,23 +10,32 @@
           "id": "20260423000000_core_init",
           "timestamp": "2026-04-23T00:00:00Z",
           "description": "Initial schema with ActionLedger and PendingEvent tables",
-          "tables": ["action_ledger", "pending_events"],
+          "tables": [
+            "action_ledger",
+            "pending_events"
+          ],
           "breaking": false
         },
         {
           "id": "20260423000001_core_nullable_action_payload",
           "timestamp": "2026-04-23T00:01:00Z",
           "description": "Make action_payload nullable in ActionLedger",
-          "tables": ["action_ledger"],
+          "tables": [
+            "action_ledger"
+          ],
           "breaking": false
         },
         {
           "id": "20260528000000_core_unique_tx_hash",
           "timestamp": "2026-05-28T00:00:00Z",
           "description": "Add unique constraint on tx_hash for idempotency",
-          "tables": ["action_ledger"],
+          "tables": [
+            "action_ledger"
+          ],
           "breaking": false,
-          "relatedIssues": ["#72"]
+          "relatedIssues": [
+            "#72"
+          ]
         }
       ]
     },
@@ -38,40 +47,71 @@
           "id": "20260529000000_feature_saved_pools",
           "timestamp": "2026-05-29T00:00:00Z",
           "description": "User pool watchlist functionality",
-          "tables": ["saved_pools"],
+          "tables": [
+            "saved_pools"
+          ],
           "breaking": false,
-          "relatedIssues": ["#89", "#90"]
+          "relatedIssues": [
+            "#89",
+            "#90"
+          ]
         },
         {
           "id": "20260530000000_feature_indexer_checkpoint",
           "timestamp": "2026-05-30T00:00:00Z",
           "description": "Blockchain indexer state tracking",
-          "tables": ["indexer_checkpoints"],
+          "tables": [
+            "indexer_checkpoints"
+          ],
           "breaking": false
         },
         {
           "id": "20260531000000_feature_user_quests",
           "timestamp": "2026-05-31T00:00:00Z",
           "description": "Quest progress tracking system",
-          "tables": ["user_quests"],
+          "tables": [
+            "user_quests"
+          ],
           "breaking": false,
-          "relatedIssues": ["#26"]
+          "relatedIssues": [
+            "#26"
+          ]
         },
         {
           "id": "20260531000001_feature_vault_settlements",
           "timestamp": "2026-05-31T00:01:00Z",
           "description": "Vault settlement and escrow pipeline",
-          "tables": ["vault_settlements"],
+          "tables": [
+            "vault_settlements"
+          ],
           "breaking": false,
-          "relatedIssues": ["#settlement"]
+          "relatedIssues": [
+            "#settlement"
+          ]
         },
         {
           "id": "20260630000000_feature_user_profiles",
           "timestamp": "2026-06-30T00:00:00Z",
           "description": "Durable user profile contract with editable fields and achievements",
-          "tables": ["user_profiles"],
+          "tables": [
+            "user_profiles"
+          ],
           "breaking": false,
-          "relatedIssues": ["#134"]
+          "relatedIssues": [
+            "#134"
+          ]
+        },
+        {
+          "id": "20260925000000_feature_job_leases",
+          "timestamp": "2026-09-25T00:00:00Z",
+          "description": "Distributed leases and fencing tokens for scheduled jobs",
+          "tables": [
+            "job_leases"
+          ],
+          "breaking": false,
+          "relatedIssues": [
+            "#93"
+          ]
         }
       ]
     },
@@ -130,6 +170,11 @@
       "phase": "features",
       "createdIn": "20260630000000_feature_user_profiles",
       "description": "Durable user profile with editable fields"
+    },
+    "job_leases": {
+      "phase": "features",
+      "createdIn": "20260925000000_feature_job_leases",
+      "description": "Distributed ownership leases for cron/indexer workers"
     }
   }
 }

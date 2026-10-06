@@ -19,6 +19,7 @@
  */
 
 import type { PrismaClient, Prisma } from "@prisma/client";
+import type { JobLeaseContext } from "./jobLeaseService.js";
 import { CANONICAL_DEPOSIT_ASSET } from "../constants.js";
 
 export type QuestMetricKey =
@@ -139,7 +140,7 @@ function minorUnitsToNumber(minor: bigint, decimals: number): number {
 
 export class QuestService {
   constructor(
-    private readonly prisma: PrismaClient,
+    private readonly prisma: PrismaClient | Prisma.TransactionClient,
     private readonly quests: readonly QuestDefinition[] = STANDARD_QUESTS
   ) {}
 
@@ -226,7 +227,10 @@ export class QuestService {
    * progress or status actually changed are written. Returns the current
    * progress snapshot.
    */
-  async evaluateWallet(walletAddress: string): Promise<QuestProgress[]> {
+  async evaluateWallet(walletAddress: string, lease?: JobLeaseContext): Promise<QuestProgress[]> {
+    if (lease) {
+      return lease.transaction((tx) => new QuestService(tx, this.quests).evaluateWallet(walletAddress));
+    }
     const metrics = await this.computeMetrics(walletAddress);
     const projected = this.projectProgress(metrics);
 
@@ -286,7 +290,8 @@ export class QuestService {
    * Cron entry point. Finds wallets with confirmed ledger entries updated since
    * `since` and re-evaluates each. Returns the number of wallets processed.
    */
-  async evaluateRecent(since: Date, limit = 500): Promise<{ wallets: number }> {
+  async evaluateRecent(since: Date, limit = 500, lease?: JobLeaseContext): Promise<{ wallets: number }> {
+    lease?.signal.throwIfAborted();
     const rows = await this.prisma.actionLedger.findMany({
       where: { status: "confirmed", updatedAt: { gte: since } },
       select: { walletAddress: true },
@@ -295,7 +300,8 @@ export class QuestService {
     });
 
     for (const { walletAddress } of rows) {
-      await this.evaluateWallet(walletAddress);
+      lease?.signal.throwIfAborted();
+      await this.evaluateWallet(walletAddress, lease);
     }
 
     return { wallets: rows.length };

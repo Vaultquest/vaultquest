@@ -10,9 +10,10 @@
  * so the service is fully unit-testable without a real database or cloud vendor lock-in.
  */
 
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 import { createHash } from "node:crypto";
 import type { Logger } from "pino";
+import type { JobLeaseContext } from "./jobLeaseService.js";
 
 // ─── Injectable I/O interfaces ────────────────────────────────────────────────
 
@@ -28,7 +29,8 @@ export interface SpawnResult {
 export type SpawnFn = (
   command: string,
   args: string[],
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
+  signal?: AbortSignal
 ) => Promise<SpawnResult>;
 
 export interface FsAdapter {
@@ -46,6 +48,8 @@ export interface FsAdapter {
   mtimeMs(path: string): Promise<number | null>;
   /** Delete a file. */
   unlink(path: string): Promise<void>;
+  /** Atomically publish a staged dump. Required for leased backup runs. */
+  rename?(from: string, to: string): Promise<void>;
   /** Check if file exists. */
   exists?(path: string): Promise<boolean>;
 }
@@ -61,14 +65,19 @@ export interface RemoteObjectMetadata {
 }
 
 export interface RemoteStorageAdapter {
+  /**
+   * Implementations must propagate signal to their storage client. Cancellation
+   * is cooperative; this interface does not promise server-side atomic fencing.
+   */
   uploadFile(
     localPath: string,
     remoteKey: string,
-    metadata?: Record<string, string>
+    metadata?: Record<string, string>,
+    signal?: AbortSignal
   ): Promise<{ remoteKey: string; etag?: string }>;
-  downloadFile(remoteKey: string, localPath: string): Promise<void>;
-  listObjects(prefix?: string): Promise<RemoteObjectMetadata[]>;
-  deleteObject(remoteKey: string): Promise<void>;
+  downloadFile(remoteKey: string, localPath: string, signal?: AbortSignal): Promise<void>;
+  listObjects(prefix?: string, signal?: AbortSignal): Promise<RemoteObjectMetadata[]>;
+  deleteObject(remoteKey: string, signal?: AbortSignal): Promise<void>;
 }
 
 // ─── Restore Verification Interfaces ─────────────────────────────────────────
@@ -76,7 +85,7 @@ export interface RemoteStorageAdapter {
 export interface RestoreDrillOptions {
   /** Dump file path to restore. If omitted, the latest retained backup is used. */
   dumpFilePath?: string;
-  /** Target database name for isolated restore drill. Defaults to "vaultquest_restore_test". */
+  /** Defaults to "vaultquest_restore_test"; leased drills append an owner/fence suffix. */
   targetDatabaseName?: string;
   /** Maximum Recovery Time Objective in ms. */
   maxRtoMs?: number;
@@ -97,10 +106,11 @@ export interface RestoreDrillResult {
 }
 
 export interface DbRestoreRunner {
-  createDatabase?(dbName: string): Promise<void>;
-  dropDatabase?(dbName: string): Promise<void>;
-  restoreDump(dbName: string, dumpFilePath: string): Promise<SpawnResult>;
-  runSmokeChecks(dbName: string): Promise<{ tableCount: number; passed: boolean; details?: string }>;
+  /** Runners must honor the isolated dbName and cancel their subprocesses or queries. */
+  createDatabase?(dbName: string, signal?: AbortSignal): Promise<void>;
+  dropDatabase?(dbName: string, signal?: AbortSignal): Promise<void>;
+  restoreDump(dbName: string, dumpFilePath: string, signal?: AbortSignal): Promise<SpawnResult>;
+  runSmokeChecks(dbName: string, signal?: AbortSignal): Promise<{ tableCount: number; passed: boolean; details?: string }>;
 }
 
 // ─── Backup Manifest & Results ────────────────────────────────────────────────
@@ -158,32 +168,48 @@ export interface BackupResult {
 
 // ─── Defaults using Node builtins ─────────────────────────────────────────────
 
-export function defaultSpawn(
+export async function defaultSpawn(
   command: string,
   args: string[],
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
+  signal?: AbortSignal
 ): Promise<SpawnResult> {
-  return new Promise((resolve) => {
-    import("node:child_process").then(({ spawn }) => {
-      const proc = spawn(command, args, {
-        env: { ...process.env, ...env },
-        stdio: ["ignore", "ignore", "pipe"]
-      });
+  signal?.throwIfAborted();
+  const { spawn } = await import("node:child_process");
+  signal?.throwIfAborted();
 
-      const stderrChunks: Buffer[] = [];
-      proc.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args, {
+      env: { ...process.env, ...env },
+      stdio: ["ignore", "ignore", "pipe"],
+      signal
+    });
 
-      proc.on("close", (code) => {
+    const stderrChunks: Buffer[] = [];
+    let processError: Error | undefined;
+    proc.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    proc.once("error", (error: Error) => {
+      processError = error;
+    });
+
+    // An abort emits "error" before the child has necessarily exited. Wait for
+    // "close" so the subprocess has stopped when this promise settles.
+    proc.once("close", (code) => {
+      if (signal?.aborted) {
+        reject(signal.reason);
+      } else if (processError) {
+        reject(processError);
+      } else {
         resolve({
           exitCode: code ?? 1,
           stderr: Buffer.concat(stderrChunks).toString("utf8").trim()
         });
-      });
+      }
     });
   });
 }
 
-import { mkdir, writeFile, readFile, readdir, stat, unlink, access } from "node:fs/promises";
+import { mkdir, writeFile, readFile, readdir, stat, unlink, rename, access } from "node:fs/promises";
 
 export const defaultFsAdapter: FsAdapter = {
   async mkdir(dir) {
@@ -211,6 +237,9 @@ export const defaultFsAdapter: FsAdapter = {
   },
   async unlink(path) {
     await unlink(path);
+  },
+  async rename(from, to) {
+    await rename(from, to);
   },
   async exists(path) {
     try {
@@ -304,21 +333,30 @@ export class BackupService {
    * @returns Backup metadata and manifest.
    * @throws If pg_dump or replication fails.
    */
-  async run(): Promise<BackupResult> {
+  async run(ctx?: JobLeaseContext): Promise<BackupResult> {
     const start = Date.now();
+    await this.assertCurrent(ctx);
+    if (ctx && !this.fs.rename) {
+      throw new Error("Leased backups require an FsAdapter with atomic rename");
+    }
 
-    await this.fs.mkdir(this.backupDir);
+    await this.withFence(ctx, () => this.fs.mkdir(this.backupDir));
 
-    const dumpFilename = this.buildFilename();
+    const dumpFilename = this.buildFilename(ctx);
     const manifestFilename = this.buildManifestFilename(dumpFilename);
     const filePath = join(this.backupDir, dumpFilename);
     const manifestPath = join(this.backupDir, manifestFilename);
+    // A partial dump is neither a retained backup nor a restore candidate. Its
+    // owner/fence suffix also prevents an old child overwriting a successor.
+    const stagedPath = ctx ? `${filePath}.partial` : filePath;
 
-    const { pgEnv, pgArgs } = this.buildPgDumpArgs(filePath);
+    const { pgEnv, pgArgs } = this.buildPgDumpArgs(stagedPath);
 
     this.logger?.info({ filePath }, "backup: starting pg_dump");
 
-    const { exitCode, stderr } = await this.spawn(this.pgDumpPath, pgArgs, pgEnv);
+    await this.assertCurrent(ctx);
+    const { exitCode, stderr } = await this.spawn(this.pgDumpPath, pgArgs, pgEnv, ...this.signalArgs(ctx));
+    await this.assertCurrent(ctx);
 
     if (exitCode !== 0) {
       this.logger?.error({ exitCode, stderr }, "backup: pg_dump failed");
@@ -328,7 +366,7 @@ export class BackupService {
     const durationMs = Date.now() - start;
 
     // Read dump content to compute SHA-256 checksum and size
-    const dumpContent = await this.fs.readFile(filePath);
+    const dumpContent = await this.fs.readFile(stagedPath);
     const checksumSha256 = this.computeSha256(dumpContent);
     const fileSizeBytes = dumpContent.length;
 
@@ -357,8 +395,12 @@ export class BackupService {
       }
     };
 
-    // Write initial manifest file locally
-    await this.fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+    // Publish only after preparation completes and ownership is revalidated.
+    await this.withFence(ctx, async () => {
+      await this.fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+      ctx?.signal.throwIfAborted();
+      if (ctx) await this.fs.rename!(stagedPath, filePath);
+    });
 
     let replicated = false;
     let prunedRemote = 0;
@@ -366,10 +408,15 @@ export class BackupService {
     // Off-site replication if configured
     if (this.remoteStorage) {
       try {
-        const uploadRes = await this.remoteStorage.uploadFile(filePath, dumpFilename, {
-          checksum: checksumSha256
-        });
-        await this.remoteStorage.uploadFile(manifestPath, manifestFilename);
+        // A dump upload may outlive a short database transaction. Its unique
+        // key is preparation; the catalog is published only with a current fence.
+        const uploadRes = await this.prepare(ctx, () => this.remoteStorage!.uploadFile(
+          filePath,
+          dumpFilename,
+          { checksum: checksumSha256 },
+          ...this.signalArgs(ctx)
+        ));
+        await this.uploadRemote(manifestPath, manifestFilename, ctx);
 
         replicated = true;
         manifest.remoteCatalog = {
@@ -380,24 +427,26 @@ export class BackupService {
         };
 
         // Save updated manifest with catalog info
-        await this.fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-        await this.remoteStorage.uploadFile(manifestPath, manifestFilename);
+        await this.withFence(ctx, () => this.fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2)));
+        await this.uploadRemote(manifestPath, manifestFilename, ctx);
         this.logger?.info({ dumpFilename }, "backup: replicated off-site successfully");
       } catch (err: unknown) {
+        await this.assertCurrent(ctx);
         const errMsg = err instanceof Error ? err.message : String(err);
         manifest.verificationStatus = {
           verified: false,
           error: `Off-site replication failed: ${errMsg}`
         };
-        await this.fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+        await this.withFence(ctx, () => this.fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2)));
         this.logger?.error({ err }, "backup: off-site replication failed");
         throw new Error(`Off-site replication failed: ${errMsg}`);
       }
 
-      prunedRemote = await this.pruneOldRemoteBackups();
+      prunedRemote = await this.pruneOldRemoteBackups(ctx);
     }
 
-    const pruned = await this.pruneOldBackups();
+    const pruned = await this.pruneOldBackups(ctx);
+    await this.assertCurrent(ctx);
 
     this.logger?.info(
       { filePath, durationMs, checksumSha256, fileSizeBytes, replicated, pruned, prunedRemote },
@@ -427,8 +476,9 @@ export class BackupService {
    *  6. Cleans up isolated test database.
    *  7. Updates backup manifest & remote catalog verification status.
    */
-  async runRestoreDrill(opts: RestoreDrillOptions = {}): Promise<RestoreDrillResult> {
-    const targetDbName = opts.targetDatabaseName ?? "vaultquest_restore_test";
+  async runRestoreDrill(opts: RestoreDrillOptions = {}, ctx?: JobLeaseContext): Promise<RestoreDrillResult> {
+    await this.assertCurrent(ctx);
+    const targetDbName = this.restoreDatabaseName(opts.targetDatabaseName ?? "vaultquest_restore_test", ctx);
     const maxRtoMs = opts.maxRtoMs ?? this.maxRtoMs;
     const maxRpoMinutes = opts.maxRpoMinutes ?? this.maxRpoMinutes;
 
@@ -461,11 +511,12 @@ export class BackupService {
     // Step 1: Checksum verification
     const dumpContent = await this.fs.readFile(filePath);
     const actualChecksum = this.computeSha256(dumpContent);
+    await this.assertCurrent(ctx);
 
     if (manifest && manifest.checksumSha256 !== actualChecksum) {
       const error = `Checksum mismatch: manifest expected ${manifest.checksumSha256}, got ${actualChecksum}`;
       this.logger?.error({ filePath, error }, "restore drill failed checksum check");
-      await this.updateManifestVerification(manifestPath, manifest, false, error);
+      await this.updateManifestVerification(ctx, manifestPath, manifest, false, error);
       return {
         success: false,
         backupId: manifest?.backupId,
@@ -485,7 +536,7 @@ export class BackupService {
     if (rpoMinutes > maxRpoMinutes) {
       const error = `RPO threshold exceeded: backup age ${rpoMinutes}m exceeds max ${maxRpoMinutes}m`;
       this.logger?.error({ filePath, error }, "restore drill failed RPO check");
-      await this.updateManifestVerification(manifestPath, manifest, false, error);
+      await this.updateManifestVerification(ctx, manifestPath, manifest, false, error);
       return {
         success: false,
         backupId: manifest?.backupId,
@@ -510,28 +561,44 @@ export class BackupService {
     try {
       if (this.restoreRunner) {
         if (this.restoreRunner.createDatabase) {
-          await this.restoreRunner.createDatabase(targetDbName);
+          await this.withFence(ctx, () => this.restoreRunner!.createDatabase!(targetDbName, ...this.signalArgs(ctx)));
         }
-        const restoreRes = await this.restoreRunner.restoreDump(targetDbName, filePath);
+        const restoreRes = await this.prepare(ctx, () => this.restoreRunner!.restoreDump(
+          targetDbName, filePath, ...this.signalArgs(ctx)
+        ));
         if (restoreRes.exitCode !== 0) {
           throw new Error(`pg_restore failed with code ${restoreRes.exitCode}: ${restoreRes.stderr}`);
         }
-        smokeResult = await this.restoreRunner.runSmokeChecks(targetDbName);
+        smokeResult = await this.prepare(ctx, () => this.restoreRunner!.runSmokeChecks(targetDbName, ...this.signalArgs(ctx)));
       } else {
+        if (ctx) {
+          await this.withFence(ctx, () => this.runDatabaseCommand("createdb", targetDbName, ctx));
+        }
         const { pgArgs, pgEnv } = this.buildPgRestoreArgs(targetDbName, filePath);
-        const { exitCode, stderr } = await this.spawn(this.pgRestorePath, pgArgs, pgEnv);
+        const { exitCode, stderr } = await this.prepare(ctx, () => this.spawn(
+          this.pgRestorePath, pgArgs, pgEnv, ...this.signalArgs(ctx)
+        ));
         if (exitCode !== 0) {
           throw new Error(`pg_restore exited with code ${exitCode}: ${stderr}`);
         }
         smokeResult = { tableCount: 1, passed: true, details: "" };
       }
     } catch (err: unknown) {
+      await this.assertCurrent(ctx);
       restoreError = err instanceof Error ? err.message : String(err);
     } finally {
-      if (this.restoreRunner?.dropDatabase) {
+      const cleanup = this.restoreRunner?.dropDatabase
+        ? () => this.restoreRunner!.dropDatabase!(targetDbName, ...this.signalArgs(ctx))
+        : ctx && !this.restoreRunner
+          ? () => this.runDatabaseCommand("dropdb", targetDbName, ctx)
+          : undefined;
+      if (cleanup) {
         try {
-          await this.restoreRunner.dropDatabase(targetDbName);
+          // Never start destructive cleanup with a lost lease. The isolated
+          // database can be reaped later without targeting a successor's drill.
+          await this.withFence(ctx, cleanup);
         } catch (dropErr) {
+          await this.assertCurrent(ctx);
           this.logger?.warn({ dropErr }, "restore drill: failed to drop temporary target database");
         }
       }
@@ -541,7 +608,7 @@ export class BackupService {
 
     if (restoreError) {
       this.logger?.error({ filePath, restoreError }, "restore drill execution failed");
-      await this.updateManifestVerification(manifestPath, manifest, false, restoreError, rtoMs, rpoMinutes);
+      await this.updateManifestVerification(ctx, manifestPath, manifest, false, restoreError, rtoMs, rpoMinutes);
       return {
         success: false,
         backupId: manifest?.backupId,
@@ -557,7 +624,7 @@ export class BackupService {
     if (!smokeResult.passed) {
       const error = `Schema/data smoke check failed: ${smokeResult.details || "No tables found"}`;
       this.logger?.error({ filePath, error }, "restore drill failed smoke checks");
-      await this.updateManifestVerification(manifestPath, manifest, false, error, rtoMs, rpoMinutes);
+      await this.updateManifestVerification(ctx, manifestPath, manifest, false, error, rtoMs, rpoMinutes);
       return {
         success: false,
         backupId: manifest?.backupId,
@@ -575,7 +642,7 @@ export class BackupService {
     if (rtoMs > maxRtoMs) {
       const error = `RTO threshold exceeded: restore time ${rtoMs}ms exceeds max ${maxRtoMs}ms`;
       this.logger?.error({ filePath, error }, "restore drill failed RTO threshold");
-      await this.updateManifestVerification(manifestPath, manifest, false, error, rtoMs, rpoMinutes);
+      await this.updateManifestVerification(ctx, manifestPath, manifest, false, error, rtoMs, rpoMinutes);
       return {
         success: false,
         backupId: manifest?.backupId,
@@ -591,6 +658,7 @@ export class BackupService {
 
     // Drill Succeeded!
     await this.updateManifestVerification(
+      ctx,
       manifestPath,
       manifest,
       true,
@@ -621,12 +689,13 @@ export class BackupService {
    * Generates timestamped filename for dump file.
    * Format: `backup-YYYY-MM-DDTHH-MM-SS.sql.gz`
    */
-  buildFilename(): string {
+  buildFilename(ctx?: JobLeaseContext): string {
     const ts = this.now()
       .toISOString()
       .replace(/:/g, "-")
       .replace(/\..+$/, "");
-    return `backup-${ts}.sql.gz`;
+    const suffix = ctx ? `-${this.leaseSuffix(ctx)}` : "";
+    return `backup-${ts}${suffix}.sql.gz`;
   }
 
   /**
@@ -648,7 +717,8 @@ export class BackupService {
   /**
    * Deletes local backup files and manifests older than `retainDays`.
    */
-  async pruneOldBackups(): Promise<number> {
+  async pruneOldBackups(ctx?: JobLeaseContext): Promise<number> {
+    await this.assertCurrent(ctx);
     const cutoffMs = this.now().getTime() - this.retainDays * 24 * 60 * 60 * 1000;
     let pruned = 0;
 
@@ -656,6 +726,7 @@ export class BackupService {
     try {
       entries = await this.fs.readdir(this.backupDir);
     } catch {
+      await this.assertCurrent(ctx);
       return 0;
     }
 
@@ -671,29 +742,32 @@ export class BackupService {
 
       if (mtime !== null && mtime < cutoffMs) {
         try {
-          await this.fs.unlink(fullPath);
+          await this.withFence(ctx, () => this.fs.unlink(fullPath));
           pruned += 1;
           this.logger?.info({ file: entry }, "backup: pruned old local backup/manifest");
         } catch (err) {
+          await this.assertCurrent(ctx);
           this.logger?.warn({ err, file: entry }, "backup: failed to prune local file");
         }
       }
     }
 
+    await this.assertCurrent(ctx);
     return pruned;
   }
 
   /**
    * Deletes remote objects older than `remoteRetainDays`, respecting immutability policy.
    */
-  async pruneOldRemoteBackups(): Promise<number> {
+  async pruneOldRemoteBackups(ctx?: JobLeaseContext): Promise<number> {
+    await this.assertCurrent(ctx);
     if (!this.remoteStorage) return 0;
 
     const cutoffMs = this.now().getTime() - this.remoteRetainDays * 24 * 60 * 60 * 1000;
     let pruned = 0;
 
     try {
-      const objects = await this.remoteStorage.listObjects("backup-");
+      const objects = await this.prepare(ctx, () => this.remoteStorage!.listObjects("backup-", ...this.signalArgs(ctx)));
       for (const obj of objects) {
         // Check immutability policy
         if (obj.immutableUntil) {
@@ -707,22 +781,103 @@ export class BackupService {
         const uploadedMs = new Date(obj.uploadedAt).getTime();
         if (uploadedMs < cutoffMs) {
           try {
-            await this.remoteStorage.deleteObject(obj.remoteKey);
+            await this.withFence(ctx, () => this.remoteStorage!.deleteObject(obj.remoteKey, ...this.signalArgs(ctx)));
             pruned += 1;
             this.logger?.info({ remoteKey: obj.remoteKey }, "backup: pruned old remote backup object");
           } catch (err) {
+            await this.assertCurrent(ctx);
             this.logger?.warn({ err, remoteKey: obj.remoteKey }, "backup: failed to delete remote object");
           }
         }
       }
     } catch (err) {
+      await this.assertCurrent(ctx);
       this.logger?.warn({ err }, "backup: error during remote backup pruning");
     }
 
+    await this.assertCurrent(ctx);
     return pruned;
   }
 
   // ─── Private Helpers ────────────────────────────────────────────────────────
+
+  private signalArgs(ctx?: JobLeaseContext): [] | [AbortSignal] {
+    return ctx ? [ctx.signal] : [];
+  }
+
+  private async assertCurrent(ctx?: JobLeaseContext): Promise<void> {
+    if (!ctx) return;
+    ctx.signal.throwIfAborted();
+    await ctx.assertCurrent();
+    ctx.signal.throwIfAborted();
+  }
+
+  private async prepare<T>(ctx: JobLeaseContext | undefined, work: () => Promise<T>): Promise<T> {
+    await this.assertCurrent(ctx);
+    const result = await work();
+    await this.assertCurrent(ctx);
+    return result;
+  }
+
+  private async withFence<T>(ctx: JobLeaseContext | undefined, work: () => Promise<T>): Promise<T> {
+    if (!ctx) return work();
+    ctx.signal.throwIfAborted();
+    return ctx.withFence(async () => {
+      ctx.signal.throwIfAborted();
+      const result = await work();
+      ctx.signal.throwIfAborted();
+      return result;
+    });
+  }
+
+  private async uploadRemote(localPath: string, remoteKey: string, ctx?: JobLeaseContext): Promise<{ remoteKey: string; etag?: string }> {
+    // The lease lock serializes publication starts, while the adapter's signal
+    // cancels in-flight I/O. A storage server must implement native fencing to
+    // reject an already accepted request after connection/lease loss.
+    return this.withFence(ctx, () => ctx
+      ? this.remoteStorage!.uploadFile(localPath, remoteKey, undefined, ctx.signal)
+      : this.remoteStorage!.uploadFile(localPath, remoteKey));
+  }
+
+  private leaseSuffix(ctx: JobLeaseContext): string {
+    const ownerHash = createHash("sha256").update(`${ctx.jobName}:${ctx.ownerId}`).digest("hex").slice(0, 12);
+    return `${ownerHash}_${ctx.fenceToken.toString()}`;
+  }
+
+  private restoreDatabaseName(base: string, ctx?: JobLeaseContext): string {
+    if (!ctx) return base;
+    const suffix = `_${this.leaseSuffix(ctx)}`;
+    let prefix = "";
+    // PostgreSQL identifiers are limited to 63 bytes. Preserve the fencing
+    // suffix even when a configured base name needs truncating.
+    for (const char of base) {
+      if (Buffer.byteLength(prefix + char + suffix) > 63) break;
+      prefix += char;
+    }
+    return prefix + suffix;
+  }
+
+  private async runDatabaseCommand(command: "createdb" | "dropdb", dbName: string, ctx: JobLeaseContext): Promise<void> {
+    const url = new URL(this.databaseUrl);
+    const args = [
+      "--host", this.connectionHost(url),
+      "--port", url.port || "5432",
+      "--username", decodeURIComponent(url.username) || "postgres",
+      "--no-password",
+      ...(command === "dropdb" ? ["--if-exists"] : []),
+      "--",
+      dbName
+    ];
+    const result = await this.spawn(
+      join(dirname(this.pgRestorePath), command),
+      args,
+      { PGPASSWORD: decodeURIComponent(url.password || "") || undefined },
+      ctx.signal
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(`${command} exited with code ${result.exitCode}: ${result.stderr}`);
+    }
+  }
 
   private async findLatestBackupFile(): Promise<string | undefined> {
     try {
@@ -740,6 +895,7 @@ export class BackupService {
   }
 
   private async updateManifestVerification(
+    ctx: JobLeaseContext | undefined,
     manifestPath: string,
     manifest: BackupManifest | null,
     verified: boolean,
@@ -748,6 +904,7 @@ export class BackupService {
     rpoMinutes?: number,
     smokeChecksPassed?: boolean
   ): Promise<void> {
+    await this.assertCurrent(ctx);
     if (!manifest) return;
 
     manifest.verificationStatus = {
@@ -760,11 +917,12 @@ export class BackupService {
     };
 
     try {
-      await this.fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+      await this.withFence(ctx, () => this.fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2)));
       if (this.remoteStorage && manifest.remoteCatalog?.replicated) {
-        await this.remoteStorage.uploadFile(manifestPath, manifest.manifestFileName);
+        await this.uploadRemote(manifestPath, manifest.manifestFileName, ctx);
       }
     } catch (err) {
+      await this.assertCurrent(ctx);
       this.logger?.warn({ err, manifestPath }, "failed to update manifest file verification status");
     }
   }
@@ -772,10 +930,16 @@ export class BackupService {
   private extractDatabaseName(): string {
     try {
       const url = new URL(this.databaseUrl);
-      return url.pathname.replace(/^\//, "") || "postgres";
+      return decodeURIComponent(url.pathname.replace(/^\//, "")) || "postgres";
     } catch {
       return "postgres";
     }
+  }
+
+  private connectionHost(url: URL): string {
+    // URL keeps IPv6 URI brackets; PostgreSQL's host parameter takes the address.
+    const host = url.hostname;
+    return (host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host) || "localhost";
   }
 
   private buildPgDumpArgs(outputPath: string): {
@@ -784,10 +948,10 @@ export class BackupService {
   } {
     const url = new URL(this.databaseUrl);
 
-    const host = url.hostname || "localhost";
+    const host = this.connectionHost(url);
     const port = url.port || "5432";
-    const database = url.pathname.replace(/^\//, "") || "postgres";
-    const username = url.username || "postgres";
+    const database = decodeURIComponent(url.pathname.replace(/^\//, "")) || "postgres";
+    const username = decodeURIComponent(url.username) || "postgres";
     const password = decodeURIComponent(url.password || "");
 
     const pgArgs = [
@@ -816,9 +980,9 @@ export class BackupService {
   } {
     const url = new URL(this.databaseUrl);
 
-    const host = url.hostname || "localhost";
+    const host = this.connectionHost(url);
     const port = url.port || "5432";
-    const username = url.username || "postgres";
+    const username = decodeURIComponent(url.username) || "postgres";
     const password = decodeURIComponent(url.password || "");
 
     const pgArgs = [

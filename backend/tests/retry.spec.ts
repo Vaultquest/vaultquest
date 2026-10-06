@@ -40,6 +40,26 @@ describe("isRetryableError", () => {
 // ─── withRetry ────────────────────────────────────────────────────────────────
 
 describe("withRetry", () => {
+  it("does not begin work after cancellation", async () => {
+    const abort = new AbortController();
+    abort.abort(new Error("lease lost"));
+    const fn = vi.fn();
+    await expect(withRetry(fn, { signal: abort.signal })).rejects.toThrow("lease lost");
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("cancels pending backoff without a second RPC attempt", async () => {
+    const abort = new AbortController();
+    const fn = vi.fn().mockRejectedValue(new Error("timeout"));
+    const sleep = vi.fn(async () => {
+      abort.abort(new Error("lease lost"));
+      await new Promise<void>(() => undefined);
+    });
+    await expect(withRetry(fn, { signal: abort.signal, sleep })).rejects.toThrow("lease lost");
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
   it("resolves immediately when the first attempt succeeds", async () => {
     const fn = vi.fn().mockResolvedValue("ok");
     const result = await withRetry(fn, { sleep: noSleep });

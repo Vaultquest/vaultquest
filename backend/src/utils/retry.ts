@@ -9,6 +9,8 @@
 import { RETRYABLE_RESULT_CODES } from "../constants.js";
 
 export interface RetryOptions {
+  /** Stop retrying and cancel a pending backoff when the owning job ends. */
+  signal?: AbortSignal;
   /**
    * Maximum number of attempts (including the first).
    * @default 4
@@ -72,6 +74,25 @@ export function isRetryableError(err: unknown): boolean {
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+async function waitForRetry(ms: number, sleep: (ms: number) => Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return sleep(ms);
+  signal.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => { cleanup(); reject(signal.reason); };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (sleep === defaultSleep) {
+      timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+    } else {
+      sleep(ms).then(() => { cleanup(); resolve(); }, (err) => { cleanup(); reject(err); });
+    }
+  });
+}
+
 /**
  * Wraps an async function with exponential backoff + full-jitter retries.
  *
@@ -98,9 +119,13 @@ export async function withRetry<T>(
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    options.signal?.throwIfAborted();
     try {
-      return await fn();
+      const value = await fn();
+      options.signal?.throwIfAborted();
+      return value;
     } catch (err) {
+      options.signal?.throwIfAborted();
       lastError = err;
 
       const exhausted = attempt >= maxAttempts;
@@ -115,7 +140,7 @@ export async function withRetry<T>(
       //   sleep = random(0, cap)
       const cap = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt - 1));
       const delay = Math.floor(Math.random() * cap);
-      await sleep(delay);
+      await waitForRetry(delay, sleep, options.signal);
     }
   }
 
