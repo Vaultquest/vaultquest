@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { injectMockWallet } from './helpers/wallet-mock';
+import { enableAccountTestFixtures } from './helpers/account-fixtures';
 
 test.describe('Error States — Failed Transactions', () => {
   test('rejected wallet transaction shows an error message in the UI', async ({ page }) => {
@@ -54,6 +55,7 @@ test.describe('Error States — Failed Transactions', () => {
     });
 
     // Trigger a data-loading action.
+    await enableAccountTestFixtures(page);
     await page.goto('/app/account?mockConnected=true');
 
     // The page should render an error / empty state rather than hanging indefinitely.
@@ -124,6 +126,7 @@ test.describe('Error States — Failed Transactions', () => {
       route.fulfill({ status: 500, body: JSON.stringify({ error: 'Internal Server Error' }) })
     );
 
+    await enableAccountTestFixtures(page);
     await page.goto('/app/account?mockConnected=true');
 
     // Wait for the page to attempt its data fetch and surface the error.
@@ -161,6 +164,7 @@ test.describe('Error States — Failed Transactions', () => {
       })
     );
 
+    await enableAccountTestFixtures(page);
     await page.goto('/app/account?mockConnected=true');
 
     // The app should not show a blank page — some fallback message must appear.

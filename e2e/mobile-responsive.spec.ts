@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { enableAccountTestFixtures } from './helpers/account-fixtures';
 
 test.describe('Mobile Responsiveness Tests', () => {
   test.describe('Mobile Navigation', () => {
@@ -60,6 +61,7 @@ test.describe('Mobile Responsiveness Tests', () => {
     test('should handle tables on mobile with horizontal scroll or collapse', async ({ page, isMobile }) => {
       test.skip(!isMobile, 'This test is only for mobile viewports');
       
+      await enableAccountTestFixtures(page);
       await page.goto('/app/account?mockConnected=true');
       
       const table = page.locator('table, [role="table"]').first();
@@ -76,6 +78,7 @@ test.describe('Mobile Responsiveness Tests', () => {
     test('should display transaction table on mobile without breaking layout', async ({ page, isMobile }) => {
       test.skip(!isMobile, 'This test is only for mobile viewports');
       
+      await enableAccountTestFixtures(page);
       await page.goto('/app/account?mockConnected=true');
       
       const transactionSection = page.locator('text=Past transactions').locator('..');
@@ -199,6 +202,7 @@ test.describe('Mobile Responsiveness Tests', () => {
     test('should handle swipe gestures for scrollable content', async ({ page, isMobile }) => {
       test.skip(!isMobile, 'This test is only for mobile viewports');
       
+      await enableAccountTestFixtures(page);
       await page.goto('/app/account?mockConnected=true');
       
       const scrollableElement = page.locator('table, [role="table"]').first();

@@ -1,5 +1,7 @@
 # VaultQuest E2E Testing Guide
 
+> Account URL fixtures (`?mockConnected=true`, `?networkMismatch=true`) only apply outside production builds, when `NEXT_PUBLIC_ALLOW_ACCOUNT_TEST_FIXTURES=true`, or after `enableAccountTestFixtures(page)` / `mockAppShell(page)` injects the runtime flag (`window.__VQ_ALLOW_ACCOUNT_TEST_FIXTURES__`). Hostile production query strings are ignored.
+
 ## Quick Start
 
 ```bash

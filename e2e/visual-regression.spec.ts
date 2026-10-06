@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { enableAccountTestFixtures } from './helpers/account-fixtures';
 
 test.describe('Visual Regression Tests', () => {
   test.beforeEach(async ({ page }) => {
@@ -124,6 +125,7 @@ test.describe('Visual Regression Tests', () => {
 
   test.describe('Account Page', () => {
     test('should match account page with mock data', async ({ page }) => {
+      await enableAccountTestFixtures(page);
       await page.goto('/app/account?mockConnected=true');
       await page.waitForLoadState('networkidle');
       await page.waitForTimeout(500);
@@ -135,6 +137,7 @@ test.describe('Visual Regression Tests', () => {
     });
 
     test('should match deposit allocation chart', async ({ page }) => {
+      await enableAccountTestFixtures(page);
       await page.goto('/app/account?mockConnected=true');
       await page.waitForLoadState('networkidle');
       
@@ -145,6 +148,7 @@ test.describe('Visual Regression Tests', () => {
     });
 
     test('should match savings progression chart', async ({ page }) => {
+      await enableAccountTestFixtures(page);
       await page.goto('/app/account?mockConnected=true');
       await page.waitForLoadState('networkidle');
       
@@ -155,6 +159,7 @@ test.describe('Visual Regression Tests', () => {
     });
 
     test('should match transaction table', async ({ page }) => {
+      await enableAccountTestFixtures(page);
       await page.goto('/app/account?mockConnected=true');
       await page.waitForLoadState('networkidle');
       
@@ -278,6 +283,7 @@ test.describe('Visual Regression Tests', () => {
     });
 
     test('should match filter interaction on account page', async ({ page }) => {
+      await enableAccountTestFixtures(page);
       await page.goto('/app/account?mockConnected=true');
       await page.waitForLoadState('networkidle');
       

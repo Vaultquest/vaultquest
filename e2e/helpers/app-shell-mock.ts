@@ -1,7 +1,10 @@
 import { type Page } from "@playwright/test";
 import { injectMockWallet } from "./wallet-mock";
+import { enableAccountTestFixtures } from "./account-fixtures";
 
 export async function mockAppShell(page: Page, { connected = false } = {}) {
+  await enableAccountTestFixtures(page);
+
   await page.addInitScript(() => {
     const originalFetch = window.fetch.bind(window);
 

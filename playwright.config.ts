@@ -81,5 +81,10 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 300000,
+    env: {
+      ...process.env,
+      // Keep account URL fixtures available for e2e against next start builds.
+      NEXT_PUBLIC_ALLOW_ACCOUNT_TEST_FIXTURES: 'true',
+    },
   },
 });

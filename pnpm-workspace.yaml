@@ -94,8 +94,14 @@ overrides:
   undici@<6.27.0: '>=6.27.0'
   undici@<6.28.0: '>=6.28.0'
   uuid@<11.1.1: '>=11.1.1'
-  vite@<=6.4.1: '>=6.4.2'
-  vite@<=6.4.2: '>=6.4.3'
-  vitest@<3.2.6: '>=3.2.6'
+  vite@<=6.4.1: '~6.4.3'
+  vite@<=6.4.2: '~6.4.3'
+  vitest@<3.2.6: '~3.2.6'
   ws@>=8.0.0 <8.20.1: '>=8.20.1'
   ws@>=8.0.0 <8.21.0: '>=8.21.0'
+
+# Supply the existing compatible WebSocket peer only to this subscription subtree.
+packageExtensions:
+  '@solana/rpc-subscriptions@2.3.0':
+    dependencies:
+      ws: '8.21.0'

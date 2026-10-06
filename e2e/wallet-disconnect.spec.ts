@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { injectMockWallet } from './helpers/wallet-mock';
+import { enableAccountTestFixtures } from './helpers/account-fixtures';
 
 test.describe('Wallet Disconnect UI Updates', () => {
   /**
@@ -59,6 +60,7 @@ test.describe('Wallet Disconnect UI Updates', () => {
   });
 
   test('Account page shows connect prompt after disconnect', async ({ page }) => {
+    await enableAccountTestFixtures(page);
     await page.goto('/app/account?mockConnected=true');
     
     // Initially should show account content
@@ -142,6 +144,7 @@ test.describe('Wallet Disconnect UI Updates', () => {
   });
 
   test('Reconnect guidance appears after disconnect', async ({ page }) => {
+    await enableAccountTestFixtures(page);
     await page.goto('/app/account?mockConnected=true');
     
     // Wait for account page to load with connected state
@@ -194,6 +197,7 @@ test.describe('Wallet Disconnect UI Updates', () => {
   });
 
   test('Balance information is removed after disconnect', async ({ page }) => {
+    await enableAccountTestFixtures(page);
     await page.goto('/app/account?mockConnected=true');
     
     // Wait for account page with balances to load
