@@ -25,7 +25,7 @@
     "@sendgrid/mail": "^8.1.0",
     "@stellar/stellar-sdk": "^12.3.0",
     "fastify": "^4.28.1",
-    "fastify-plugin": "^4.5.1",
+    "fastify-plugin": "^6.0.0",
     "ioredis": "^5.11.0",
     "node-cron": "^3.0.3",
     "pino": "^9.5.0",
