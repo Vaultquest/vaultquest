@@ -33,7 +33,7 @@
     "react-i18next": "^15.4.1",
     "react-window": "^2.2.7",
     "recharts": "^3.8.1",
-    "viem": "^2.21.54",
+    "viem": "^2.56.0",
     "wagmi": "^2.14.6"
   },
   "devDependencies": {
