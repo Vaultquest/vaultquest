@@ -2,7 +2,7 @@ import type { FC } from "react";
 import { getAssetDisplayName } from "../../lib/assets";
 import { EXPECTED_NETWORK } from "../../lib/wallets";
 import { useStore } from "@nanostores/react";
-import { connectedNetwork } from "../../core/store.js";
+import { connectedNetwork, isNetworkMismatch, networkReadiness } from "../../core/store.js";
 import { useState, useCallback } from "react";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import Modal from "../../components/Modal";
@@ -20,7 +20,11 @@ export interface WithdrawalModalProps {
 
 export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWithdraw, onClose }) => {
    // Get the current network and asset display name
-  const network = useStore(connectedNetwork) || EXPECTED_NETWORK;
+  const rawNetwork = useStore(connectedNetwork);
+  const mismatchState = useStore(isNetworkMismatch);
+  const readinessState = useStore(networkReadiness);
+  const isWrongNetwork = mismatchState || readinessState === "mismatch" || (rawNetwork !== null && rawNetwork !== EXPECTED_NETWORK);
+  const network = rawNetwork || EXPECTED_NETWORK;
   const assetDisplayName = pool ? getAssetDisplayName(network, pool.asset) : "";
   const [step, setStep] = useState<Step>("input");
   const [amount, setAmount] = useState("");
@@ -28,7 +32,7 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
 
   const depositedNum = parseFloat(position.deposited);
   const amountNum = parseFloat(amount) || 0;
-  const isValid = amountNum > 0 && amountNum <= depositedNum;
+  const isValid = amountNum > 0 && amountNum <= depositedNum && !isWrongNetwork;
 
   const handleMax = useCallback(() => {
     setAmount(depositedNum.toFixed(2));
@@ -36,15 +40,23 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
   }, [depositedNum]);
 
   const handleContinue = useCallback(() => {
+    if (isWrongNetwork) {
+      setError(`Wallet network mismatch: connected to ${rawNetwork || "unknown"}, expected ${EXPECTED_NETWORK}. Please switch networks to continue.`);
+      return;
+    }
     if (!isValid) {
       setError(amountNum <= 0 ? "Enter an amount" : "Amount exceeds deposited position");
       return;
     }
     setStep("review");
     setError(null);
-  }, [isValid, amountNum]);
+  }, [isValid, amountNum, isWrongNetwork, rawNetwork]);
 
   const handleConfirm = useCallback(async () => {
+    if (isWrongNetwork) {
+      setError(`Cannot broadcast withdrawal on wrong network (${rawNetwork || "unknown"} vs ${EXPECTED_NETWORK}).`);
+      return;
+    }
     setStep("broadcasting");
     setError(null);
     try {
@@ -54,7 +66,7 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
       setError(err instanceof Error ? err.message : "Transaction failed");
       setStep("review");
     }
-  }, [amount, onWithdraw]);
+  }, [amount, onWithdraw, isWrongNetwork, rawNetwork]);
 
   return (
     <Modal
@@ -99,6 +111,13 @@ export const WithdrawalModal: FC<WithdrawalModalProps> = ({ pool, position, onWi
               <div className="flex items-start gap-2 rounded-lg border border-amber-900/40 bg-amber-900/10 p-3 text-sm text-amber-300">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>Amount exceeds your deposited position</span>
+              </div>
+            )}
+
+            {isWrongNetwork && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-900/40 bg-amber-900/10 p-3 text-sm text-amber-300">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>Wallet network mismatch: connected to {rawNetwork || "unknown"}, but {EXPECTED_NETWORK} is required. Please switch networks.</span>
               </div>
             )}
 

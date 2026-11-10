@@ -20,4 +20,5 @@ export const connectedPublicKey = atom<string>("");
 export const connectedNetwork = atom<NetworkType | null>(null);
 export const isNetworkMismatch = atom<boolean>(false);
 export const networkReadiness = atom<NetworkReadinessState>("idle");
+export const expectedNetwork = atom<NetworkType>("testnet");
 

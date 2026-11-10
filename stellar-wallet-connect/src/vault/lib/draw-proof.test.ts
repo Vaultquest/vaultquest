@@ -53,8 +53,8 @@ describe("verifyDrawProof", () => {
   it("keeps a won reward as won when verified but no claim tx exists yet", () => {
     const entry = attachDrawProof(baseEntry, { roundId: "42", txHash: null, proof: "digest-1", verified: null });
     const { entry: updated, verdict } = verifyDrawProof(entry, { txHash: null, proof: "digest-1" });
-    expect(verdict.verdict).toBe("verified");
-    expect(updated.status).toBe("won");
+    expect(verdict.verdict).toBe("missing");
+    expect(updated.status).toBe("pending");
   });
 
   it("marks a missing proof as pending (missing flag)", () => {

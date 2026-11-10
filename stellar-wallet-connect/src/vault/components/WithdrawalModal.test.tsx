@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { WithdrawalModal } from "./WithdrawalModal";
 import type { PoolSummary, UserPosition } from "../contract/types";
@@ -86,5 +86,33 @@ describe("WithdrawalModal", () => {
 
     await user.click(screen.getByRole("button", { name: /Withdraw all/ }));
     expect(screen.getByLabelText("Amount")).toHaveValue(50);
+  });
+
+  it("blocks withdrawal and displays mismatch guidance when network is mismatched, and recovers when corrected", async () => {
+    const user = userEvent.setup();
+    const onWithdraw = vi.fn();
+    const { isNetworkMismatch, connectedNetwork, networkReadiness } = await import("../../core/store");
+
+    act(() => {
+      isNetworkMismatch.set(true);
+      connectedNetwork.set("public" as any);
+      networkReadiness.set("mismatch");
+    });
+
+    renderModal(onWithdraw);
+
+    await user.type(screen.getByLabelText("Amount"), "10");
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    expect(screen.getByText(/Wallet network mismatch/i)).toBeInTheDocument();
+
+    // Recover: network corrected
+    act(() => {
+      isNetworkMismatch.set(false);
+      connectedNetwork.set("testnet");
+      networkReadiness.set("verified");
+    });
+
+    expect(screen.getByRole("button", { name: "Continue" })).not.toBeDisabled();
+    expect(screen.queryByText(/Wallet network mismatch/i)).not.toBeInTheDocument();
   });
 });
